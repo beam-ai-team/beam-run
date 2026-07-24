@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "beam": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/beam",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "beam",
+  "version": "0.1.0",
+  "description": "Build with Beam in Codex",
+  "author": { "name": "Beam AI" },
+  "skills": "./skills/",
+  "mcpServers": "./mcp.codex.json",
+  "interface": {
+    "displayName": "Beam",
+    "shortDescription": "Build with Beam in Codex",
+    "capabilities": ["Read", "Write"]
+  }
+}

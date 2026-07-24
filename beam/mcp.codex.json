@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "beam": {
+      "command": "./beam",
+      "args": ["mcp"],
+      "cwd": "bin"
+    }
+  }
+}

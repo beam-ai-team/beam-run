@@ -1,0 +1,19 @@
+{
+  "name": "beam-plugins",
+  "interface": {
+    "displayName": "Beam"
+  },
+  "plugins": [
+    {
+      "name": "beam",
+      "source": {
+        "source": "local",
+        "path": "./beam"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      }
+    }
+  ]
+}

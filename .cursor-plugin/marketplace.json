@@ -1,0 +1,16 @@
+{
+  "name": "beam-plugins",
+  "owner": {
+    "name": "Beam AI"
+  },
+  "metadata": {
+    "description": "Official Beam plugins for Cursor"
+  },
+  "plugins": [
+    {
+      "name": "beam",
+      "source": "./beam",
+      "description": "Build with Beam in Cursor"
+    }
+  ]
+}

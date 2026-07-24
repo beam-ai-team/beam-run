@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "beam": {
+      "command": "beam",
+      "args": ["mcp"]
+    }
+  }
+}
