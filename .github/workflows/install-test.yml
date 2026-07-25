@@ -1,0 +1,35 @@
+# SPEC-04 — cross-host install test (skeleton).
+# Now: shellcheck + CLI smoke on ubuntu/macos. The offline smoke runs on every PR;
+# the authenticated path runs only when BEAM_API_KEY is configured as a repo secret
+# (use a NON-PROD test workspace). TODO: add a headless Claude Code / Codex install
+# matrix and a scripted Cursor smoke doc (Cursor is a GUI — can't run in CI).
+name: install-test
+
+on:
+  push:
+    branches: [ main, "activation-*" ]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck beam/bin/beam test/smoke.sh
+
+  smoke:
+    needs: lint
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: smoke (offline unless BEAM_API_KEY secret is set)
+        env:
+          BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
+          BEAM_WORKSPACE_ID: ${{ secrets.BEAM_WORKSPACE_ID }}
+        run: sh test/smoke.sh

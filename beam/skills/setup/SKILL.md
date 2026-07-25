@@ -138,18 +138,20 @@ Create an API key in Beam if needed:
 2. Workspace icon (top left) → **Personal settings** → **API Keys**
 3. **Create New API Key** → copy it
 
-Then:
+Then sign in **without putting the key on the command line** (argv leaks to shell history + `ps`):
 
 ```bash
-beam login --api-key '<PASTE_KEY>'
+beam login                       # hidden prompt (preferred)
+# or:  BEAM_API_KEY='<KEY>' beam login
+# or:  printf '%s' "$KEY" | beam login --api-key -
 # optional if whoami didn't auto-pick a workspace:
-# beam workspace '<WORKSPACE_ID>'
+# beam workspace list  &&  beam workspace '<WORKSPACE_ID>'
 beam whoami; echo "exit_code=$?"
 ```
 
 Exit 0 → CLI is good. Tell the user which user/workspace you're on.
 
-**Do not** print the API key back to the user or commit it.
+**Do not** print the API key back to the user, pass it as `--api-key <key>`, or commit it.
 
 ### Register MCP when the plugin didn't
 
