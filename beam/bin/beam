@@ -381,37 +381,34 @@ cmd_setup() {
     if cmd_register >/dev/null 2>&1; then registered=1; emit_event mcp_connected; fi
   fi
 
-  # ---- onboarding output: success line + checklist + last steps ----
+  # ---- onboarding output: success line + emoji checklist + last steps ----
   if [ "$signed" = "0" ]; then
-    printf 'Beam is installed — 2 quick steps to finish.\n\n'
-    printf 'Setup checklist:\n'
-    printf '  [x] Plugin installed\n'
-    printf '  [x] beam on your PATH\n'
-    printf '  [ ] Sign in\n'
-    printf '  [ ] Restart your agent\n\n'
-    printf 'Last steps (yours):\n'
+    printf '🚀 Beam is installed — 2 quick steps to finish.\n\n'
+    printf '  ✅ Plugin installed\n'
+    printf '  ✅ beam on your PATH\n'
+    printf '  ⬜ Sign in\n'
+    printf '  ⬜ Restart your agent\n\n'
+    printf 'Next:\n'
     printf '  1. beam login     (create a key at app.beam.ai, then paste it at the hidden prompt)\n'
-    printf '  2. beam setup     (run me again to finish wiring and confirm)\n'
+    printf '  2. beam setup     (run me again to finish)\n'
     return 3
   fi
 
-  if [ "$registered" = "1" ]; then printf 'Beam is connected — 1 step left.\n\n'
-  else printf 'Almost there — 2 steps left.\n\n'; fi
-  printf 'Setup checklist:\n'
-  printf '  [x] Plugin installed\n'
-  printf '  [x] beam on your PATH\n'
-  if [ -n "$ws" ]; then printf '  [x] Signed in (workspace %s)\n' "$ws"; else printf '  [x] Signed in\n'; fi
+  if [ "$registered" = "1" ]; then printf '🎉 Beam is connected — 1 step left!\n\n'
+  else printf '🚀 Almost there — 2 steps left.\n\n'; fi
+  printf '  ✅ Plugin installed\n'
+  printf '  ✅ beam on your PATH\n'
+  if [ -n "$ws" ]; then printf '  ✅ Signed in (workspace %s)\n' "$ws"; else printf '  ✅ Signed in\n'; fi
   if [ "$registered" = "1" ]; then
-    printf '  [x] Beam connection registered\n'
-    printf '  [ ] Restart your agent\n\n'
-    printf 'Last step (yours):\n'
-    printf '  1. Fully quit and reopen your agent, then ask: "list my Beam agents"\n'
+    printf '  ✅ Beam connection registered\n'
+    printf '  ⬜ Restart your agent\n\n'
+    printf 'Last step: fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
   else
-    printf '  [ ] Register the Beam connection\n'
-    printf '  [ ] Restart your agent\n\n'
-    printf 'Last steps (yours):\n'
+    printf '  ⬜ Register the Beam connection\n'
+    printf '  ⬜ Restart your agent\n\n'
+    printf 'Last steps:\n'
     printf '  1. Add a remote MCP server in your agent:  name=beam  type=http  url=%s  header="Authorization: Bearer <your key>"\n' "$MCP_URL"
-    printf '  2. Fully quit and reopen your agent, then ask: "list my Beam agents"\n'
+    printf '  2. Fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
   fi
 }
 

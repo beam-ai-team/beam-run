@@ -43,15 +43,19 @@ A reload/soft-restart isn't enough.
 After restart, call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
 
 ## Presenting it — make it feel like onboarding
-Relay results as a **success line + a ✓ checklist + numbered last steps** — never as raw command output or an engineer's status report. `beam setup` already prints this shape; mirror it. Template while steps remain:
+Render setup results as a warm chat message with **emoji** — **not** raw command output and **not inside a code block** (a fenced block of ASCII checkboxes is the thing to avoid). Use ✅ for done, ⬜ for pending, and 🚀 / 🎉 to celebrate. Don't paste `beam setup`'s terminal text verbatim — translate it into this shape:
 
-> **Beam is installed — almost there.**
-> ✓ Plugin installed · ✓ on PATH · ✓ signed in (workspace …)
-> **Last steps:**
-> 1. Fully quit and reopen your agent
-> 2. Then ask: "list my Beam agents"
+🚀 **Beam is installed — almost there!**
+✅ Plugin installed
+✅ beam on PATH
+⬜ Sign in
+⬜ Restart your agent
 
-When fully connected and a tool call has succeeded, **celebrate briefly** and name what they can now do — list agents, run tasks, monitor progress, pull analytics. Keep the plumbing (MCP/CLI/paths/headers) out of it.
+**Next:**
+1. `beam login` — create a key at app.beam.ai, paste it at the hidden prompt
+2. Restart your agent, then ask "list my Beam agents"
+
+When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
 
 ## Fallbacks (only if needed)
 - **`beam` not found** — resolve the bundled launcher, use its absolute path, then re-run:
