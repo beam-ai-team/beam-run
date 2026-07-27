@@ -42,6 +42,17 @@ A reload/soft-restart isn't enough.
 ### 5 · Confirm
 After restart, call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
 
+## Presenting it — make it feel like onboarding
+Relay results as a **success line + a ✓ checklist + numbered last steps** — never as raw command output or an engineer's status report. `beam setup` already prints this shape; mirror it. Template while steps remain:
+
+> **Beam is installed — almost there.**
+> ✓ Plugin installed · ✓ on PATH · ✓ signed in (workspace …)
+> **Last steps:**
+> 1. Fully quit and reopen your agent
+> 2. Then ask: "list my Beam agents"
+
+When fully connected and a tool call has succeeded, **celebrate briefly** and name what they can now do — list agents, run tasks, monitor progress, pull analytics. Keep the plumbing (MCP/CLI/paths/headers) out of it.
+
 ## Fallbacks (only if needed)
 - **`beam` not found** — resolve the bundled launcher, use its absolute path, then re-run:
   ```bash

@@ -360,29 +360,59 @@ EOF
 
 cmd_setup() {
   emit_event install
-  printf 'Connecting Beam to your coding agent — I will handle install, PATH, and wiring.\n\n'
+  # Install + PATH (always).
   bindir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || printf '')"
   mkdir -p "$HOME/.local/bin"
   if [ -n "$bindir" ] && [ "$bindir" != "$HOME/.local/bin" ]; then
     ln -sf "$bindir/beam" "$HOME/.local/bin/beam" 2>/dev/null || cp "$bindir/beam" "$HOME/.local/bin/beam"
     chmod +x "$HOME/.local/bin/beam" 2>/dev/null || true
   fi
-  printf '  [ok] beam installed on PATH (~/.local/bin/beam)\n'
-  add_to_path_rc
+  add_to_path_rc >/dev/null 2>&1 || true
   emit_event path_ok
 
-  if read_key >/dev/null 2>&1; then
-    printf '  [ok] signed in\n'
-  else
-    printf '  [--] not signed in — run:  beam login   (hidden prompt; never put the key on the command line),\n'
-    printf '       then re-run:  beam setup   to finish.\n'
+  # Signed in? (verify the stored key actually works)
+  key="$(read_key 2>/dev/null || true)"
+  signed=0; ws=""
+  if [ -n "$key" ] && verify_key "$key" >/dev/null 2>&1; then signed=1; ws="$(read_workspace 2>/dev/null || true)"; fi
+
+  # Register the MCP server where we safely can (needs signed-in + claude CLI).
+  registered=0
+  if [ "$signed" = "1" ]; then
+    if cmd_register >/dev/null 2>&1; then registered=1; emit_event mcp_connected; fi
+  fi
+
+  # ---- onboarding output: success line + checklist + last steps ----
+  if [ "$signed" = "0" ]; then
+    printf 'Beam is installed — 2 quick steps to finish.\n\n'
+    printf 'Setup checklist:\n'
+    printf '  [x] Plugin installed\n'
+    printf '  [x] beam on your PATH\n'
+    printf '  [ ] Sign in\n'
+    printf '  [ ] Restart your agent\n\n'
+    printf 'Last steps (yours):\n'
+    printf '  1. beam login     (create a key at app.beam.ai, then paste it at the hidden prompt)\n'
+    printf '  2. beam setup     (run me again to finish wiring and confirm)\n'
     return 3
   fi
 
-  printf '  registering the Beam connection...\n'
-  cmd_register 2>&1 | sed 's/^/  /' || true
-  printf '\n'; cmd_doctor || true
-  printf '\n  Last step (the only thing left for you): fully restart your agent, then ask "list my Beam agents".\n'
+  if [ "$registered" = "1" ]; then printf 'Beam is connected — 1 step left.\n\n'
+  else printf 'Almost there — 2 steps left.\n\n'; fi
+  printf 'Setup checklist:\n'
+  printf '  [x] Plugin installed\n'
+  printf '  [x] beam on your PATH\n'
+  if [ -n "$ws" ]; then printf '  [x] Signed in (workspace %s)\n' "$ws"; else printf '  [x] Signed in\n'; fi
+  if [ "$registered" = "1" ]; then
+    printf '  [x] Beam connection registered\n'
+    printf '  [ ] Restart your agent\n\n'
+    printf 'Last step (yours):\n'
+    printf '  1. Fully quit and reopen your agent, then ask: "list my Beam agents"\n'
+  else
+    printf '  [ ] Register the Beam connection\n'
+    printf '  [ ] Restart your agent\n\n'
+    printf 'Last steps (yours):\n'
+    printf '  1. Add a remote MCP server in your agent:  name=beam  type=http  url=%s  header="Authorization: Bearer <your key>"\n' "$MCP_URL"
+    printf '  2. Fully quit and reopen your agent, then ask: "list my Beam agents"\n'
+  fi
 }
 
 cmd_uninstall() {
