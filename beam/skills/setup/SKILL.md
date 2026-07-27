@@ -28,7 +28,7 @@ It installs `beam`, puts it on PATH (and your shell rc), and — if you're alrea
 - **127 / `beam` not found** → resolve the launcher (see Fallbacks) and re-run with its absolute path.
 
 ### 3 · Sign in (the user's one data step)
-> "Create a key at **app.beam.ai → Personal settings → API Keys**, then run `beam login` in your terminal and paste it at the hidden prompt. Tell me when it says you're signed in."
+> "Create a key at **app.beam.ai → Personal settings → API Keys**, then run `beam login` in your terminal and paste it when it asks (it stays hidden as you type). Tell me when it says you're signed in."
 
 Wait for confirmation — do **not** take the key yourself. Then re-run `beam setup`; it now registers MCP and verifies.
 
@@ -52,7 +52,7 @@ Render setup results as a warm chat message with **emoji** — **not** raw comma
 ⬜ Restart your agent
 
 **Next:**
-1. `beam login` — create a key at app.beam.ai, paste it at the hidden prompt
+1. `beam login` — create a key at app.beam.ai, paste it when it asks (it stays hidden as you type)
 2. Restart your agent, then ask "list my Beam agents"
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.

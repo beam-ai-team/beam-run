@@ -161,7 +161,7 @@ Usage:
   beam setup                 guided install: PATH + auth + MCP registration
   beam register              register the Beam MCP server with your agent
   beam doctor                self-diagnose install/auth/connection (human checklist)
-  beam login                 sign in (hidden prompt; or --api-key -, or BEAM_API_KEY)
+  beam login                 sign in (asks for your key; or --api-key -, or BEAM_API_KEY)
   beam logout
   beam whoami
   beam workspace [ID]        show/set current workspace
@@ -172,7 +172,7 @@ Usage:
   beam --version | --help
 
 Auth (never put the key on the command line — it leaks to shell history):
-  beam login                 # hidden prompt
+  beam login                 # asks for your key (stays hidden as you type)
   BEAM_API_KEY=... beam login  # env
   printf '%s' "\$KEY" | beam login --api-key -   # stdin
   Create a key: app.beam.ai -> Personal settings -> API Keys
@@ -195,7 +195,7 @@ cmd_login() {
   if [ -z "$key" ] && [ -n "${BEAM_API_KEY:-}" ]; then key="$BEAM_API_KEY"; fi
   if [ -z "$key" ]; then
     if [ -t 0 ]; then
-      printf 'Paste your Beam API key (input hidden): ' >&2
+      printf 'Paste your Beam API key and press Enter (it stays hidden as you type): ' >&2
       if command -v stty >/dev/null 2>&1; then
         stty -echo 2>/dev/null || true; IFS= read -r key || true; stty echo 2>/dev/null || true; printf '\n' >&2
       else
@@ -389,7 +389,7 @@ cmd_setup() {
     printf '  ⬜ Sign in\n'
     printf '  ⬜ Restart your agent\n\n'
     printf 'Next:\n'
-    printf '  1. beam login     (create a key at app.beam.ai, then paste it at the hidden prompt)\n'
+    printf '  1. beam login     (get a key at app.beam.ai; paste it when asked — it stays hidden as you type)\n'
     printf '  2. beam setup     (run me again to finish)\n'
     return 3
   fi
