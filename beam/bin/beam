@@ -271,11 +271,13 @@ cmd_mcp() {
   emit_event mcp_connected
   vendored="$(dirname "$0")/mcp-proxy"
   if [ -x "$vendored" ]; then exec "$vendored" "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
+  # The /mcp endpoint authenticates via `Authorization: Bearer <key>` (NOT `x-api-key`,
+  # which is the REST API header). Send both so either subsystem is satisfied.
   # uvx -> PyPI mcp-proxy (remote streamable-HTTP -> stdio), the proven path.
-  if command -v uvx >/dev/null 2>&1; then exec uvx mcp-proxy "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
+  if command -v uvx >/dev/null 2>&1; then exec uvx mcp-proxy "$MCP_URL" --transport streamablehttp -H Authorization "Bearer $key" -H x-api-key "$key"; fi
   # npx fallback -> mcp-remote (NOT npm `mcp-proxy`, which is a different, incompatible tool).
-  if command -v npx >/dev/null 2>&1; then exec npx -y mcp-remote "$MCP_URL" --header "x-api-key: $key"; fi
-  die "internal_error" "no MCP bridge available. Best fix: register Beam as a DIRECT HTTP MCP server (type:http, url=$MCP_URL, header x-api-key) — no proxy needed. Otherwise install uv (for uvx) or Node (for npx)." 1
+  if command -v npx >/dev/null 2>&1; then exec npx -y mcp-remote "$MCP_URL" --header "Authorization: Bearer $key" --header "x-api-key: $key"; fi
+  die "internal_error" "no MCP bridge available. Best fix: register Beam as a DIRECT HTTP MCP server (type:http, url=$MCP_URL, header 'Authorization: Bearer <key>') — no proxy needed. Otherwise install uv (for uvx) or Node (for npx)." 1
 }
 
 cmd_doctor() {
@@ -337,7 +339,7 @@ cmd_setup() {
   printf '\nMCP registration:\n'
   printf '  Claude Code / Cursor / VS Code (recommended — no proxy, no Node/uv):\n'
   printf '    register the REMOTE endpoint with your key. Claude Code:\n'
-  printf '      claude mcp add --transport http beam %s --header "x-api-key: <your key>"\n' "$MCP_URL"
+  printf '      claude mcp add --transport http beam %s --header "Authorization: Bearer <your key>"\n' "$MCP_URL"
   printf '    (the plugin also ships beam/.mcp.json using ${BEAM_API_KEY})\n'
   printf '  Codex / stdio-only hosts: the plugin runs a local `beam mcp` bridge.\n'
   printf '\nFinally:  beam doctor   then restart your agent.\n'
