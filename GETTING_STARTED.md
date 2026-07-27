@@ -44,7 +44,7 @@ needs to a permanent location.
 
 ## Run the `setup` skill
 
-Once installed, run the bundled **`setup` skill** now, in this session, before anything else below. It puts `beam` on PATH, stores your API key, registers the MCP server where needed, and verifies both the CLI and the MCP server work.
+Once installed, run the bundled **`setup` skill** — it shows a short, gamified checklist and walks you through the one thing left: your **API key**, then a restart. On **Claude Code**, `/plugin install` already registered the Beam connection, so setup just captures the key and verifies. (`beam` on PATH, `beam login`, and manual MCP registration are only needed on the developer / CLI fallback path — not for a normal `/plugin` install.)
 
 **Important — restarting your agent afterward is not optional:** MCP servers resolve credentials at startup. An already-running MCP server won't see a key that was saved after it launched — skipping the restart is the most common reason `beam whoami` looks like it worked but the MCP tools still fail. How you restart is platform-specific; see the skill for the exact steps.
 
