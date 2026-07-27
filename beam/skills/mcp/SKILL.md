@@ -5,8 +5,9 @@ description: Beam MCP — which Model Context Protocol tools the Beam server exp
 
 # Beam MCP
 
-The Beam MCP server is the primary in-editor surface. The plugin launches it via
-`beam mcp` (stdio proxy to `https://api.beamstudio.ai/mcp` using the stored API key).
+The Beam MCP server is the primary in-editor surface. **Preferred: register it as a
+direct HTTP MCP server** (`type: http`, url `https://api.beamstudio.ai/mcp`) — no local
+proxy, no Node/uv. Where the host only supports stdio, the plugin bridges via `beam mcp`.
 
 ## Tool groups (from Beam docs)
 
@@ -32,5 +33,18 @@ host's MCP panel rather than assuming this list is exhaustive.
 
 ## Auth note
 
-MCP reads the API key **once at startup**. After `beam login`, restart the agent
-host or the MCP server won't see the new credentials. See the `setup` skill.
+The `/mcp` endpoint authenticates with **`Authorization: Bearer <key>`** — NOT `x-api-key`
+(that's the REST API header). MCP reads the key **once at startup**; after `beam login` or
+any auth/config change, restart the agent host. See the `setup` skill.
+
+## Known issues (server-side, being fixed)
+
+These tools currently error at the MCP layer (the server returns a non-object result, or a
+DI fault); don't rely on them until the platform fix lands:
+
+| Tool | Symptom | Workaround |
+| --- | --- | --- |
+| `getCurrentUser` | `structuredContent expected record` | `beam whoami` (CLI) |
+| `getTaskDetails` | same, even on a valid taskId | `listAgentTasks` / `getLatestExecutions` |
+| `getToolOutputSchema` | same (returns an array) | inspect via `getAgentGraph` |
+| `getToolOptimizationStatus` | `UserService not found` (DI) | — |

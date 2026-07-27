@@ -30,7 +30,7 @@ beam agents list
 ## 4. Tier A — direct HTTP MCP (no proxy, no Node/uv) on Claude Code
 ```sh
 claude mcp add --transport http beam https://api.beamstudio.ai/mcp \
-  --header "x-api-key: <your key>"
+  --header "Authorization: Bearer <your key>"
 ```
 Then **fully restart Claude Code** and ask *"list my Beam agents."*
 
