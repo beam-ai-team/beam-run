@@ -18,10 +18,11 @@ API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
 MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
 CONFIG_DIR="${BEAM_CONFIG_DIR:-$HOME/.config/beam}"
 CREDS_FILE="$CONFIG_DIR/credentials"
-# mcp-proxy package spec for the stdio fallback. Unpinned by default to match the
-# working default; override (e.g. BEAM_MCP_PROXY="mcp-proxy@0.8.2") to pin, and see
-# SPEC-02/05 for vendoring a per-OS binary so no runtime is needed at all.
-PROXY_PKG="${BEAM_MCP_PROXY:-mcp-proxy}"
+# The stdio bridge needs a REMOTE-streamable-HTTP -> stdio proxy:
+#   - uvx: PyPI `mcp-proxy` (sparfenyuk) — proven; args: <url> --transport streamablehttp -H ...
+#   - npx: `mcp-remote` (geelen) — the npm equivalent. NOT npm `mcp-proxy`, which is a
+#     DIFFERENT tool (stdio -> HTTP server) with incompatible args that silently fails.
+# Prefer the DIRECT HTTP MCP registration (type:http) — it needs no proxy at all.
 
 die() {
   # Categorical exit codes agents can branch on:
@@ -270,9 +271,11 @@ cmd_mcp() {
   emit_event mcp_connected
   vendored="$(dirname "$0")/mcp-proxy"
   if [ -x "$vendored" ]; then exec "$vendored" "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
-  if command -v uvx >/dev/null 2>&1; then exec uvx "$PROXY_PKG" "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
-  if command -v npx >/dev/null 2>&1; then exec npx -y "$PROXY_PKG" "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
-  die "internal_error" "need a bundled bridge or uvx/npx to run beam mcp. Tip: on Claude Code/Cursor use the direct HTTP MCP config — no proxy needed." 1
+  # uvx -> PyPI mcp-proxy (remote streamable-HTTP -> stdio), the proven path.
+  if command -v uvx >/dev/null 2>&1; then exec uvx mcp-proxy "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
+  # npx fallback -> mcp-remote (NOT npm `mcp-proxy`, which is a different, incompatible tool).
+  if command -v npx >/dev/null 2>&1; then exec npx -y mcp-remote "$MCP_URL" --header "x-api-key: $key"; fi
+  die "internal_error" "no MCP bridge available. Best fix: register Beam as a DIRECT HTTP MCP server (type:http, url=$MCP_URL, header x-api-key) — no proxy needed. Otherwise install uv (for uvx) or Node (for npx)." 1
 }
 
 cmd_doctor() {
