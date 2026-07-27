@@ -388,9 +388,9 @@ cmd_setup() {
     printf '  ✅ beam on your PATH\n'
     printf '  ⬜ Sign in\n'
     printf '  ⬜ Restart your agent\n\n'
-    printf 'Next:\n'
-    printf '  1. beam login     (get a key at app.beam.ai; paste it when asked — it stays hidden as you type)\n'
-    printf '  2. beam setup     (run me again to finish)\n'
+    printf 'Next — do these in your terminal:\n'
+    printf '  1. Run:  beam login     (first make a key at app.beam.ai; paste it when asked — it stays hidden as you type)\n'
+    printf '  2. Run:  beam setup     (finishes wiring and verifies)\n'
     return 3
   fi
 

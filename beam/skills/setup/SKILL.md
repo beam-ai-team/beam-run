@@ -52,7 +52,7 @@ Render setup results as a warm chat message with **emoji** — **not** raw comma
 ⬜ Restart your agent
 
 **Next:**
-1. `beam login` — create a key at app.beam.ai, paste it when it asks (it stays hidden as you type)
+1. In your terminal, run `beam login` — make a key at app.beam.ai first, then paste it when it asks (it stays hidden as you type)
 2. Restart your agent, then ask "list my Beam agents"
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
