@@ -43,7 +43,7 @@ A reload/soft-restart isn't enough.
 After restart, call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
 
 ## Presenting it — make it feel like onboarding
-Render setup results as a warm chat message with **emoji** — **not** raw command output and **not inside a code block** (a fenced block of ASCII checkboxes is the thing to avoid). Use ✅ for done, ⬜ for pending, and 🚀 / 🎉 to celebrate. Don't paste `beam setup`'s terminal text verbatim — translate it into this shape:
+Render setup results as a warm chat message with **emoji** — never a raw diagnostic dump. Keep the **checklist** in plain text (not a code block): ✅ done, ⬜ pending, 🚀/🎉 to celebrate. But put any **runnable command** in a ```bash block so the app shows a one-click Run button, and make the key page a clickable link. Shape:
 
 🚀 **Beam is installed — almost there!**
 ✅ Plugin installed
@@ -51,9 +51,13 @@ Render setup results as a warm chat message with **emoji** — **not** raw comma
 ⬜ Sign in
 ⬜ Restart your agent
 
-**Next:**
-1. In your terminal, run `beam login` — make a key at app.beam.ai first, then paste it when it asks (it stays hidden as you type)
-2. Restart your agent, then ask "list my Beam agents"
+**Next steps:**
+🔑 1. Generate a key — [app.beam.ai → Personal settings → API Keys](https://app.beam.ai)
+💻 2. Run this in your terminal (paste the key when it asks — it stays hidden as you type):
+```bash
+beam login
+```
+🔄 3. Restart your agent, then ask "list my Beam agents"
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
 

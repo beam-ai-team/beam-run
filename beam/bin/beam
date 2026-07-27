@@ -216,7 +216,11 @@ cmd_login() {
   emit_event auth_ok
   printf '{"ok":true,"saved":"%s","workspaceId":%s}\n' "$CREDS_FILE" \
     "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)"
-  printf 'Signed in. If your agent (Claude Code / Codex / Cursor) is already running, restart it so MCP picks up this key.\n' >&2
+  # Best-effort: also wire the MCP connection where we safely can (claude CLI hosts).
+  if command -v claude >/dev/null 2>&1; then
+    claude mcp add --transport http beam "$MCP_URL" --header "Authorization: Bearer $key" >/dev/null 2>&1 && printf 'Beam connection registered.\n' >&2 || true
+  fi
+  printf 'Signed in ✅  Now restart your agent, then ask "list my Beam agents".\n' >&2
 }
 
 cmd_logout() {
@@ -388,9 +392,10 @@ cmd_setup() {
     printf '  ✅ beam on your PATH\n'
     printf '  ⬜ Sign in\n'
     printf '  ⬜ Restart your agent\n\n'
-    printf 'Next — do these in your terminal:\n'
-    printf '  1. Run:  beam login     (first make a key at app.beam.ai; paste it when asked — it stays hidden as you type)\n'
-    printf '  2. Run:  beam setup     (finishes wiring and verifies)\n'
+    printf 'Next — 3 steps:\n'
+    printf '  1. 🔑 Generate a key in Beam  (app.beam.ai -> Personal settings -> API Keys)\n'
+    printf '  2. 💻 In your terminal, run:  beam login   (paste the key when asked — it stays hidden as you type)\n'
+    printf '  3. 🔄 Restart your agent, then ask "list my Beam agents"\n'
     return 3
   fi
 
