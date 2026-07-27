@@ -12,7 +12,7 @@
 #   - API key never required on argv (hidden prompt / stdin / env)
 set -eu
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 REPO="beam-ai-team/beam-run"
 API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
 MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
@@ -158,7 +158,8 @@ cmd_help() {
 beam $VERSION — Beam Core CLI for coding agents
 
 Usage:
-  beam setup                 one-command install + auth + MCP registration guidance
+  beam setup                 guided install: PATH + auth + MCP registration
+  beam register              register the Beam MCP server with your agent
   beam doctor                self-diagnose install/auth/connection (human checklist)
   beam login                 sign in (hidden prompt; or --api-key -, or BEAM_API_KEY)
   beam logout
@@ -316,33 +317,72 @@ cmd_doctor() {
   printf '\nSome checks need attention (see [XX] above).\n'; return 3
 }
 
+add_to_path_rc() {
+  # Idempotently add ~/.local/bin to the user's shell rc so `beam` is typeable.
+  bindir="$HOME/.local/bin"
+  case ":$PATH:" in *":$bindir:"*) return 0 ;; esac
+  sh_name="$(basename "${SHELL:-sh}")"
+  case "$sh_name" in
+    zsh) rc="$HOME/.zshrc" ;;
+    bash) rc="$HOME/.bashrc" ;;
+    fish) rc="$HOME/.config/fish/config.fish" ;;
+    *) rc="$HOME/.profile" ;;
+  esac
+  if [ -f "$rc" ] && grep -q 'added by beam setup' "$rc" 2>/dev/null; then return 0; fi
+  mkdir -p "$(dirname "$rc")" 2>/dev/null || true
+  if [ "$sh_name" = "fish" ]; then
+    printf '\n# added by beam setup\nset -gx PATH $HOME/.local/bin $PATH\n' >> "$rc" 2>/dev/null || true
+  else
+    printf '\n# added by beam setup\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc" 2>/dev/null || true
+  fi
+  printf '  [ok] added ~/.local/bin to PATH in %s (open a new terminal to pick it up)\n' "$rc"
+}
+
+cmd_register() {
+  # Register the Beam MCP server WITHOUT the caller handling the key: read it from
+  # stored creds and register directly. Only auto-registers where it can do so safely.
+  key="$(read_key 2>/dev/null || true)"
+  if [ -z "$key" ]; then die "auth_missing" "sign in first: beam login" 3; fi
+  if command -v claude >/dev/null 2>&1; then
+    if claude mcp add --transport http beam "$MCP_URL" --header "Authorization: Bearer $key" >/dev/null 2>&1; then
+      printf '{"ok":true,"registered":"claude-code (http)"}\n'; return 0
+    fi
+    printf '{"ok":false,"note":"could not add via claude CLI (may already exist) — check: claude mcp list"}\n' >&2
+    return 0
+  fi
+  cat >&2 <<EOF
+No 'claude' CLI found (e.g. the Claude desktop app). Register Beam as a REMOTE HTTP MCP server:
+  name=beam  type=http  url=$MCP_URL  header="Authorization: Bearer <your key>"
+Then fully restart your agent.
+EOF
+  return 2
+}
+
 cmd_setup() {
   emit_event install
-  printf 'Beam setup — plugging Beam into your AI. One switch.\n\n'
-
+  printf 'Connecting Beam to your coding agent — I will handle install, PATH, and wiring.\n\n'
   bindir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || printf '')"
   mkdir -p "$HOME/.local/bin"
   if [ -n "$bindir" ] && [ "$bindir" != "$HOME/.local/bin" ]; then
     ln -sf "$bindir/beam" "$HOME/.local/bin/beam" 2>/dev/null || cp "$bindir/beam" "$HOME/.local/bin/beam"
     chmod +x "$HOME/.local/bin/beam" 2>/dev/null || true
-    printf '  [ok] beam on PATH at ~/.local/bin/beam\n'
   fi
-  case ":$PATH:" in
-    *":$HOME/.local/bin:"*) : ;;
-    *) printf '  [--] add to your shell rc:  export PATH="$HOME/.local/bin:$PATH"\n' ;;
-  esac
+  printf '  [ok] beam installed on PATH (~/.local/bin/beam)\n'
+  add_to_path_rc
   emit_event path_ok
 
-  if read_key >/dev/null 2>&1; then printf '  [ok] API key already stored\n'
-  else printf '  [--] sign in:  beam login   (hidden prompt), or set BEAM_API_KEY\n'; fi
+  if read_key >/dev/null 2>&1; then
+    printf '  [ok] signed in\n'
+  else
+    printf '  [--] not signed in — run:  beam login   (hidden prompt; never put the key on the command line),\n'
+    printf '       then re-run:  beam setup   to finish.\n'
+    return 3
+  fi
 
-  printf '\nMCP registration:\n'
-  printf '  Claude Code / Cursor / VS Code (recommended — no proxy, no Node/uv):\n'
-  printf '    register the REMOTE endpoint with your key. Claude Code:\n'
-  printf '      claude mcp add --transport http beam %s --header "Authorization: Bearer <your key>"\n' "$MCP_URL"
-  printf '    (the plugin also ships beam/.mcp.json using ${BEAM_API_KEY})\n'
-  printf '  Codex / stdio-only hosts: the plugin runs a local `beam mcp` bridge.\n'
-  printf '\nFinally:  beam doctor   then restart your agent.\n'
+  printf '  registering the Beam connection...\n'
+  cmd_register 2>&1 | sed 's/^/  /' || true
+  printf '\n'; cmd_doctor || true
+  printf '\n  Last step (the only thing left for you): fully restart your agent, then ask "list my Beam agents".\n'
 }
 
 cmd_uninstall() {
@@ -372,6 +412,7 @@ main() {
         *) die "validation_error" "usage: beam agents list" 2 ;;
       esac ;;
     mcp) cmd_mcp ;;
+    register) cmd_register ;;
     uninstall) cmd_uninstall ;;
     *) die "validation_error" "unknown command: $cmd (try beam --help)" 2 ;;
   esac

@@ -1,6 +1,6 @@
 # Testing Beam Run locally (dev)
 
-`v0.2.0` (branch `activation-v3`). API-key auth; OAuth is a future iteration.
+`v0.3.0` (branch `activation-v3`). API-key auth; OAuth is a future iteration.
 
 ## 1. Point your local install at this working copy
 Your `~/.local/bin/beam` forwarder resolves the newest launcher under
@@ -9,7 +9,7 @@ Your `~/.local/bin/beam` forwarder resolves the newest launcher under
 ```sh
 cp -R beam "$HOME/.config/beam-plugin/beam"
 chmod +x "$HOME/.config/beam-plugin/beam/bin/beam"
-beam --version    # -> beam 0.2.0
+beam --version    # -> beam 0.3.0
 ```
 
 ## 2. Smoke test (read-only — never creates tasks)
