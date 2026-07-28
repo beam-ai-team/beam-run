@@ -1,0 +1,100 @@
+{
+  "agentName": "Welcome Email + Follow-up",
+  "agentDescription": "Sends a welcome email, waits two days, then sends a follow-up email.",
+  "nodes": [
+    {
+      "key": "entry",
+      "name": "Entry",
+      "objective": "Entry Node",
+      "is_entry": true,
+      "edges": [{ "target": "write-welcome" }]
+    },
+    {
+      "key": "write-welcome",
+      "name": "Write Welcome Email",
+      "objective": "Write the welcome email content",
+      "tool_name": "Write Welcome Email",
+      "prompt": "## Role:\nYou are an onboarding specialist who writes warm welcome emails.\n\n## Task:\nWrite a welcome email for a new customer.\n\n## Context:\n```\n{customer_name}\n```\n\n## Rules:\n1. Keep it under 150 words and genuinely warm.\n2. Output welcome_subject (the subject line) and welcome_body (the email body).",
+      "input_params": [
+        { "name": "customer_name", "description": "The new customer's name", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "welcome_subject", "description": "Welcome email subject", "type": "string", "position": 0 },
+        { "name": "welcome_body", "description": "Welcome email body", "type": "string", "position": 1 }
+      ],
+      "edges": [{ "target": "send-welcome" }]
+    },
+    {
+      "key": "send-welcome",
+      "name": "Send Welcome Email",
+      "objective": "Send the welcome email via Gmail",
+      "model": "GPT4_1_MINI",
+      "edges": [{ "target": "wait-2-days" }]
+    },
+    {
+      "key": "wait-2-days",
+      "name": "Wait 2 Days",
+      "objective": "Wait two days before sending the follow-up",
+      "node_type": "waitingNode",
+      "node_configurations": { "waitType": "time_based", "timeToWaitValue": 2, "timeToWaitUnit": "days", "timeoutType": "no_timeout" },
+      "tool_name": "Wait",
+      "tool_description": "Pauses the workflow for a fixed delay",
+      "prompt": "",
+      "edges": [{ "target": "write-followup" }]
+    },
+    {
+      "key": "write-followup",
+      "name": "Write Follow-up Email",
+      "objective": "Write the follow-up email content",
+      "tool_name": "Write Follow-up Email",
+      "prompt": "## Role:\nYou are an onboarding specialist who writes helpful follow-up emails.\n\n## Task:\nWrite a follow-up email checking in on the new customer two days after they joined.\n\n## Context:\n```\n{customer_name}\n```\n\n## Rules:\n1. Keep it under 150 words, helpful and non-pushy.\n2. Output followup_subject (the subject line) and followup_body (the email body).",
+      "input_params": [
+        { "name": "customer_name", "description": "The customer's name", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "followup_subject", "description": "Follow-up email subject", "type": "string", "position": 0 },
+        { "name": "followup_body", "description": "Follow-up email body", "type": "string", "position": 1 }
+      ],
+      "edges": [{ "target": "send-followup" }]
+    },
+    {
+      "key": "send-followup",
+      "name": "Send Follow-up Email",
+      "objective": "Send the follow-up email via Gmail",
+      "model": "GPT4_1_MINI",
+      "edges": []
+    }
+  ],
+  "integrations": [
+    {
+      "node_key": "send-welcome",
+      "tool_function_name": "GmailAction_SendEmail",
+      "tool_name": "Send Email",
+      "description": "Send an email from Gmail",
+      "requires_consent": true,
+      "input_params": [
+        { "paramName": "email_address", "fillType": "ai_fill", "paramDescription": "Recipient email address", "dataType": "string", "required": true, "position": 0 },
+        { "paramName": "subject", "fillType": "linked", "paramDescription": "Email subject", "dataType": "string", "required": true, "position": 1, "linked_from_key": "write-welcome", "linked_from_param": "welcome_subject" },
+        { "paramName": "body", "fillType": "linked", "paramDescription": "Email body", "dataType": "string", "required": true, "position": 2, "linked_from_key": "write-welcome", "linked_from_param": "welcome_body" }
+      ],
+      "output_params": [
+        { "paramName": "message", "paramDescription": "Send result", "dataType": "string", "position": 0 }
+      ]
+    },
+    {
+      "node_key": "send-followup",
+      "tool_function_name": "GmailAction_SendEmail",
+      "tool_name": "Send Email",
+      "description": "Send an email from Gmail",
+      "requires_consent": true,
+      "input_params": [
+        { "paramName": "email_address", "fillType": "ai_fill", "paramDescription": "Recipient email address", "dataType": "string", "required": true, "position": 0 },
+        { "paramName": "subject", "fillType": "linked", "paramDescription": "Email subject", "dataType": "string", "required": true, "position": 1, "linked_from_key": "write-followup", "linked_from_param": "followup_subject" },
+        { "paramName": "body", "fillType": "linked", "paramDescription": "Email body", "dataType": "string", "required": true, "position": 2, "linked_from_key": "write-followup", "linked_from_param": "followup_body" }
+      ],
+      "output_params": [
+        { "paramName": "message", "paramDescription": "Send result", "dataType": "string", "position": 0 }
+      ]
+    }
+  ]
+}

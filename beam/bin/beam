@@ -2,13 +2,36 @@
 # beam — thin agent-oriented CLI for Beam Core.
 # Stores credentials under ~/.config/beam/, verifies with /v2/user/me,
 # and launches a local stdio MCP proxy to https://api.beamstudio.ai/mcp.
+#
+# v0.2.0 — activation-v3:
+#   - resilient HTTP (timeouts + bounded retries; network vs auth distinguished)
+#   - safe credential parsing (no shell-sourcing of the creds file)
+#   - no hard python3 dependency (jq -> python3 -> POSIX fallback)
+#   - `beam doctor` (human self-diagnosis) and `beam setup` (one-command install)
+#   - `beam uninstall`, `beam workspace list`
+#   - API key never required on argv (hidden prompt / stdin / env)
+#
+# v0.4.0 — build & manage agents:
+#   - `beam agents get <id>` (inspect one agent)
+#   - `beam agents deploy <spec> [--publish] [--dry-run] [--agent-id ID]`
+#     (build/update an agent from a spec via the bundled agent-builder graph builder)
+#   - `beam agents publish <graphId>` (promote a draft graph — x-api-key)
+#   - `beam agents delete <id>` (remove an agent — mints a short-lived Bearer JWT
+#     from the API key via /auth/access-token, since the delete route is JWT-gated)
+#   - write-capable HTTP layer (_http_send) + api_write / api_bearer helpers
 set -eu
 
+VERSION="0.4.0"
 REPO="beam-ai-team/beam-run"
 API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
 MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
 CONFIG_DIR="${BEAM_CONFIG_DIR:-$HOME/.config/beam}"
 CREDS_FILE="$CONFIG_DIR/credentials"
+# The stdio bridge needs a REMOTE-streamable-HTTP -> stdio proxy:
+#   - uvx: PyPI `mcp-proxy` (sparfenyuk) — proven; args: <url> --transport streamablehttp -H ...
+#   - npx: `mcp-remote` (geelen) — the npm equivalent. NOT npm `mcp-proxy`, which is a
+#     DIFFERENT tool (stdio -> HTTP server) with incompatible args that silently fails.
+# Prefer the DIRECT HTTP MCP registration (type:http) — it needs no proxy at all.
 
 die() {
   # Categorical exit codes agents can branch on:
@@ -23,36 +46,24 @@ ensure_config_dir() {
   chmod 700 "$CONFIG_DIR" 2>/dev/null || true
 }
 
+# --- credentials (parsed, never sourced) ---------------------------------------
+
+creds_value() {
+  # $1 = key name; prints value from CREDS_FILE without executing the file
+  if [ ! -f "$CREDS_FILE" ]; then return 1; fi
+  line=$(grep "^$1=" "$CREDS_FILE" 2>/dev/null | head -n1) || return 1
+  if [ -z "$line" ]; then return 1; fi
+  printf '%s' "${line#*=}"
+}
+
 read_key() {
-  if [ -n "${BEAM_API_KEY:-}" ]; then
-    printf '%s' "$BEAM_API_KEY"
-    return 0
-  fi
-  if [ -f "$CREDS_FILE" ]; then
-    # shellcheck disable=SC1090
-    . "$CREDS_FILE"
-    if [ -n "${BEAM_API_KEY:-}" ]; then
-      printf '%s' "$BEAM_API_KEY"
-      return 0
-    fi
-  fi
-  return 1
+  if [ -n "${BEAM_API_KEY:-}" ]; then printf '%s' "$BEAM_API_KEY"; return 0; fi
+  creds_value BEAM_API_KEY
 }
 
 read_workspace() {
-  if [ -n "${BEAM_WORKSPACE_ID:-}" ]; then
-    printf '%s' "$BEAM_WORKSPACE_ID"
-    return 0
-  fi
-  if [ -f "$CREDS_FILE" ]; then
-    # shellcheck disable=SC1090
-    . "$CREDS_FILE"
-    if [ -n "${BEAM_WORKSPACE_ID:-}" ]; then
-      printf '%s' "$BEAM_WORKSPACE_ID"
-      return 0
-    fi
-  fi
-  return 1
+  if [ -n "${BEAM_WORKSPACE_ID:-}" ]; then printf '%s' "$BEAM_WORKSPACE_ID"; return 0; fi
+  creds_value BEAM_WORKSPACE_ID
 }
 
 write_creds() {
@@ -62,159 +73,296 @@ write_creds() {
   umask 077
   {
     printf 'BEAM_API_KEY=%s\n' "$key"
-    if [ -n "$workspace" ]; then
-      printf 'BEAM_WORKSPACE_ID=%s\n' "$workspace"
-    fi
+    if [ -n "$workspace" ]; then printf 'BEAM_WORKSPACE_ID=%s\n' "$workspace"; fi
   } > "$CREDS_FILE"
   chmod 600 "$CREDS_FILE"
 }
 
+# --- JSON (jq -> python3 -> POSIX best-effort) ---------------------------------
+
+extract_workspace_id() {
+  # reads /v2/user/me JSON on stdin, prints the first workspace id (or empty)
+  if command -v jq >/dev/null 2>&1; then
+    jq -r 'if .workspaces then (.workspaces[0].id // "") elif .workspace then (.workspace.id // "") else "" end' 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+ws=d.get("workspaces") or d.get("workspace") or []
+if isinstance(ws, dict):
+    print(ws.get("id") or "")
+elif isinstance(ws, list) and ws:
+    w=ws[0]
+    print(w.get("id") if isinstance(w, dict) else "")' 2>/dev/null || true
+  else
+    # best-effort: first "id":"..." occurrence (guarded; jq/python3 preferred)
+    grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' 2>/dev/null | head -n1 | sed 's/.*"\([^"]*\)"$/\1/' || true
+  fi
+}
+
+# --- resilient HTTP ------------------------------------------------------------
+# Returns: 0 ok (body on stdout) - 3 auth - 5 network/other. Bounded retry+backoff.
+
+_http_get() {
+  # $1 = full URL ; remaining args = extra curl args (e.g. -H "Name: value")
+  url="$1"; shift
+  tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")
+  attempt=1; max=3; delay=1
+  while [ "$attempt" -le "$max" ]; do
+    set +e
+    code=$(curl -sS --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
+    cx=$?
+    set -e
+    if [ "$cx" -ne 0 ]; then
+      if [ "$attempt" -lt "$max" ]; then sleep "$delay"; delay=$((delay * 2)); attempt=$((attempt + 1)); continue; fi
+      rm -f "$tmp"; return 5
+    fi
+    case "$code" in
+      2*) cat "$tmp"; rm -f "$tmp"; return 0 ;;
+      401|403) rm -f "$tmp"; return 3 ;;
+      5*) if [ "$attempt" -lt "$max" ]; then sleep "$delay"; delay=$((delay * 2)); attempt=$((attempt + 1)); continue; fi
+          rm -f "$tmp"; return 5 ;;
+      *) rm -f "$tmp"; return 5 ;;
+    esac
+  done
+  rm -f "$tmp"; return 5
+}
+
+verify_key() {
+  # $1 = key to test; prints /v2/user/me body on success
+  _http_get "$API_BASE/v2/user/me" -H "x-api-key: $1"
+}
+
+api_request() {
+  # $1 = path; uses stored/env key + workspace
+  path="$1"
+  key="$(read_key)" || return 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ]; then
+    _http_get "$API_BASE$path" -H "x-api-key: $key" -H "current-workspace-id: $ws"
+  else
+    _http_get "$API_BASE$path" -H "x-api-key: $key"
+  fi
+}
+
+# --- write-capable HTTP (POST/PUT/PATCH/DELETE) --------------------------------
+# Like _http_get but sends a method (+ optional JSON body). SINGLE attempt: a write
+# is not blindly retried (a 5xx may already have applied). Returns 0 ok (body on
+# stdout), 3 auth, 5 network/other.
+_http_send() {
+  # $1 = method ; $2 = full URL ; $3 = body ('' for none) ; rest = extra curl args
+  method="$1"; url="$2"; body="$3"; shift 3
+  tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")
+  set +e
+  if [ -n "$body" ]; then
+    code=$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 60 \
+      -X "$method" -H "Content-Type: application/json" --data-binary @- \
+      -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
+  else
+    code=$(curl -sS --connect-timeout 5 --max-time 60 \
+      -X "$method" -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
+  fi
+  cx=$?
+  set -e
+  if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
+  case "$code" in
+    2*) cat "$tmp"; rm -f "$tmp"; return 0 ;;
+    401|403) rm -f "$tmp"; return 3 ;;
+    *) rm -f "$tmp"; return 5 ;;
+  esac
+}
+
+api_write() {
+  # $1 = method ; $2 = path ; $3 = body ('' for none). x-api-key + workspace.
+  # The /agent-graphs/* routes (create, update, publish) accept the API key.
+  method="$1"; path="$2"; body="${3:-}"
+  key="$(read_key)" || return 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ]; then
+    _http_send "$method" "$API_BASE$path" "$body" -H "x-api-key: $key" -H "current-workspace-id: $ws"
+  else
+    _http_send "$method" "$API_BASE$path" "$body" -H "x-api-key: $key"
+  fi
+}
+
+extract_id_token() {
+  # reads /auth/access-token JSON on stdin, prints the idToken (or empty)
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.idToken // .accessToken // .token // ""' 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+print(d.get("idToken") or d.get("accessToken") or d.get("token") or "")' 2>/dev/null || true
+  else
+    grep -o '"idToken"[[:space:]]*:[[:space:]]*"[^"]*"' 2>/dev/null | head -n1 | sed 's/.*"\([^"]*\)"$/\1/' || true
+  fi
+}
+
+mint_bearer() {
+  # Exchange the stored API key for a short-lived Bearer JWT (idToken). Some routes
+  # (agent delete, triggers, webhooks) are JWT-gated and reject the raw API key.
+  key="$(read_key)" || return 3
+  set +e
+  resp="$(_http_send POST "$API_BASE/auth/access-token" "{\"apiKey\":\"$key\"}")"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || return "$rc"
+  tok="$(printf '%s' "$resp" | extract_id_token)"
+  [ -n "$tok" ] || return 3
+  printf '%s' "$tok"
+}
+
+api_bearer() {
+  # $1 = method ; $2 = path ; $3 = body ('' for none). Uses a minted Bearer JWT.
+  method="$1"; path="$2"; body="${3:-}"
+  tok="$(mint_bearer)" || return 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ]; then
+    _http_send "$method" "$API_BASE$path" "$body" -H "Authorization: Bearer $tok" -H "current-workspace-id: $ws"
+  else
+    _http_send "$method" "$API_BASE$path" "$body" -H "Authorization: Bearer $tok"
+  fi
+}
+
+# Resolve the real directory of this script, following one symlink level
+# (~/.local/bin/beam is a symlink into the plugin). Used to locate bundled skills.
+script_dir() {
+  src="$0"
+  if [ -L "$src" ]; then
+    target="$(readlink "$src" 2>/dev/null || true)"
+    case "$target" in
+      /*) src="$target" ;;
+      *) src="$(dirname "$src")/$target" ;;
+    esac
+  fi
+  (cd "$(dirname "$src")" 2>/dev/null && pwd) || printf '%s' "$(dirname "$0")"
+}
+
+# --- telemetry (local placeholder until a sink is chosen — SPEC-00) ------------
+
+emit_event() {
+  if [ "${BEAM_TELEMETRY:-1}" = "0" ]; then return 0; fi
+  ensure_config_dir
+  if [ ! -f "$CONFIG_DIR/install_id" ]; then
+    { command -v uuidgen >/dev/null 2>&1 && uuidgen || date +%s; } > "$CONFIG_DIR/install_id" 2>/dev/null || true
+  fi
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'now')
+  printf '%s stage=%s host=%s os=%s ver=%s\n' "$ts" "$1" "${BEAM_HOST:-unknown}" \
+    "$(uname -s 2>/dev/null || printf unknown)" "$VERSION" >> "$CONFIG_DIR/events.log" 2>/dev/null || true
+}
+
+# --- commands ------------------------------------------------------------------
+
 cmd_help() {
-  cat <<'EOF'
-beam — Beam Core CLI for coding agents
+  cat <<EOF
+beam $VERSION — Beam Core CLI for coding agents
 
 Usage:
-  beam login [--api-key KEY] [--workspace-id ID]
+  beam setup                 guided install: PATH + auth + MCP registration
+  beam register              register the Beam MCP server with your agent
+  beam doctor                self-diagnose install/auth/connection (human checklist)
+  beam login                 sign in (asks for your key; or --api-key -, or BEAM_API_KEY)
   beam logout
   beam whoami
-  beam workspace [ID]
-  beam agents list
-  beam mcp
-  beam --help
+  beam workspace [ID]        show/set current workspace
+  beam workspace list        list your workspaces
+  beam agents list           list agents in the current workspace
+  beam agents get <id>       inspect one agent
+  beam agents deploy <spec>  build/update an agent from a spec (draft; --publish to go live)
+  beam agents publish <gid>  publish a draft graph (graphId from deploy output)
+  beam agents delete <id>    delete an agent
+  beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
+  beam uninstall
+  beam --version | --help
 
-Auth:
-  Create an API key in Beam → Personal settings → API Keys, then:
-    beam login --api-key <key>
-  Or export BEAM_API_KEY (and optionally BEAM_WORKSPACE_ID).
+Auth (never put the key on the command line — it leaks to shell history):
+  beam login                 # asks for your key (stays hidden as you type)
+  BEAM_API_KEY=... beam login  # env
+  printf '%s' "\$KEY" | beam login --api-key -   # stdin
+  Create a key: app.beam.ai -> Personal settings -> API Keys
 
-MCP:
-  beam mcp launches a stdio proxy to the Beam MCP server using your stored key.
-  Requires npx or uvx on PATH (uses mcp-proxy).
-
-Docs:
-  https://github.com/beam-ai-team/beam-run
-  https://docs.beam.ai/08-reference/api/mcp-connection/mcp-connection
+Docs: https://github.com/$REPO
 EOF
 }
 
 cmd_login() {
-  key=""
-  workspace=""
+  key=""; workspace=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --api-key)
-        key="${2:-}"
-        shift 2
-        ;;
-      --workspace-id)
-        workspace="${2:-}"
-        shift 2
-        ;;
-      -h|--help)
-        cmd_help
-        exit 0
-        ;;
-      *)
-        die "validation_error" "unknown flag: $1 (try beam login --api-key <key>)" 2
-        ;;
+      --api-key) key="${2:-}"; shift 2 ;;
+      --workspace-id) workspace="${2:-}"; shift 2 ;;
+      -h|--help) cmd_help; exit 0 ;;
+      *) die "validation_error" "unknown flag: $1 (try beam login --help)" 2 ;;
     esac
   done
-
+  if [ "$key" = "-" ]; then IFS= read -r key || true; fi
+  if [ -z "$key" ] && [ -n "${BEAM_API_KEY:-}" ]; then key="$BEAM_API_KEY"; fi
   if [ -z "$key" ]; then
     if [ -t 0 ]; then
-      printf 'Paste your Beam API key (from Personal settings → API Keys): ' >&2
-      # Disable echo if possible
+      printf 'Paste your Beam API key and press Enter (it stays hidden as you type): ' >&2
       if command -v stty >/dev/null 2>&1; then
-        stty -echo 2>/dev/null || true
-        IFS= read -r key || true
-        stty echo 2>/dev/null || true
-        printf '\n' >&2
+        stty -echo 2>/dev/null || true; IFS= read -r key || true; stty echo 2>/dev/null || true; printf '\n' >&2
       else
         IFS= read -r key || true
       fi
     else
-      die "auth_missing" "pass --api-key <key>, or set BEAM_API_KEY, or run interactively" 3
+      die "auth_missing" "no key — use: beam login (interactive), BEAM_API_KEY=... beam login, or pipe to --api-key -. Avoid --api-key <key> (leaks to history)." 3
     fi
   fi
+  if [ -z "$key" ]; then die "auth_missing" "empty API key" 3; fi
 
-  [ -n "$key" ] || die "auth_missing" "empty API key" 3
+  set +e; resp="$(verify_key "$key")"; vc=$?; set -e
+  if [ "$vc" -eq 3 ]; then die "auth_invalid" "API key rejected by $API_BASE/v2/user/me — create a fresh key in app.beam.ai" 3; fi
+  if [ "$vc" -eq 5 ]; then die "network_error" "could not reach $API_BASE (network/timeout) — key NOT saved; check your connection and retry" 5; fi
 
-  # Verify before saving
-  resp="$(curl -fsS -H "x-api-key: $key" "$API_BASE/v2/user/me" 2>/dev/null)" \
-    || die "auth_invalid" "API key rejected by $API_BASE/v2/user/me" 3
-
-  # Prefer an existing workspace flag; otherwise take the first workspace id if present
-  if [ -z "$workspace" ]; then
-    workspace="$(printf '%s' "$resp" | python3 -c '
-import json,sys
-try:
-  d=json.load(sys.stdin)
-except Exception:
-  sys.exit(0)
-ws=d.get("workspaces") or d.get("workspace") or []
-if isinstance(ws, dict):
-  print(ws.get("id") or "")
-elif isinstance(ws, list) and ws:
-  w=ws[0]
-  print(w.get("id") if isinstance(w, dict) else "")
-' 2>/dev/null || true)"
-  fi
-
+  if [ -z "$workspace" ]; then workspace="$(printf '%s' "$resp" | extract_workspace_id)"; fi
   write_creds "$key" "$workspace"
-  printf '{"ok":true,"saved":"%s","workspaceId":%s}\n' \
-    "$CREDS_FILE" \
+  emit_event auth_ok
+  printf '{"ok":true,"saved":"%s","workspaceId":%s}\n' "$CREDS_FILE" \
     "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)"
+  # Best-effort: also wire the MCP connection where we safely can (claude CLI hosts).
+  if command -v claude >/dev/null 2>&1; then
+    claude mcp add --transport http beam "$MCP_URL" --header "Authorization: Bearer $key" >/dev/null 2>&1 && printf 'Beam connection registered.\n' >&2 || true
+  fi
+  printf 'Signed in ✅  Now restart your agent, then ask "list my Beam agents".\n' >&2
 }
 
 cmd_logout() {
-  if [ -f "$CREDS_FILE" ]; then
-    rm -f "$CREDS_FILE"
-  fi
+  if [ -f "$CREDS_FILE" ]; then rm -f "$CREDS_FILE"; fi
   printf '{"ok":true,"loggedOut":true}\n'
 }
 
 cmd_whoami() {
-  key="$(read_key)" || die "auth_missing" "not signed in — run beam login --api-key <key> or set BEAM_API_KEY" 3
-  workspace="$(read_workspace || true)"
-
-  set +e
-  if [ -n "${workspace:-}" ]; then
-    resp="$(curl -fsS -H "x-api-key: $key" -H "current-workspace-id: $workspace" "$API_BASE/v2/user/me" 2>&1)"
-  else
-    resp="$(curl -fsS -H "x-api-key: $key" "$API_BASE/v2/user/me" 2>&1)"
-  fi
-  code=$?
-  set -e
-
-  if [ $code -ne 0 ]; then
-    case "$resp" in
-      *Could\ not\ resolve*|*Failed\ to\ connect*|*timed\ out*)
-        die "network_error" "could not reach $API_BASE: $resp" 5
-        ;;
-      *)
-        die "auth_invalid" "whoami failed: $resp" 3
-        ;;
-    esac
-  fi
-
-  if [ -n "${workspace:-}" ]; then
-    printf '%s\n' "$resp" | BEAM_WS="$workspace" BEAM_API="$API_BASE" python3 -c '
-import json,sys,os
-d=json.load(sys.stdin)
-d["_beam"]={"workspaceId": os.environ.get("BEAM_WS",""), "apiBase": os.environ.get("BEAM_API","")}
-print(json.dumps(d))
-'
+  set +e; resp="$(api_request /v2/user/me)"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in or key rejected — run: beam login" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "could not reach $API_BASE (network/timeout)" 5; fi
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ] && command -v jq >/dev/null 2>&1; then
+    printf '%s' "$resp" | jq --arg ws "$ws" --arg api "$API_BASE" '. + {_beam:{workspaceId:$ws,apiBase:$api}}' 2>/dev/null || printf '%s\n' "$resp"
   else
     printf '%s\n' "$resp"
   fi
 }
 
 cmd_workspace() {
-  if [ $# -eq 0 ]; then
-    workspace="$(read_workspace || true)"
-    if [ -z "${workspace:-}" ]; then
-      die "validation_error" "no workspace set — run beam workspace <id> after beam login" 2
+  if [ "${1:-}" = "list" ]; then
+    set +e; resp="$(api_request /v2/user/me)"; rc=$?; set -e
+    if [ "$rc" -ne 0 ]; then die "auth_missing" "run beam login first" 3; fi
+    if command -v jq >/dev/null 2>&1; then
+      printf '%s' "$resp" | jq -r '(.workspaces // [.workspace]) | .[]? | "\(.id)\t\(.name // "")"' 2>/dev/null || printf '%s\n' "$resp"
+    else
+      printf '%s\n' "$resp"
     fi
+    return 0
+  fi
+  if [ $# -eq 0 ]; then
+    workspace="$(read_workspace 2>/dev/null || true)"
+    if [ -z "$workspace" ]; then die "validation_error" "no workspace set — run: beam workspace list, then beam workspace <id>" 2; fi
     printf '{"workspaceId":"%s"}\n' "$workspace"
     return 0
   fi
@@ -224,50 +372,237 @@ cmd_workspace() {
 }
 
 cmd_agents_list() {
+  if ! read_workspace >/dev/null 2>&1; then die "validation_error" "no workspace — run: beam workspace list, then beam workspace <id>" 2; fi
+  # NOTE: capped at pageSize=50 (no pagination yet — deferred, see specs).
+  set +e; resp="$(api_request '/agent?pageNum=1&pageSize=50')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "agents list failed (network/timeout)" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_get() {
+  id="${1:-}"
+  [ -n "$id" ] || die "validation_error" "usage: beam agents get <agentId>" 2
+  set +e; resp="$(api_request "/agent/$id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "agents get failed (network/timeout)" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_deploy() {
+  # Build or update an agent from a spec via the bundled agent-builder graph builder.
+  # Draft by default; pass --publish to go live. See skills/agent-builder for the spec format.
+  spec="${1:-}"
+  [ -n "$spec" ] || die "validation_error" "usage: beam agents deploy <specFile> [--agent-id ID] [--publish] [--dry-run]" 2
+  [ -f "$spec" ] || die "validation_error" "spec file not found: $spec" 2
+  shift
+  command -v python3 >/dev/null 2>&1 || die "internal_error" "beam agents deploy needs python3 (the graph builder). Install Python 3.8+." 1
   key="$(read_key)" || die "auth_missing" "not signed in — run beam login first" 3
-  workspace="$(read_workspace)" || die "validation_error" "no workspace — run beam workspace <id>" 2
-  curl -fsS \
-    -H "x-api-key: $key" \
-    -H "current-workspace-id: $workspace" \
-    "$API_BASE/agent?pageNum=1&pageSize=50" \
-    || die "network_error" "agents list failed" 5
-  printf '\n'
+  ws="$(read_workspace 2>/dev/null || true)"
+  [ -n "$ws" ] || die "validation_error" "no workspace — run: beam workspace list, then beam workspace <id>" 2
+  builder="$(script_dir)/../skills/agent-builder/scripts/beam.py"
+  [ -f "$builder" ] || die "internal_error" "bundled graph builder not found ($builder) — reinstall the plugin (beam setup)" 1
+  BEAM_API_KEY="$key" BEAM_WORKSPACE_ID="$ws" BEAM_API_URL="$API_BASE" python3 "$builder" deploy "$spec" "$@"
+}
+
+cmd_agents_publish() {
+  gid="${1:-}"
+  [ -n "$gid" ] || die "validation_error" "usage: beam agents publish <graphId>  (graphId comes from deploy output)" 2
+  set +e; resp="$(api_write PATCH "/agent-graphs/$gid/publish" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "publish failed (network/timeout) — graph NOT published" 5; fi
+  printf '{"ok":true,"published":"%s"}\n' "$gid"
+}
+
+cmd_agents_delete() {
+  id="${1:-}"
+  [ -n "$id" ] || die "validation_error" "usage: beam agents delete <agentId>" 2
+  # DELETE /agent/{id} is JWT-gated; mint a Bearer token from the API key first.
+  set +e; resp="$(api_bearer DELETE "/agent/$id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "delete auth failed (JWT exchange rejected) — run beam login for a fresh key" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "delete failed (network/timeout) — agent NOT deleted" 5; fi
+  printf '{"ok":true,"deleted":"%s"}\n' "$id"
 }
 
 cmd_mcp() {
-  key="$(read_key)" || die "auth_missing" "not signed in — run beam login --api-key <key> before starting MCP" 3
+  key="$(read_key)" || die "auth_missing" "not signed in — run beam login before starting MCP" 3
+  emit_event mcp_connected
+  vendored="$(dirname "$0")/mcp-proxy"
+  if [ -x "$vendored" ]; then exec "$vendored" "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
+  # The /mcp endpoint authenticates via `Authorization: Bearer <key>` (NOT `x-api-key`,
+  # which is the REST API header). Send both so either subsystem is satisfied.
+  # uvx -> PyPI mcp-proxy (remote streamable-HTTP -> stdio), the proven path.
+  if command -v uvx >/dev/null 2>&1; then exec uvx mcp-proxy "$MCP_URL" --transport streamablehttp -H Authorization "Bearer $key" -H x-api-key "$key"; fi
+  # npx fallback -> mcp-remote (NOT npm `mcp-proxy`, which is a different, incompatible tool).
+  if command -v npx >/dev/null 2>&1; then exec npx -y mcp-remote "$MCP_URL" --header "Authorization: Bearer $key" --header "x-api-key: $key"; fi
+  die "internal_error" "no MCP bridge available. Best fix: register Beam as a DIRECT HTTP MCP server (type:http, url=$MCP_URL, header 'Authorization: Bearer <key>') — no proxy needed. Otherwise install uv (for uvx) or Node (for npx)." 1
+}
 
-  if command -v uvx >/dev/null 2>&1; then
-    exec uvx mcp-proxy "$MCP_URL" --transport streamablehttp -H x-api-key "$key"
+cmd_doctor() {
+  fail=0
+  printf 'Beam doctor — checking your setup:\n\n'
+  printf '  [ok] beam CLI: %s (v%s)\n' "$0" "$VERSION"
+
+  bindir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || printf '')"
+  case ":$PATH:" in
+    *":$bindir:"*) printf '  [ok] on PATH (%s)\n' "$bindir" ;;
+    *) printf '  [--] not on PATH — run beam by full path, or add to your shell rc: export PATH="%s:$PATH"\n' "$bindir" ;;
+  esac
+
+  key="$(read_key 2>/dev/null || true)"
+  if [ -z "$key" ]; then
+    printf '  [XX] not signed in — run: beam login   (key from app.beam.ai -> Personal settings -> API Keys)\n'; fail=1
+  else
+    set +e; verify_key "$key" >/dev/null; vc=$?; set -e
+    case "$vc" in
+      0) printf '  [ok] API key valid; Beam endpoint reachable\n' ;;
+      3) printf '  [XX] API key rejected — run: beam login   (create a fresh key)\n'; fail=1 ;;
+      5) printf '  [XX] cannot reach Beam (network/timeout) — check your internet, then retry\n'; fail=1 ;;
+    esac
   fi
-  if command -v npx >/dev/null 2>&1; then
-    exec npx -y mcp-proxy "$MCP_URL" --transport streamablehttp -H x-api-key "$key"
+
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ]; then printf '  [ok] workspace set (%s)\n' "$ws"
+  else printf '  [--] no workspace set — run: beam workspace list, then beam workspace <id>\n'; fi
+
+  if [ -x "$(dirname "$0")/mcp-proxy" ]; then printf '  [ok] bundled MCP bridge present\n'
+  elif command -v uvx >/dev/null 2>&1 || command -v npx >/dev/null 2>&1; then printf '  [ok] MCP bridge runtime available (uvx/npx) — only needed for stdio hosts like Codex\n'
+  else printf '  [--] no uvx/npx — only needed for stdio hosts (Codex); Claude Code/Cursor use direct HTTP (no runtime)\n'; fi
+
+  printf '\n  Reminder: if you signed in AFTER starting your agent, fully restart it so MCP picks up the key.\n'
+  if [ "$fail" -eq 0 ]; then printf '\nAll good. Try: beam whoami\n'; return 0; fi
+  printf '\nSome checks need attention (see [XX] above).\n'; return 3
+}
+
+add_to_path_rc() {
+  # Idempotently add ~/.local/bin to the user's shell rc so `beam` is typeable.
+  bindir="$HOME/.local/bin"
+  case ":$PATH:" in *":$bindir:"*) return 0 ;; esac
+  sh_name="$(basename "${SHELL:-sh}")"
+  case "$sh_name" in
+    zsh) rc="$HOME/.zshrc" ;;
+    bash) rc="$HOME/.bashrc" ;;
+    fish) rc="$HOME/.config/fish/config.fish" ;;
+    *) rc="$HOME/.profile" ;;
+  esac
+  if [ -f "$rc" ] && grep -q 'added by beam setup' "$rc" 2>/dev/null; then return 0; fi
+  mkdir -p "$(dirname "$rc")" 2>/dev/null || true
+  if [ "$sh_name" = "fish" ]; then
+    printf '\n# added by beam setup\nset -gx PATH $HOME/.local/bin $PATH\n' >> "$rc" 2>/dev/null || true
+  else
+    printf '\n# added by beam setup\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc" 2>/dev/null || true
   fi
-  die "internal_error" "need uvx or npx on PATH to run beam mcp (install Node.js or uv)" 1
+  printf '  [ok] added ~/.local/bin to PATH in %s (open a new terminal to pick it up)\n' "$rc"
+}
+
+cmd_register() {
+  # Register the Beam MCP server WITHOUT the caller handling the key: read it from
+  # stored creds and register directly. Only auto-registers where it can do so safely.
+  key="$(read_key 2>/dev/null || true)"
+  if [ -z "$key" ]; then die "auth_missing" "sign in first: beam login" 3; fi
+  if command -v claude >/dev/null 2>&1; then
+    if claude mcp add --transport http beam "$MCP_URL" --header "Authorization: Bearer $key" >/dev/null 2>&1; then
+      printf '{"ok":true,"registered":"claude-code (http)"}\n'; return 0
+    fi
+    printf '{"ok":false,"note":"could not add via claude CLI (may already exist) — check: claude mcp list"}\n' >&2
+    return 0
+  fi
+  cat >&2 <<EOF
+No 'claude' CLI found (e.g. the Claude desktop app). Register Beam as a REMOTE HTTP MCP server:
+  name=beam  type=http  url=$MCP_URL  header="Authorization: Bearer <your key>"
+Then fully restart your agent.
+EOF
+  return 2
+}
+
+cmd_setup() {
+  emit_event install
+  # Install + PATH (always).
+  bindir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || printf '')"
+  mkdir -p "$HOME/.local/bin"
+  if [ -n "$bindir" ] && [ "$bindir" != "$HOME/.local/bin" ]; then
+    ln -sf "$bindir/beam" "$HOME/.local/bin/beam" 2>/dev/null || cp "$bindir/beam" "$HOME/.local/bin/beam"
+    chmod +x "$HOME/.local/bin/beam" 2>/dev/null || true
+  fi
+  add_to_path_rc >/dev/null 2>&1 || true
+  emit_event path_ok
+
+  # Signed in? (verify the stored key actually works)
+  key="$(read_key 2>/dev/null || true)"
+  signed=0; ws=""
+  if [ -n "$key" ] && verify_key "$key" >/dev/null 2>&1; then signed=1; ws="$(read_workspace 2>/dev/null || true)"; fi
+
+  # Register the MCP server where we safely can (needs signed-in + claude CLI).
+  registered=0
+  if [ "$signed" = "1" ]; then
+    if cmd_register >/dev/null 2>&1; then registered=1; emit_event mcp_connected; fi
+  fi
+
+  # ---- onboarding output: success line + emoji checklist + last steps ----
+  if [ "$signed" = "0" ]; then
+    printf '🚀 Beam is installed — 2 quick steps to finish.\n\n'
+    printf '  ✅ Plugin installed\n'
+    printf '  ✅ beam on your PATH\n'
+    printf '  ⬜ Sign in\n'
+    printf '  ⬜ Restart your agent\n\n'
+    printf 'Next — 3 steps:\n'
+    printf '  1. 🔑 Generate a key in Beam  (app.beam.ai -> Personal settings -> API Keys)\n'
+    printf '  2. 💻 In your terminal, run:  beam login   (paste the key when asked — it stays hidden as you type)\n'
+    printf '  3. 🔄 Restart your agent, then ask "list my Beam agents"\n'
+    return 3
+  fi
+
+  if [ "$registered" = "1" ]; then printf '🎉 Beam is connected — 1 step left!\n\n'
+  else printf '🚀 Almost there — 2 steps left.\n\n'; fi
+  printf '  ✅ Plugin installed\n'
+  printf '  ✅ beam on your PATH\n'
+  if [ -n "$ws" ]; then printf '  ✅ Signed in (workspace %s)\n' "$ws"; else printf '  ✅ Signed in\n'; fi
+  if [ "$registered" = "1" ]; then
+    printf '  ✅ Beam connection registered\n'
+    printf '  ⬜ Restart your agent\n\n'
+    printf 'Last step: fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
+  else
+    printf '  ⬜ Register the Beam connection\n'
+    printf '  ⬜ Restart your agent\n\n'
+    printf 'Last steps:\n'
+    printf '  1. Add a remote MCP server in your agent:  name=beam  type=http  url=%s  header="Authorization: Bearer <your key>"\n' "$MCP_URL"
+    printf '  2. Fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
+  fi
+}
+
+cmd_uninstall() {
+  removed=""
+  if [ -e "$HOME/.local/bin/beam" ]; then rm -f "$HOME/.local/bin/beam"; removed="$removed ~/.local/bin/beam"; fi
+  if [ -d "$HOME/.config/beam-plugin/beam" ]; then rm -rf "$HOME/.config/beam-plugin/beam"; removed="$removed ~/.config/beam-plugin/beam"; fi
+  printf '{"ok":true,"removed":"%s"}\n' "${removed# }"
+  printf 'Credentials kept at %s (run: beam logout to remove). Also remove any "beam" entry from your host MCP config.\n' "$CREDS_FILE" >&2
 }
 
 main() {
-  if [ $# -eq 0 ]; then
-    cmd_help
-    exit 0
-  fi
-  cmd="$1"
-  shift
+  if [ $# -eq 0 ]; then cmd_help; exit 0; fi
+  cmd="$1"; shift
   case "$cmd" in
     -h|--help|help) cmd_help ;;
+    --version|version) printf 'beam %s\n' "$VERSION" ;;
+    setup) cmd_setup "$@" ;;
+    doctor) cmd_doctor "$@" ;;
     login) cmd_login "$@" ;;
     logout) cmd_logout ;;
     whoami) cmd_whoami ;;
     workspace) cmd_workspace "$@" ;;
     agents)
-      sub="${1:-}"
-      shift || true
+      sub="${1:-}"; shift || true
       case "$sub" in
         list) cmd_agents_list ;;
-        *) die "validation_error" "usage: beam agents list" 2 ;;
-      esac
-      ;;
+        get) cmd_agents_get "$@" ;;
+        deploy) cmd_agents_deploy "$@" ;;
+        publish) cmd_agents_publish "$@" ;;
+        delete) cmd_agents_delete "$@" ;;
+        *) die "validation_error" "usage: beam agents <list|get|deploy|publish|delete>" 2 ;;
+      esac ;;
     mcp) cmd_mcp ;;
+    register) cmd_register ;;
+    uninstall) cmd_uninstall ;;
     *) die "validation_error" "unknown command: $cmd (try beam --help)" 2 ;;
   esac
 }

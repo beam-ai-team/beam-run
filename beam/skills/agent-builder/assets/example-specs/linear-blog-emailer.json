@@ -1,0 +1,53 @@
+{
+  "agentName": "Blog Writer & Emailer",
+  "agentDescription": "Writes a short blog post on a topic and emails it via Gmail.",
+  "nodes": [
+    {
+      "key": "entry",
+      "name": "Entry",
+      "objective": "Entry Node",
+      "is_entry": true,
+      "edges": [{ "target": "write-blog" }]
+    },
+    {
+      "key": "write-blog",
+      "name": "Write Blog Post",
+      "objective": "Write a short blog post from the given topic",
+      "tool_name": "Write Blog Post",
+      "model": "BEDROCK_CLAUDE_SONNET_4",
+      "prompt": "## Role:\nYou are a senior content writer who produces clear, engaging blog posts.\n\n## Task:\nWrite a short blog post based on the provided topic.\n\n## Context:\n```\n{topic}\n```\n\n## Rules:\n1. Length: 300-500 words.\n2. Output two fields: blog_title (a punchy title) and blog_body (the full post as plain text).\n3. Use short paragraphs and a friendly, professional tone.\n4. Do not invent statistics, quotes, or sources.",
+      "input_params": [
+        { "name": "topic", "description": "The blog topic provided by the user", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "blog_title", "description": "The blog post title", "type": "string", "position": 0 },
+        { "name": "blog_body", "description": "The full blog post body", "type": "string", "position": 1 }
+      ],
+      "edges": [{ "target": "send-email" }]
+    },
+    {
+      "key": "send-email",
+      "name": "Send Email",
+      "objective": "Email the finished blog post via Gmail",
+      "model": "GPT4_1_MINI",
+      "edges": []
+    }
+  ],
+  "integrations": [
+    {
+      "node_key": "send-email",
+      "tool_function_name": "GmailAction_SendEmail",
+      "tool_name": "Send Email",
+      "description": "Send an email from Gmail",
+      "requires_consent": true,
+      "input_params": [
+        { "paramName": "email_address", "fillType": "ai_fill", "paramDescription": "Recipient email address", "dataType": "string", "required": true, "position": 0 },
+        { "paramName": "subject", "fillType": "linked", "paramDescription": "Email subject line", "dataType": "string", "required": true, "position": 1, "linked_from_key": "write-blog", "linked_from_param": "blog_title" },
+        { "paramName": "body", "fillType": "linked", "paramDescription": "Email body content", "dataType": "string", "required": true, "position": 2, "linked_from_key": "write-blog", "linked_from_param": "blog_body" }
+      ],
+      "output_params": [
+        { "paramName": "message", "paramDescription": "Send result", "dataType": "string", "position": 0 }
+      ]
+    }
+  ]
+}

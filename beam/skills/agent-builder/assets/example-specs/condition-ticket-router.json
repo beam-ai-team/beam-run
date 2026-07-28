@@ -1,0 +1,83 @@
+{
+  "agentName": "Support Ticket Router",
+  "agentDescription": "Classifies a support ticket and routes it to the right reply handler.",
+  "nodes": [
+    {
+      "key": "entry",
+      "name": "Entry",
+      "objective": "Entry Node",
+      "is_entry": true,
+      "edges": [{ "target": "classify" }]
+    },
+    {
+      "key": "classify",
+      "name": "Classify Ticket",
+      "objective": "Classify the incoming support ticket",
+      "tool_name": "Classify Ticket",
+      "prompt": "## Role:\nYou are a customer support triage specialist.\n\n## Task:\nRead the support ticket and classify it, then summarize it in one sentence.\n\n## Context:\n```\n{ticket_text}\n```\n\n## Rules:\n1. category must be exactly one of: billing, technical, general.\n2. Output category (the label) and summary (one concise sentence describing the ticket).\n\n## Examples:\nInput: \"I was charged twice for my plan this month and need a refund.\"\nOutput: category = billing, summary = Customer was double-charged and wants a refund.\n\nInput: \"The dashboard won't load and shows a 500 error.\"\nOutput: category = technical, summary = Dashboard is down with a server error.",
+      "input_params": [
+        { "name": "ticket_text", "description": "The raw support ticket text", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "category", "description": "billing, technical, or general", "type": "string", "position": 0 },
+        { "name": "summary", "description": "One-sentence ticket summary", "type": "string", "position": 1 }
+      ],
+      "edges": [{ "target": "route" }]
+    },
+    {
+      "key": "route",
+      "name": "Route Ticket",
+      "objective": "Route the ticket to the correct reply handler",
+      "node_type": "conditionNode",
+      "node_configurations": { "conditionType": "llm_based", "llmModel": "GPT4_1_MINI", "fallbackModels": null },
+      "edges": [
+        { "target": "reply-billing", "condition": "the ticket is about billing, payments, refunds, or invoices" },
+        { "target": "reply-technical", "condition": "the ticket is about a bug, outage, error, or other technical problem" },
+        { "target": "reply-general", "condition": "any other ticket that does not match the billing or technical categories above" }
+      ]
+    },
+    {
+      "key": "reply-billing",
+      "name": "Draft Billing Reply",
+      "objective": "Draft a reply for a billing ticket",
+      "tool_name": "Draft Billing Reply",
+      "prompt": "## Role:\nYou are a billing support agent.\n\n## Task:\nDraft a helpful, empathetic reply addressing the billing issue.\n\n## Context:\n```\n{summary}\n```\n\n## Rules:\n1. Be concise and reassuring.\n2. Output reply (the full reply text).",
+      "input_params": [
+        { "name": "summary", "description": "Ticket summary from the classifier", "type": "string", "fill_type": "linked", "linked_node": "classify", "linked_param": "summary", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "reply", "description": "The drafted reply", "type": "string", "position": 0 }
+      ],
+      "edges": []
+    },
+    {
+      "key": "reply-technical",
+      "name": "Draft Technical Reply",
+      "objective": "Draft a reply for a technical ticket",
+      "tool_name": "Draft Technical Reply",
+      "prompt": "## Role:\nYou are a technical support engineer.\n\n## Task:\nDraft a clear reply that acknowledges the technical issue and outlines next steps.\n\n## Context:\n```\n{summary}\n```\n\n## Rules:\n1. Acknowledge the problem and give a realistic next step.\n2. Output reply (the full reply text).",
+      "input_params": [
+        { "name": "summary", "description": "Ticket summary from the classifier", "type": "string", "fill_type": "linked", "linked_node": "classify", "linked_param": "summary", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "reply", "description": "The drafted reply", "type": "string", "position": 0 }
+      ],
+      "edges": []
+    },
+    {
+      "key": "reply-general",
+      "name": "Draft General Reply",
+      "objective": "Draft a reply for a general ticket",
+      "tool_name": "Draft General Reply",
+      "prompt": "## Role:\nYou are a friendly customer support agent.\n\n## Task:\nDraft a warm, helpful reply to the general inquiry.\n\n## Context:\n```\n{summary}\n```\n\n## Rules:\n1. Be friendly and helpful.\n2. Output reply (the full reply text).",
+      "input_params": [
+        { "name": "summary", "description": "Ticket summary from the classifier", "type": "string", "fill_type": "linked", "linked_node": "classify", "linked_param": "summary", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "reply", "description": "The drafted reply", "type": "string", "position": 0 }
+      ],
+      "edges": []
+    }
+  ],
+  "integrations": []
+}
