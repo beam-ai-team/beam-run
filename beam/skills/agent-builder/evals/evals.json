@@ -1,0 +1,26 @@
+{
+  "skill_name": "beam-agent-builder",
+  "evals": [
+    {
+      "id": 0,
+      "name": "linear-integration-blog-emailer",
+      "prompt": "Build me a Beam agent that takes a topic, writes a short blog post about it (around 400 words), and emails the finished post to me. I use Gmail.",
+      "expected_output": "A deployed Beam agent (draft, not published) with an entry node, a custom GPT node that writes the blog post using a proper ## Role/## Task/## Context/## Rules prompt, and a Gmail integration node whose subject/body are linked to the writer node's outputs. The skill should ask a clarifying question about the recipient address and/or trigger before deploying, show a Mermaid diagram for approval, and report the agent as a draft.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "condition-node-ticket-triage",
+      "prompt": "I need a Beam agent that triages support tickets. It should read the ticket text, classify it as billing, technical, or general, and then draft a reply tailored to whichever category it falls into.",
+      "expected_output": "A deployed Beam agent (draft) with a classifier node, a conditionNode (llm_based) that branches to three handlers, each branch edge carrying an explicit non-empty condition (including a written catch-all for the general case). Downstream reply nodes link to the classifier's output. A Mermaid diagram with a diamond condition node is shown for approval first.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "waiting-node-welcome-followup",
+      "prompt": "Can you create a Beam agent that sends a new customer a welcome email, then waits 2 days and sends a follow-up check-in email? Both emails go over Gmail.",
+      "expected_output": "A deployed Beam agent (draft) with two Gmail integration nodes and a waitingNode (time_based, 2 days) chained sequentially between them. The waiting node is not the entry node, has one outgoing edge, and the flow is entry -> write welcome -> send welcome -> wait -> write follow-up -> send follow-up.",
+      "files": []
+    }
+  ]
+}

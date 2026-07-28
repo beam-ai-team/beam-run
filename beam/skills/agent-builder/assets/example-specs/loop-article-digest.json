@@ -1,0 +1,65 @@
+{
+  "agentName": "Article Digest Builder",
+  "agentDescription": "Lists articles on a topic, summarizes each one in a loop, then compiles a digest.",
+  "nodes": [
+    {
+      "key": "entry",
+      "name": "Entry",
+      "objective": "Entry Node",
+      "is_entry": true,
+      "edges": [{ "target": "list-articles" }]
+    },
+    {
+      "key": "list-articles",
+      "name": "List Articles",
+      "objective": "List candidate articles for the topic",
+      "tool_name": "List Articles",
+      "prompt": "## Role:\nYou are a research assistant.\n\n## Task:\nList candidate article titles for the given topic.\n\n## Context:\n```\n{topic}\n```\n\n## Rules:\n1. Produce 3-5 titles.\n2. Output articles as an array of short article-title strings.",
+      "input_params": [
+        { "name": "topic", "description": "The topic to research", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "articles", "description": "Candidate article titles", "type": "string", "is_array": true, "position": 0 }
+      ],
+      "edges": [{ "target": "summarize-loop" }]
+    },
+    {
+      "key": "summarize-loop",
+      "name": "For Each Article",
+      "objective": "Loop over each candidate article",
+      "node_type": "loopingNode",
+      "node_configurations": { "linkedVariableId": "list-articles:articles", "alias": "article" },
+      "edges": [{ "target": "summarize-article" }]
+    },
+    {
+      "key": "summarize-article",
+      "name": "Summarize Article",
+      "objective": "Summarize the current article",
+      "parent": "summarize-loop",
+      "tool_name": "Summarize Article",
+      "prompt": "## Role:\nYou are a concise summarizer.\n\n## Task:\nWrite a short summary of the current article.\n\n## Context:\n```\n{article}\n```\n\n## Rules:\n1. Two to three sentences.\n2. Output summary.",
+      "input_params": [
+        { "name": "article", "description": "The current article from the loop", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "summary", "description": "The article summary", "type": "string", "position": 0 }
+      ],
+      "edges": [{ "target": "compile-digest" }]
+    },
+    {
+      "key": "compile-digest",
+      "name": "Compile Digest",
+      "objective": "Compile all article summaries into a digest",
+      "tool_name": "Compile Digest",
+      "prompt": "## Role:\nYou are an editor.\n\n## Task:\nCompile the collected article summaries into one readable digest.\n\n## Context:\n```\n{summaries}\n```\n\n## Rules:\n1. Organize the digest clearly.\n2. Output digest.",
+      "input_params": [
+        { "name": "summaries", "description": "The collected article summaries", "type": "string", "is_array": true, "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "digest", "description": "The compiled digest", "type": "string", "position": 0 }
+      ],
+      "edges": []
+    }
+  ],
+  "integrations": []
+}

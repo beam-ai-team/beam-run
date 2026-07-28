@@ -10,9 +10,18 @@
 #   - `beam doctor` (human self-diagnosis) and `beam setup` (one-command install)
 #   - `beam uninstall`, `beam workspace list`
 #   - API key never required on argv (hidden prompt / stdin / env)
+#
+# v0.4.0 — build & manage agents:
+#   - `beam agents get <id>` (inspect one agent)
+#   - `beam agents deploy <spec> [--publish] [--dry-run] [--agent-id ID]`
+#     (build/update an agent from a spec via the bundled agent-builder graph builder)
+#   - `beam agents publish <graphId>` (promote a draft graph — x-api-key)
+#   - `beam agents delete <id>` (remove an agent — mints a short-lived Bearer JWT
+#     from the API key via /auth/access-token, since the delete route is JWT-gated)
+#   - write-capable HTTP layer (_http_send) + api_write / api_bearer helpers
 set -eu
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 REPO="beam-ai-team/beam-run"
 API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
 MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
@@ -138,6 +147,102 @@ api_request() {
   fi
 }
 
+# --- write-capable HTTP (POST/PUT/PATCH/DELETE) --------------------------------
+# Like _http_get but sends a method (+ optional JSON body). SINGLE attempt: a write
+# is not blindly retried (a 5xx may already have applied). Returns 0 ok (body on
+# stdout), 3 auth, 5 network/other.
+_http_send() {
+  # $1 = method ; $2 = full URL ; $3 = body ('' for none) ; rest = extra curl args
+  method="$1"; url="$2"; body="$3"; shift 3
+  tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")
+  set +e
+  if [ -n "$body" ]; then
+    code=$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 60 \
+      -X "$method" -H "Content-Type: application/json" --data-binary @- \
+      -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
+  else
+    code=$(curl -sS --connect-timeout 5 --max-time 60 \
+      -X "$method" -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
+  fi
+  cx=$?
+  set -e
+  if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
+  case "$code" in
+    2*) cat "$tmp"; rm -f "$tmp"; return 0 ;;
+    401|403) rm -f "$tmp"; return 3 ;;
+    *) rm -f "$tmp"; return 5 ;;
+  esac
+}
+
+api_write() {
+  # $1 = method ; $2 = path ; $3 = body ('' for none). x-api-key + workspace.
+  # The /agent-graphs/* routes (create, update, publish) accept the API key.
+  method="$1"; path="$2"; body="${3:-}"
+  key="$(read_key)" || return 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ]; then
+    _http_send "$method" "$API_BASE$path" "$body" -H "x-api-key: $key" -H "current-workspace-id: $ws"
+  else
+    _http_send "$method" "$API_BASE$path" "$body" -H "x-api-key: $key"
+  fi
+}
+
+extract_id_token() {
+  # reads /auth/access-token JSON on stdin, prints the idToken (or empty)
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.idToken // .accessToken // .token // ""' 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+print(d.get("idToken") or d.get("accessToken") or d.get("token") or "")' 2>/dev/null || true
+  else
+    grep -o '"idToken"[[:space:]]*:[[:space:]]*"[^"]*"' 2>/dev/null | head -n1 | sed 's/.*"\([^"]*\)"$/\1/' || true
+  fi
+}
+
+mint_bearer() {
+  # Exchange the stored API key for a short-lived Bearer JWT (idToken). Some routes
+  # (agent delete, triggers, webhooks) are JWT-gated and reject the raw API key.
+  key="$(read_key)" || return 3
+  set +e
+  resp="$(_http_send POST "$API_BASE/auth/access-token" "{\"apiKey\":\"$key\"}")"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || return "$rc"
+  tok="$(printf '%s' "$resp" | extract_id_token)"
+  [ -n "$tok" ] || return 3
+  printf '%s' "$tok"
+}
+
+api_bearer() {
+  # $1 = method ; $2 = path ; $3 = body ('' for none). Uses a minted Bearer JWT.
+  method="$1"; path="$2"; body="${3:-}"
+  tok="$(mint_bearer)" || return 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ]; then
+    _http_send "$method" "$API_BASE$path" "$body" -H "Authorization: Bearer $tok" -H "current-workspace-id: $ws"
+  else
+    _http_send "$method" "$API_BASE$path" "$body" -H "Authorization: Bearer $tok"
+  fi
+}
+
+# Resolve the real directory of this script, following one symlink level
+# (~/.local/bin/beam is a symlink into the plugin). Used to locate bundled skills.
+script_dir() {
+  src="$0"
+  if [ -L "$src" ]; then
+    target="$(readlink "$src" 2>/dev/null || true)"
+    case "$target" in
+      /*) src="$target" ;;
+      *) src="$(dirname "$src")/$target" ;;
+    esac
+  fi
+  (cd "$(dirname "$src")" 2>/dev/null && pwd) || printf '%s' "$(dirname "$0")"
+}
+
 # --- telemetry (local placeholder until a sink is chosen — SPEC-00) ------------
 
 emit_event() {
@@ -166,7 +271,11 @@ Usage:
   beam whoami
   beam workspace [ID]        show/set current workspace
   beam workspace list        list your workspaces
-  beam agents list
+  beam agents list           list agents in the current workspace
+  beam agents get <id>       inspect one agent
+  beam agents deploy <spec>  build/update an agent from a spec (draft; --publish to go live)
+  beam agents publish <gid>  publish a draft graph (graphId from deploy output)
+  beam agents delete <id>    delete an agent
   beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
   beam uninstall
   beam --version | --help
@@ -269,6 +378,50 @@ cmd_agents_list() {
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "agents list failed (network/timeout)" 5; fi
   printf '%s\n' "$resp"
+}
+
+cmd_agents_get() {
+  id="${1:-}"
+  [ -n "$id" ] || die "validation_error" "usage: beam agents get <agentId>" 2
+  set +e; resp="$(api_request "/agent/$id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "agents get failed (network/timeout)" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_deploy() {
+  # Build or update an agent from a spec via the bundled agent-builder graph builder.
+  # Draft by default; pass --publish to go live. See skills/agent-builder for the spec format.
+  spec="${1:-}"
+  [ -n "$spec" ] || die "validation_error" "usage: beam agents deploy <specFile> [--agent-id ID] [--publish] [--dry-run]" 2
+  [ -f "$spec" ] || die "validation_error" "spec file not found: $spec" 2
+  shift
+  command -v python3 >/dev/null 2>&1 || die "internal_error" "beam agents deploy needs python3 (the graph builder). Install Python 3.8+." 1
+  key="$(read_key)" || die "auth_missing" "not signed in — run beam login first" 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  [ -n "$ws" ] || die "validation_error" "no workspace — run: beam workspace list, then beam workspace <id>" 2
+  builder="$(script_dir)/../skills/agent-builder/scripts/beam.py"
+  [ -f "$builder" ] || die "internal_error" "bundled graph builder not found ($builder) — reinstall the plugin (beam setup)" 1
+  BEAM_API_KEY="$key" BEAM_WORKSPACE_ID="$ws" BEAM_API_URL="$API_BASE" python3 "$builder" deploy "$spec" "$@"
+}
+
+cmd_agents_publish() {
+  gid="${1:-}"
+  [ -n "$gid" ] || die "validation_error" "usage: beam agents publish <graphId>  (graphId comes from deploy output)" 2
+  set +e; resp="$(api_write PATCH "/agent-graphs/$gid/publish" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "publish failed (network/timeout) — graph NOT published" 5; fi
+  printf '{"ok":true,"published":"%s"}\n' "$gid"
+}
+
+cmd_agents_delete() {
+  id="${1:-}"
+  [ -n "$id" ] || die "validation_error" "usage: beam agents delete <agentId>" 2
+  # DELETE /agent/{id} is JWT-gated; mint a Bearer token from the API key first.
+  set +e; resp="$(api_bearer DELETE "/agent/$id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "delete auth failed (JWT exchange rejected) — run beam login for a fresh key" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "delete failed (network/timeout) — agent NOT deleted" 5; fi
+  printf '{"ok":true,"deleted":"%s"}\n' "$id"
 }
 
 cmd_mcp() {
@@ -441,7 +594,11 @@ main() {
       sub="${1:-}"; shift || true
       case "$sub" in
         list) cmd_agents_list ;;
-        *) die "validation_error" "usage: beam agents list" 2 ;;
+        get) cmd_agents_get "$@" ;;
+        deploy) cmd_agents_deploy "$@" ;;
+        publish) cmd_agents_publish "$@" ;;
+        delete) cmd_agents_delete "$@" ;;
+        *) die "validation_error" "usage: beam agents <list|get|deploy|publish|delete>" 2 ;;
       esac ;;
     mcp) cmd_mcp ;;
     register) cmd_register ;;
