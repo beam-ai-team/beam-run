@@ -2,7 +2,7 @@
 
 Load when picking a tool type for a node, naming a node, or auditing whether a graph reads clearly on the Beam canvas.
 
-The five categories drive naming, icon style, and the `requiresConsent` / `onError` defaults. Get the category right and the graph becomes scannable for a reviewer or a buyer.
+The five categories drive naming, icon style, and the `requiresConsent` / `onError` defaults. **`requiresConsent` only applies to integration entries** — the builder writes `requiresConsent: false` on every custom-GPT node, so consent on a Custom GPT node is not deployable (and is not meaningful: a pure reasoning step has no external side effect). Get the category right and the graph becomes scannable for a reviewer or a buyer.
 
 **Color discipline: colorful = external system touchpoint; monochrome = internal reasoning or system primitive.** This makes the canvas instantly readable.
 

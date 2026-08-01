@@ -1,6 +1,6 @@
 # Phase 2 — Design
 
-> **On entry:** display the phase timeline from `references/ux-flow.md` — Phase 2 row (`✅ Intake  ──  ● Design  ──  ○ Review  ──  ...`).
+> **On entry:** display the phase timeline — Phase 2 row (`✅ Intake  ──  ● Design  ──  ○ Review  ──  ...`).
 
 **Goal:** turn the intake into a concrete agent design — the right graph shape, the right tools, the right models, with a cost projection the user can act on.
 

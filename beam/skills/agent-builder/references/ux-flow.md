@@ -1,10 +1,18 @@
 # UX Flow Reference
 
-Interaction design for The Agent Builder. Load this file at every user-facing step. It defines display templates, command words, and the state-by-state conversation flow.
+Interaction design for The Agent Builder. It defines display templates, command
+words, and the state-by-state conversation flow.
+
+**Load it once, the first time you need a display template you do not already
+have** — not on entry to every phase. The phase timeline rows are inlined in the
+phase files, so those do not require this file.
 
 The skill drives every state. The user validates with single command words. The next valid command is always embedded in the display — the user never wonders what to type.
 
-> **Credentials note:** credentials are collected in Step 0 of SKILL.md — before State 0. The banner (State 0) is shown only after `validate` passes.
+> **Connection note:** Step 0 of SKILL.md runs `validate` first; credentials resolve
+> automatically from `beam login`, so there is nothing to collect. Show the banner on
+> first load, as SKILL.md specifies — if `validate` then fails, relay its `next` field
+> instead of continuing to State 1.
 
 ---
 

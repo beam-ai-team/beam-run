@@ -1,6 +1,6 @@
 # Phase 5 — Validate
 
-> **On entry:** display the phase timeline from `references/ux-flow.md` — Phase 5 row (`✅ Intake  ──  ✅ Design  ──  ✅ Review  ──  ✅ Build  ──  ● Validate  ──  ○ Iterate`).
+> **On entry:** display the phase timeline — Phase 5 row (`✅ Intake  ──  ✅ Design  ──  ✅ Review  ──  ✅ Build  ──  ● Validate  ──  ○ Iterate`).
 
 **Goal:** prove the deployed agent produces correct outputs on representative inputs — not just that it runs without error.
 
@@ -66,7 +66,9 @@ For each task where actual ≠ expected:
 - Was it a wrong extraction (Facts node), wrong reasoning (Intelligence node), or wrong routing (Condition node)?
 - What specifically was wrong — off-by-one, total failure, partial?
 
-Show the anomaly block (see `references/ux-flow.md` State 8):
+Report the anomaly in **one line** (the default). Only expand to the full
+State 8 block when the root cause genuinely needs more than a sentence —
+see `references/ux-flow.md` State 8 for that layout:
 
 ```
 ⚠ ANOMALY · Task #[N]

@@ -1,6 +1,6 @@
 # Phase 4 — Build
 
-> **On entry:** display the phase timeline from `references/ux-flow.md` — Phase 4 row (`✅ Intake  ──  ✅ Design  ──  ✅ Review  ──  ● Build  ──  ○ Validate  ──  ○ Iterate`).
+> **On entry:** display the phase timeline — Phase 4 row (`✅ Intake  ──  ✅ Design  ──  ✅ Review  ──  ● Build  ──  ○ Validate  ──  ○ Iterate`).
 
 **Goal:** turn the approved design into a live draft agent on Beam — lint-clean, verified, smoke-tested.
 

@@ -21,7 +21,10 @@ Load when drafting a new agent or reviewing an existing one. This is the readine
 - Prefer simple `string` or `enum` fields. Use `object` only when a downstream node needs structured machine-readable data, and always populate `objectSchema`.
 - Every input param referenced in a GPT prompt must appear in `inputParams` with the matching `paramName`.
 - Use `previous_node_output` for the generic upstream context param on GPT nodes. Do not use `prior_node_outputs`.
-- Do not author execution nodes with multiple incoming edges. Duplicate branch-specific nodes or make each branch terminal.
+- Execution nodes may have multiple incoming edges (the merge pattern), but such a
+  node must read its inputs with `ai_fill` — never `linked`, which cannot resolve
+  across branches. Prefer duplicating branch-specific nodes when each branch needs
+  genuinely different handling.
 
 ---
 
@@ -56,7 +59,12 @@ Load when drafting a new agent or reviewing an existing one. This is the readine
 
 ## Common failure modes
 
-- **Terminal node produces JSON but never acts** — the agent decides something but nothing happens. Add a real action node after the decision.
+- **Terminal node produces JSON but never acts** — the agent decides something but
+  nothing happens. Add a real action node after the decision. This applies only when
+  the user asked for the action: if the brief stops at "draft a reply" or "classify
+  it", a terminal node that emits the draft is the correct shape (see
+  `assets/example-specs/condition-ticket-router.json`). Do not invent a send step the
+  user did not ask for — that violates the "never assume integrations" rule.
 - **Every node uses the same frontier model** — simple extraction and routing nodes should use Flash/Mini-tier models. Only complex reasoning justifies Sonnet/Opus.
 - **Integration nodes have a non-empty prompt** — integration nodes must have `prompt: ""`. The integration handles execution; a prompt here conflicts with the tool's built-in behaviour.
 - **Condition edges are blank** — the routing logic is invisible. Every branch label must describe the condition it represents.

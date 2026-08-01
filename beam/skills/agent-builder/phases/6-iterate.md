@@ -1,6 +1,6 @@
 # Phase 6 — Iterate
 
-> **On entry:** display the phase timeline from `references/ux-flow.md` — Phase 6 row (`✅ Intake  ──  ✅ Design  ──  ✅ Review  ──  ✅ Build  ──  ✅ Validate  ──  ● Iterate`).
+> **On entry:** display the phase timeline — Phase 6 row (`✅ Intake  ──  ✅ Design  ──  ✅ Review  ──  ✅ Build  ──  ✅ Validate  ──  ● Iterate`).
 
 **Goal:** apply the smallest fix that resolves the failure, re-validate, loop until the agent passes or the user is satisfied.
 

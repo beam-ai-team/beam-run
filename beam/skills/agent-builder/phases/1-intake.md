@@ -1,6 +1,6 @@
 # Phase 1 — Intake
 
-> **On entry:** display the phase timeline from `references/ux-flow.md` — Phase 1 row (`● Intake  ──  ○ Design  ──  ...`).
+> **On entry:** display the phase timeline — Phase 1 row (`● Intake  ──  ○ Design  ──  ...`).
 
 **Goal:** understand the user's problem well enough to design the right agent. Map what exists before designing what will replace it.
 

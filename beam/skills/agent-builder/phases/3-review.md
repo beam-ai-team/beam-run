@@ -1,6 +1,6 @@
 # Phase 3 — Review
 
-> **On entry:** display the phase timeline from `references/ux-flow.md` — Phase 3 row (`✅ Intake  ──  ✅ Design  ──  ● Review  ──  ○ Build  ──  ...`).
+> **On entry:** display the phase timeline — Phase 3 row (`✅ Intake  ──  ✅ Design  ──  ● Review  ──  ○ Build  ──  ...`).
 
 **Goal:** give the user a complete, plain-English picture of exactly what will be built — before a single API call is made.
 
@@ -30,7 +30,7 @@ graph TD
 
 ## Step 2 — Show the node table
 
-| # | Node | Tool kind | Model | Key inputs | Consent | onError | Est. credits |
+| # | Node | Tool kind | Model | Key inputs | Consent | Est. credits |
 |---|------|-----------|-------|------------|---------|---------|--------------|
 | 0 | Entry | — | — | — | — | — | — |
 | 1 | Classify Risk | Custom GPT | GEMINI_25_FLASH | record (ai_fill) | no | STOP | ~2 |
@@ -83,7 +83,7 @@ End with:
 ## Exit gate
 
 - [ ] Mermaid diagram shown for chosen option
-- [ ] Node table shown with tool kind, model, consent, onError, credits
+- [ ] Node table shown with tool kind, model, consent, credits
 - [ ] Cost at volume shown
 - [ ] Full State 5 review block rendered
 - [ ] User typed `build`

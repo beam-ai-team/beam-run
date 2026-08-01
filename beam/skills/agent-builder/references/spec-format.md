@@ -572,12 +572,9 @@ Spam Reply  --\
 Normal Reply --/
 ```
 
-| User says | Pattern |
-|-----------|---------|
-| "send it to Gmail AND Slack" | Sequential chain |
-| "if urgent alert Slack, else just log it" | Condition node |
-| "classify, respond differently, then send the reply" | Condition + merge |
-| "summarize AND translate" | Sequential chain |
+For the full "what the user said → pattern" translation table (including waiting
+and looping shapes), see `patterns/flow-patterns.md` — it is the single owner of
+graph shapes; this file owns the schema.
 
 ---
 
