@@ -116,7 +116,7 @@ chmod +x "$HOME/.config/beam-plugin/beam/bin/beam"
 }
 ```
 
-3. Run `beam login --api-key …`, then fully restart Cursor.
+3. Run `beam login` (hidden prompt — never pass the key as an argument), then fully restart Cursor.
 
 ## Don't run two paths at once
 

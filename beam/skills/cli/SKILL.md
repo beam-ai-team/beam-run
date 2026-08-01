@@ -10,14 +10,33 @@ Workspace via `BEAM_WORKSPACE_ID` / `beam workspace <id>`.
 
 ```bash
 beam --help
-beam login --api-key <key>
+beam setup                     # install + PATH + register + verify (guided)
+beam doctor                    # self-diagnose; every red line names its fix
+beam login                     # hidden prompt — NEVER pass the key as an argument
+beam register                  # add Beam as an HTTP MCP server in the host config
 beam whoami
 beam workspace                 # show
+beam workspace list [search]   # list/search (accounts can have thousands)
 beam workspace <id>            # set
 beam agents list
-beam mcp                       # stdio MCP proxy (long-running)
+beam agents get <id>
+beam agents deploy <spec> [--agent-id ID] [--publish] [--dry-run]
+beam agents publish <graphId>
+beam agents delete <id>        # irreversible — confirm by name first
+beam mcp                       # stdio MCP bridge (long-running; hosts spawn it)
 beam logout
+beam uninstall
 ```
+
+**Never** run `beam login --api-key <key>` — it leaks the key to shell history.
+Use the hidden prompt, `BEAM_API_KEY=… beam login`, or `--api-key -` (stdin).
+
+## Workspace
+
+`beam login` sets the workspace only when the account has exactly one. With more
+than one it deliberately leaves it unset rather than guessing — guessing drops the
+user into an arbitrary workspace whose agent list looks empty. Resolve it with
+`beam workspace list <search>` then `beam workspace <id>`.
 
 ## Exit codes
 

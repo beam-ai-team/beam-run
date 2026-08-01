@@ -19,9 +19,20 @@
 #   - `beam agents delete <id>` (remove an agent — mints a short-lived Bearer JWT
 #     from the API key via /auth/access-token, since the delete route is JWT-gated)
 #   - write-capable HTTP layer (_http_send) + api_write / api_bearer helpers
+#
+# v0.4.1 — activation fixes:
+#   - never guess the workspace: with >1 workspace, login leaves it unset and
+#     reports the list instead of silently picking workspaces[0]
+#   - `beam register` writes the host MCP config itself (Claude desktop, Cursor),
+#     instead of printing manual instructions when the `claude` CLI is absent
+#   - `beam mcp` uses a vendored stdlib-Python bridge (no npx/uvx needed) and
+#     degrades to a live "finish setup" server instead of dying when signed out
+#   - `beam doctor` checks what actually breaks: host MCP registration + a real
+#     /mcp handshake
+#   - `beam uninstall` removes the MCP entries it created
 set -eu
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 REPO="beam-ai-team/beam-run"
 API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
 MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
@@ -80,8 +91,29 @@ write_creds() {
 
 # --- JSON (jq -> python3 -> POSIX best-effort) ---------------------------------
 
+workspaces_tsv() {
+  # reads /v2/user/me JSON on stdin, prints one "id<TAB>name" line per workspace
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '(.workspaces // [.workspace] // []) | .[]? | select(.id) | "\(.id)\t\(.name // "")"' 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+ws=d.get("workspaces") or d.get("workspace") or []
+if isinstance(ws, dict):
+    ws=[ws]
+for w in ws:
+    if isinstance(w, dict) and w.get("id"):
+        print("%s\t%s" % (w["id"], w.get("name") or ""))' 2>/dev/null || true
+  fi
+}
+
 extract_workspace_id() {
-  # reads /v2/user/me JSON on stdin, prints the first workspace id (or empty)
+  # reads /v2/user/me JSON on stdin, prints the first workspace id (or empty).
+  # Only safe to use when the caller has confirmed there is exactly ONE workspace —
+  # guessing across many is how users land in the wrong (often empty) workspace.
   if command -v jq >/dev/null 2>&1; then
     jq -r 'if .workspaces then (.workspaces[0].id // "") elif .workspace then (.workspace.id // "") else "" end' 2>/dev/null || true
   elif command -v python3 >/dev/null 2>&1; then
@@ -111,10 +143,14 @@ _http_get() {
   tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")
   attempt=1; max=3; delay=1
   while [ "$attempt" -le "$max" ]; do
-    set +e
-    code=$(curl -sS --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
-    cx=$?
-    set -e
+    # Capture curl's status via an `if` so errexit stays untouched: toggling
+    # `set +e`/`set -e` in here silently re-enabled it for the CALLER, which made
+    # `beam doctor` abort mid-checklist on a rejected key (the one case it exists for).
+    if code=$(curl -sS --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then
+      cx=0
+    else
+      cx=$?
+    fi
     if [ "$cx" -ne 0 ]; then
       if [ "$attempt" -lt "$max" ]; then sleep "$delay"; delay=$((delay * 2)); attempt=$((attempt + 1)); continue; fi
       rm -f "$tmp"; return 5
@@ -155,17 +191,15 @@ _http_send() {
   # $1 = method ; $2 = full URL ; $3 = body ('' for none) ; rest = extra curl args
   method="$1"; url="$2"; body="$3"; shift 3
   tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")
-  set +e
+  # As in _http_get: never toggle errexit here — it leaks to the caller.
   if [ -n "$body" ]; then
-    code=$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 60 \
+    if code=$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 60 \
       -X "$method" -H "Content-Type: application/json" --data-binary @- \
-      -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
+      -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then cx=0; else cx=$?; fi
   else
-    code=$(curl -sS --connect-timeout 5 --max-time 60 \
-      -X "$method" -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null)
+    if code=$(curl -sS --connect-timeout 5 --max-time 60 \
+      -X "$method" -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then cx=0; else cx=$?; fi
   fi
-  cx=$?
-  set -e
   if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
   case "$code" in
     2*) cat "$tmp"; rm -f "$tmp"; return 0 ;;
@@ -270,7 +304,7 @@ Usage:
   beam logout
   beam whoami
   beam workspace [ID]        show/set current workspace
-  beam workspace list        list your workspaces
+  beam workspace list [q]    list/search your workspaces (filter by name or id)
   beam agents list           list agents in the current workspace
   beam agents get <id>       inspect one agent
   beam agents deploy <spec>  build/update an agent from a spec (draft; --publish to go live)
@@ -320,16 +354,37 @@ cmd_login() {
   if [ "$vc" -eq 3 ]; then die "auth_invalid" "API key rejected by $API_BASE/v2/user/me — create a fresh key in app.beam.ai" 3; fi
   if [ "$vc" -eq 5 ]; then die "network_error" "could not reach $API_BASE (network/timeout) — key NOT saved; check your connection and retry" 5; fi
 
-  if [ -z "$workspace" ]; then workspace="$(printf '%s' "$resp" | extract_workspace_id)"; fi
+  # Workspace: NEVER guess when there is more than one. Picking workspaces[0]
+  # silently drops the user into an arbitrary (often near-empty) workspace, so
+  # their first "list my agents" looks broken. Auto-set only when unambiguous.
+  ws_count=0
+  if [ -z "$workspace" ]; then
+    ws_list="$(printf '%s' "$resp" | workspaces_tsv)"
+    if [ -n "$ws_list" ]; then ws_count=$(printf '%s\n' "$ws_list" | grep -c .); fi
+    prev="$(read_workspace 2>/dev/null || true)"
+    if [ -n "$prev" ]; then
+      workspace="$prev"                       # keep what the user already chose
+    elif [ "$ws_count" -eq 1 ]; then
+      workspace="$(printf '%s\n' "$ws_list" | head -n1 | cut -f1)"
+    fi
+  fi
+
   write_creds "$key" "$workspace"
   emit_event auth_ok
-  printf '{"ok":true,"saved":"%s","workspaceId":%s}\n' "$CREDS_FILE" \
-    "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)"
-  # Best-effort: also wire the MCP connection where we safely can (claude CLI hosts).
-  if command -v claude >/dev/null 2>&1; then
-    claude mcp add --transport http beam "$MCP_URL" --header "Authorization: Bearer $key" >/dev/null 2>&1 && printf 'Beam connection registered.\n' >&2 || true
+  printf '{"ok":true,"saved":"%s","workspaceId":%s,"workspaceCount":%s}\n' "$CREDS_FILE" \
+    "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)" "$ws_count"
+
+  # Wire the MCP connection now that the key is stored (all supported hosts).
+  set +e; cmd_register >/dev/null 2>&1; reg=$?; set -e
+
+  printf 'Signed in ✅\n' >&2
+  if [ "$reg" -eq 0 ]; then printf 'Beam connection registered ✅\n' >&2; fi
+  if [ -z "$workspace" ]; then
+    printf '\n⚠️  You have %s workspaces — pick one before listing agents:\n' "$ws_count" >&2
+    printf '    beam workspace list <search>   # e.g. beam workspace list acme\n' >&2
+    printf '    beam workspace <id>\n' >&2
   fi
-  printf 'Signed in ✅  Now restart your agent, then ask "list my Beam agents".\n' >&2
+  printf '\nNext: fully restart your agent, then ask "list my Beam agents".\n' >&2
 }
 
 cmd_logout() {
@@ -351,12 +406,25 @@ cmd_whoami() {
 
 cmd_workspace() {
   if [ "${1:-}" = "list" ]; then
+    query="${2:-}"
     set +e; resp="$(api_request /v2/user/me)"; rc=$?; set -e
     if [ "$rc" -ne 0 ]; then die "auth_missing" "run beam login first" 3; fi
-    if command -v jq >/dev/null 2>&1; then
-      printf '%s' "$resp" | jq -r '(.workspaces // [.workspace]) | .[]? | "\(.id)\t\(.name // "")"' 2>/dev/null || printf '%s\n' "$resp"
+    all="$(printf '%s' "$resp" | workspaces_tsv)"
+    total=0; [ -n "$all" ] && total=$(printf '%s\n' "$all" | grep -c .)
+    if [ -n "$query" ]; then
+      shown="$(printf '%s\n' "$all" | grep -i -- "$query" || true)"
     else
-      printf '%s\n' "$resp"
+      shown="$all"
+    fi
+    n=0; [ -n "$shown" ] && n=$(printf '%s\n' "$shown" | grep -c .)
+    if [ "$n" -eq 0 ]; then
+      printf 'No workspace matched "%s" (of %s total). Try a different search.\n' "$query" "$total" >&2
+      return 0
+    fi
+    # Accounts can hold thousands of workspaces — never dump them all.
+    printf '%s\n' "$shown" | head -n 25
+    if [ "$n" -gt 25 ]; then
+      printf '\n… showing 25 of %s matches (%s workspaces total). Narrow it: beam workspace list <search>\n' "$n" "$total" >&2
     fi
     return 0
   fi
@@ -425,17 +493,77 @@ cmd_agents_delete() {
 }
 
 cmd_mcp() {
-  key="$(read_key)" || die "auth_missing" "not signed in — run beam login before starting MCP" 3
+  # NOTE: no auth gate here. On a fresh install the host spawns this before the
+  # user has ever run `beam login`; exiting would leave a dead MCP server as the
+  # first thing they see. The vendored bridge serves a live "finish setup"
+  # session instead, so the agent can explain the next step.
+  key="$(read_key 2>/dev/null || true)"
   emit_event mcp_connected
-  vendored="$(dirname "$0")/mcp-proxy"
-  if [ -x "$vendored" ]; then exec "$vendored" "$MCP_URL" --transport streamablehttp -H x-api-key "$key"; fi
-  # The /mcp endpoint authenticates via `Authorization: Bearer <key>` (NOT `x-api-key`,
-  # which is the REST API header). Send both so either subsystem is satisfied.
-  # uvx -> PyPI mcp-proxy (remote streamable-HTTP -> stdio), the proven path.
+
+  # Preferred: vendored stdlib-Python bridge — no npx/uvx, no install step.
+  proxy="$(script_dir)/mcp_proxy.py"
+  if [ -f "$proxy" ] && command -v python3 >/dev/null 2>&1; then
+    BEAM_API_KEY="$key" BEAM_MCP_URL="$MCP_URL" exec python3 "$proxy"
+  fi
+
+  if [ -z "$key" ]; then
+    die "auth_missing" "not signed in — run beam login before starting MCP" 3
+  fi
+  # The endpoint accepts either header; send both so any server build works.
+  vendored="$(script_dir)/mcp-proxy"
+  if [ -x "$vendored" ]; then exec "$vendored" "$MCP_URL" --transport streamablehttp -H Authorization "Bearer $key" -H x-api-key "$key"; fi
+  # uvx -> PyPI mcp-proxy (remote streamable-HTTP -> stdio).
   if command -v uvx >/dev/null 2>&1; then exec uvx mcp-proxy "$MCP_URL" --transport streamablehttp -H Authorization "Bearer $key" -H x-api-key "$key"; fi
-  # npx fallback -> mcp-remote (NOT npm `mcp-proxy`, which is a different, incompatible tool).
+  # npx fallback -> mcp-remote (NOT npm `mcp-proxy`, a different, incompatible tool).
   if command -v npx >/dev/null 2>&1; then exec npx -y mcp-remote "$MCP_URL" --header "Authorization: Bearer $key" --header "x-api-key: $key"; fi
-  die "internal_error" "no MCP bridge available. Best fix: register Beam as a DIRECT HTTP MCP server (type:http, url=$MCP_URL, header 'Authorization: Bearer <key>') — no proxy needed. Otherwise install uv (for uvx) or Node (for npx)." 1
+  die "internal_error" "no MCP bridge available (python3, uvx and npx all missing). Best fix: run 'beam register' to add Beam as a DIRECT HTTP MCP server — no bridge needed." 1
+}
+
+mcp_registered_hosts() {
+  # Print a space-separated list of hosts that have a "beam" MCP entry.
+  found=""
+  command -v python3 >/dev/null 2>&1 || { printf ''; return 0; }
+  for cfg in "$HOME/.claude.json" "$HOME/.cursor/mcp.json"; do
+    [ -f "$cfg" ] || continue
+    if BEAM_REG_CFG="$cfg" python3 -c 'import json,os,sys
+try:
+    d=json.load(open(os.environ["BEAM_REG_CFG"]))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(d, dict) and "beam" in (d.get("mcpServers") or {}) else 1)' 2>/dev/null; then
+      case "$cfg" in
+        *".claude.json") found="$found claude" ;;
+        *) found="$found cursor" ;;
+      esac
+    fi
+  done
+  printf '%s' "${found# }"
+}
+
+mcp_handshake() {
+  # $1 = key. 0 = /mcp accepted the key, 3 = rejected, 5 = unreachable.
+  # NOTE: `initialize` and `tools/list` are NOT authenticated by the endpoint, so
+  # they prove reachability only. Call a real tool to actually exercise the key;
+  # auth failures come back as HTTP 200 + isError text, never as 401/403.
+  body='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"getCurrentUser","arguments":{}}}'
+  # Capture via `if` — see _http_get: toggling errexit here leaks to the caller.
+  if out="$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 20 \
+    -X POST -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -H "Authorization: Bearer $1" --data-binary @- "$MCP_URL" 2>/dev/null)"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  [ "$rc" -eq 0 ] || return 5
+  # A rejected key is always reported as auth text in the body. Anything else
+  # that comes back as JSON-RPC means the key was accepted — including a tool's
+  # own error (some Beam tools are broken server-side; that is not an auth fault).
+  case "$out" in
+    *"Invalid API key"*|*"Authentication required"*|*Unauthorized*) return 3 ;;
+    *'"jsonrpc"'*|*'"result"'*) return 0 ;;
+    *) return 5 ;;
+  esac
 }
 
 cmd_doctor() {
@@ -444,6 +572,7 @@ cmd_doctor() {
   printf '  [ok] beam CLI: %s (v%s)\n' "$0" "$VERSION"
 
   bindir="$(cd "$(dirname "$0")" 2>/dev/null && pwd || printf '')"
+  # shellcheck disable=SC2016  # literal $PATH is intentional (it's shown to the user)
   case ":$PATH:" in
     *":$bindir:"*) printf '  [ok] on PATH (%s)\n' "$bindir" ;;
     *) printf '  [--] not on PATH — run beam by full path, or add to your shell rc: export PATH="%s:$PATH"\n' "$bindir" ;;
@@ -465,9 +594,28 @@ cmd_doctor() {
   if [ -n "$ws" ]; then printf '  [ok] workspace set (%s)\n' "$ws"
   else printf '  [--] no workspace set — run: beam workspace list, then beam workspace <id>\n'; fi
 
-  if [ -x "$(dirname "$0")/mcp-proxy" ]; then printf '  [ok] bundled MCP bridge present\n'
-  elif command -v uvx >/dev/null 2>&1 || command -v npx >/dev/null 2>&1; then printf '  [ok] MCP bridge runtime available (uvx/npx) — only needed for stdio hosts like Codex\n'
-  else printf '  [--] no uvx/npx — only needed for stdio hosts (Codex); Claude Code/Cursor use direct HTTP (no runtime)\n'; fi
+  # The checks that actually predict "my Beam tools don't work": is Beam
+  # registered with the host at all, and does /mcp accept this key?
+  reg="$(mcp_registered_hosts)"
+  if [ -n "$reg" ]; then printf '  [ok] Beam MCP registered in: %s\n' "$reg"
+  else printf '  [XX] Beam MCP is not registered with any agent — run: beam register\n'; fail=1; fi
+
+  if [ -n "$key" ]; then
+    set +e; mcp_handshake "$key"; mh=$?; set -e
+    case "$mh" in
+      0) printf '  [ok] MCP endpoint accepted your key\n' ;;
+      3) printf '  [XX] MCP endpoint rejected the key — run: beam login (fresh key), then beam register\n'; fail=1 ;;
+      *) printf '  [XX] could not reach the MCP endpoint (%s) — check your network\n' "$MCP_URL"; fail=1 ;;
+    esac
+  fi
+
+  if [ -f "$(script_dir)/mcp_proxy.py" ] && command -v python3 >/dev/null 2>&1; then
+    printf '  [ok] bundled MCP bridge present (stdio hosts need no npx/uvx)\n'
+  elif command -v uvx >/dev/null 2>&1 || command -v npx >/dev/null 2>&1; then
+    printf '  [ok] MCP bridge runtime available (uvx/npx) — only needed for stdio hosts\n'
+  else
+    printf '  [--] no bundled bridge and no uvx/npx — only matters for stdio hosts; direct HTTP needs neither\n'
+  fi
 
   printf '\n  Reminder: if you signed in AFTER starting your agent, fully restart it so MCP picks up the key.\n'
   if [ "$fail" -eq 0 ]; then printf '\nAll good. Try: beam whoami\n'; return 0; fi
@@ -487,28 +635,114 @@ add_to_path_rc() {
   esac
   if [ -f "$rc" ] && grep -q 'added by beam setup' "$rc" 2>/dev/null; then return 0; fi
   mkdir -p "$(dirname "$rc")" 2>/dev/null || true
+  # shellcheck disable=SC2016  # literal $HOME/$PATH must reach the rc file unexpanded
   if [ "$sh_name" = "fish" ]; then
     printf '\n# added by beam setup\nset -gx PATH $HOME/.local/bin $PATH\n' >> "$rc" 2>/dev/null || true
   else
+    # shellcheck disable=SC2016  # literal $HOME/$PATH must reach the rc file unexpanded
     printf '\n# added by beam setup\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc" 2>/dev/null || true
   fi
   printf '  [ok] added ~/.local/bin to PATH in %s (open a new terminal to pick it up)\n' "$rc"
 }
 
+# --- host MCP registration ------------------------------------------------------
+# Register Beam as a DIRECT HTTP MCP server in the host's own JSON config: no
+# proxy, no Node/uv runtime, no PATH dependency, and the key is resolved once
+# here rather than at every MCP startup. Atomic write + one-time backup.
+
+mcp_host_json() {
+  # $1 = add|remove ; $2 = config path. Key passed via BEAM_REG_KEY (never argv).
+  command -v python3 >/dev/null 2>&1 || return 1
+  BEAM_REG_ACTION="$1" BEAM_REG_CFG="$2" BEAM_REG_URL="$MCP_URL" python3 - <<'PY'
+import json, os, shutil, sys
+
+action = os.environ["BEAM_REG_ACTION"]
+cfg = os.environ["BEAM_REG_CFG"]
+url = os.environ["BEAM_REG_URL"]
+key = os.environ.get("BEAM_REG_KEY", "")
+
+if os.path.exists(cfg):
+    try:
+        with open(cfg) as fh:
+            data = json.load(fh)
+    except Exception:
+        sys.exit(1)          # never clobber a config we can't parse
+    if not isinstance(data, dict):
+        sys.exit(1)
+elif action == "remove":
+    sys.exit(1)
+else:
+    data = {}
+
+servers = data.get("mcpServers")
+if not isinstance(servers, dict):
+    servers = {}
+
+if action == "add":
+    servers["beam"] = {
+        "type": "http",
+        "url": url,
+        "headers": {"Authorization": "Bearer " + key},
+    }
+else:
+    if "beam" not in servers:
+        sys.exit(1)
+    del servers["beam"]
+
+data["mcpServers"] = servers
+
+if os.path.exists(cfg):
+    backup = cfg + ".beam-backup"
+    if not os.path.exists(backup):
+        shutil.copy2(cfg, backup)
+else:
+    parent = os.path.dirname(cfg)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+tmp = cfg + ".beam-tmp"
+with open(tmp, "w") as fh:
+    json.dump(data, fh, indent=2)
+os.replace(tmp, cfg)
+try:
+    os.chmod(cfg, 0o600)     # the file now holds an API key
+except OSError:
+    pass
+PY
+}
+
 cmd_register() {
   # Register the Beam MCP server WITHOUT the caller handling the key: read it from
-  # stored creds and register directly. Only auto-registers where it can do so safely.
+  # stored creds and write it into every host config we can find.
   key="$(read_key 2>/dev/null || true)"
   if [ -z "$key" ]; then die "auth_missing" "sign in first: beam login" 3; fi
+  hosts=""
+
+  # Claude Code: prefer the official CLI when present (it keeps its own bookkeeping).
   if command -v claude >/dev/null 2>&1; then
     if claude mcp add --transport http beam "$MCP_URL" --header "Authorization: Bearer $key" >/dev/null 2>&1; then
-      printf '{"ok":true,"registered":"claude-code (http)"}\n'; return 0
+      hosts="claude-code"
     fi
-    printf '{"ok":false,"note":"could not add via claude CLI (may already exist) — check: claude mcp list"}\n' >&2
+  fi
+  # Claude desktop app (and any Claude Code install): the shared ~/.claude.json
+  # registry. This is the common case where no `claude` binary exists.
+  if [ -z "$hosts" ] && [ -f "$HOME/.claude.json" ]; then
+    if BEAM_REG_KEY="$key" mcp_host_json add "$HOME/.claude.json"; then hosts="claude-desktop"; fi
+  fi
+  if [ -d "$HOME/.cursor" ]; then
+    if BEAM_REG_KEY="$key" mcp_host_json add "$HOME/.cursor/mcp.json"; then hosts="$hosts cursor"; fi
+  fi
+  hosts="${hosts# }"
+
+  if [ -n "$hosts" ]; then
+    printf '{"ok":true,"registered":"%s"}\n' "$hosts"
+    printf 'Beam connection registered for: %s\n' "$hosts" >&2
     return 0
   fi
+
   cat >&2 <<EOF
-No 'claude' CLI found (e.g. the Claude desktop app). Register Beam as a REMOTE HTTP MCP server:
+Could not auto-register (no supported host config found, or python3 is missing).
+Add a remote HTTP MCP server in your agent:
   name=beam  type=http  url=$MCP_URL  header="Authorization: Bearer <your key>"
 Then fully restart your agent.
 EOF
@@ -557,10 +791,19 @@ cmd_setup() {
   printf '  ✅ Plugin installed\n'
   printf '  ✅ beam on your PATH\n'
   if [ -n "$ws" ]; then printf '  ✅ Signed in (workspace %s)\n' "$ws"; else printf '  ✅ Signed in\n'; fi
+  if [ -z "$ws" ]; then
+    printf '  ⬜ Choose a workspace\n'
+  fi
   if [ "$registered" = "1" ]; then
     printf '  ✅ Beam connection registered\n'
     printf '  ⬜ Restart your agent\n\n'
-    printf 'Last step: fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
+    if [ -z "$ws" ]; then
+      printf 'Last steps:\n'
+      printf '  1. 🗂  Pick a workspace:  beam workspace list <search>   then  beam workspace <id>\n'
+      printf '  2. 🔄 Fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
+    else
+      printf 'Last step: fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
+    fi
   else
     printf '  ⬜ Register the Beam connection\n'
     printf '  ⬜ Restart your agent\n\n'
@@ -572,10 +815,15 @@ cmd_setup() {
 
 cmd_uninstall() {
   removed=""
+  # Undo the MCP registration we created, rather than leaving it to the user.
+  for cfg in "$HOME/.claude.json" "$HOME/.cursor/mcp.json"; do
+    if [ -f "$cfg" ] && mcp_host_json remove "$cfg" 2>/dev/null; then removed="$removed $cfg"; fi
+  done
+  if command -v claude >/dev/null 2>&1; then claude mcp remove beam >/dev/null 2>&1 || true; fi
   if [ -e "$HOME/.local/bin/beam" ]; then rm -f "$HOME/.local/bin/beam"; removed="$removed ~/.local/bin/beam"; fi
   if [ -d "$HOME/.config/beam-plugin/beam" ]; then rm -rf "$HOME/.config/beam-plugin/beam"; removed="$removed ~/.config/beam-plugin/beam"; fi
   printf '{"ok":true,"removed":"%s"}\n' "${removed# }"
-  printf 'Credentials kept at %s (run: beam logout to remove). Also remove any "beam" entry from your host MCP config.\n' "$CREDS_FILE" >&2
+  printf 'Credentials kept at %s (run: beam logout to remove).\n' "$CREDS_FILE" >&2
 }
 
 main() {

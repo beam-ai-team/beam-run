@@ -32,7 +32,19 @@ It installs `beam`, puts it on PATH (and your shell rc), and — if you're alrea
 
 Wait for confirmation — do **not** take the key yourself. Then re-run `beam setup`; it now registers MCP and verifies.
 
-If `beam setup` prints **"No 'claude' CLI found"** (e.g. the Claude desktop app), relay its one-time instruction: in the agent's MCP settings, add a remote HTTP server named `beam`, url `https://api.beamstudio.ai/mcp`, header `Authorization: Bearer <their key>`.
+`beam login` registers the MCP connection itself — including on the Claude desktop app,
+which has no `claude` CLI. Only if it prints **"Could not auto-register"** do you relay the
+manual fallback: add a remote HTTP server named `beam`, url `https://api.beamstudio.ai/mcp`,
+header `Authorization: Bearer <their key>`.
+
+**If the account has more than one workspace**, `beam login` deliberately does not pick one
+(guessing drops the user into an arbitrary, usually empty workspace — their agent list then
+looks broken). It reports `workspaceCount`. Help them choose:
+
+```bash
+beam workspace list <search>   # e.g. beam workspace list acme
+beam workspace <id>
+```
 
 ### 4 · Restart (the user's one action)
 > "Last step — fully quit and reopen your agent so Beam loads."

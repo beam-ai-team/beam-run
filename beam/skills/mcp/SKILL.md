@@ -33,9 +33,10 @@ host's MCP panel rather than assuming this list is exhaustive.
 
 ## Auth note
 
-The `/mcp` endpoint authenticates with **`Authorization: Bearer <key>`** — NOT `x-api-key`
-(that's the REST API header). MCP reads the key **once at startup**; after `beam login` or
-any auth/config change, restart the agent host. See the `setup` skill.
+The `/mcp` endpoint accepts **`Authorization: Bearer <key>`** (preferred) — and currently
+also tolerates `x-api-key`. Use Bearer; `beam register` sets it for you. MCP reads the key
+**once at startup**, so after `beam login` or any auth/config change, restart the agent host.
+See the `setup` skill.
 
 ## Known issues (server-side, being fixed)
 

@@ -18,7 +18,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck beam/bin/beam test/smoke.sh
+          shellcheck beam/bin/beam test/smoke.sh test/e2e.sh
 
   smoke:
     needs: lint
@@ -33,3 +33,11 @@ jobs:
           BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
           BEAM_WORKSPACE_ID: ${{ secrets.BEAM_WORKSPACE_ID }}
         run: sh test/smoke.sh
+
+      # Activation paths a new user walks: fresh-install MCP bridge, host
+      # registration without the claude CLI, workspace selection, error states.
+      # Runs in a throwaway HOME; the authenticated half is skipped with no key.
+      - name: e2e activation (offline unless BEAM_API_KEY secret is set)
+        env:
+          BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
+        run: sh test/e2e.sh
