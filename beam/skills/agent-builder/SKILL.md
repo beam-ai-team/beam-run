@@ -33,26 +33,26 @@ Output this banner on first load, then stop and wait — do not ask questions ye
 
 ---
 
-## Step 0 — Credentials gate (always first)
+## Step 0 — Connection check (always first)
 
-Before intake, design, or any command, collect all three:
-
-| Variable | Meaning |
-|----------|---------|
-| `BEAM_API_KEY` | Beam platform API key |
-| `BEAM_WORKSPACE_ID` | Workspace UUID |
-| `BEAM_API_URL` | Beam API base URL (e.g. `https://api.beamstudio.ai`) |
-
-If any are missing, ask for all three in a single message — and stop there. Then validate:
+Run one command. Credentials resolve automatically from `beam login`, so there is
+nothing to collect:
 
 ```bash
-BEAM_API_KEY='...' BEAM_WORKSPACE_ID='...' BEAM_API_URL='...' \
-  python3 scripts/beam.py validate
+beam agent-builder validate
 ```
 
-`{"valid": true}` → proceed. `{"valid": false}` → show the error, ask for corrections. Do not proceed until validate passes. If a later command fails 401/403, ask for fresh credentials and re-validate.
+**Never ask the user to paste an API key into the chat.** Branch on the exit code:
 
-Pass credentials as environment variables on every `beam.py` call. Never write them to a file.
+| Exit | `code` | What to do |
+|------|--------|------------|
+| 0 | — | Connected. Say which workspace, then proceed. |
+| 3 | `auth_error` | Not signed in, or the key was rejected. Relay the `next` field: run `beam login` in a terminal. Stop until they confirm. |
+| 2 | `validation_error` | No workspace selected. Help them pick: `beam workspace list <search>`, then `beam workspace <id>`. |
+| 5 | `network_error` | Can't reach Beam. Suggest `beam doctor`. Do not retry blindly. |
+
+Every failure prints `{"ok": false, "code": …, "error": …, "next": …}` on **stdout**.
+`next` is the concrete command to run — relay it rather than improvising.
 
 ---
 
@@ -67,14 +67,15 @@ Pass credentials as environment variables on every `beam.py` call. Never write t
 
 ## Non-negotiable rules
 
-1. **Credentials before anything.** No intake, search, or design until `validate` passes.
-2. **Publishing is a separate, explicit step.** Draft by default. Publish only on: "publish it", "make it live", "ship it". "Deploy", "create", "update", "save", "yes" do not mean publish. After deploying, tell the user it is a draft and ask whether to publish.
-3. **Never assume integrations or triggers.** If the user says "notify me" without naming a service, ask which one. Never invent a node the user did not ask for.
-4. **`search-tools` before any integration node.** For every integration the design needs, confirm a `toolFunctionName` via `search-tools` before drawing any node. Never design an integration node without a confirmed tool.
-5. **`build` is the only build trigger.** Show Mermaid diagram + node table and wait for the user to type `build`. "Yes", "looks good", "go ahead" do not proceed to deploy.
-6. **Prefer managed integrations.** When `search-tools` returns multiple matches, pick `integrationProvider: nango_cloud` first, then `pipedream`. Ask before falling back to a custom tool.
-7. **Beam runs nodes sequentially — no parallel execution.** Each non-condition node has exactly one outgoing edge. Chain for "do several things" (A → B → C). Use a condition node for "do one of several things". Use a looping node for "do this for each item".
-8. **Node IDs change after any full-graph write.** After `deploy --agent-id`, `add-node`, `remove-node`, or `update-metadata`, re-run `get-nodes` before using any node ID again. Surgical patches (`update-node`, `update-node-prompt`, `update-node-params`, `update-edge`) leave IDs unchanged.
+1. **Connection before anything.** No intake, search, or design until `validate` exits 0. Never ask the user for an API key — `beam login` owns that.
+2. **On any non-zero exit, stop and act on it.** Every command prints `{"ok": false, "code", "error", "next"}` to stdout and exits 1 internal / 2 validation / 3 auth / 5 network. Read `next` and do it, or relay it. Never retry the same command unchanged, and never continue as if it succeeded. If `next` is absent, open `references/troubleshooting.md`. Parse **stdout only** — `2>&1` merges the human log into the JSON and breaks it.
+3. **Publishing is a separate, explicit step.** Draft by default. Publish only on: "publish it", "make it live", "ship it". "Deploy", "create", "update", "save", "yes" do not mean publish. After deploying, tell the user it is a draft and ask whether to publish.
+4. **Never assume integrations or triggers.** If the user says "notify me" without naming a service, ask which one. Never invent a node the user did not ask for.
+5. **`search-tools` before any integration node.** For every integration the design needs, confirm a `toolFunctionName` via `search-tools` before drawing any node. Never design an integration node without a confirmed tool.
+6. **`build` is the only build trigger.** Show Mermaid diagram + node table and wait for the user to type `build`. "Yes", "looks good", "go ahead" do not proceed to deploy.
+7. **Prefer managed integrations.** When `search-tools` returns multiple matches, pick `integrationProvider: nango_cloud` first, then `pipedream`. Ask before falling back to a custom tool.
+8. **Beam runs nodes sequentially — no parallel execution.** Each non-condition node has exactly one outgoing edge. Chain for "do several things" (A → B → C). Use a condition node for "do one of several things". Use a looping node for "do this for each item".
+9. **Node IDs change after any full-graph write.** After `deploy --agent-id`, `add-node`, `remove-node`, or `update-metadata`, re-run `get-nodes` before using any node ID again. Surgical patches (`update-node`, `update-node-prompt`, `update-node-params`, `update-edge`) leave IDs unchanged.
 
 ---
 
@@ -112,7 +113,7 @@ Load each phase file as you enter that phase. Do not load all up front.
 | Change model or other node config | `update-node` |
 | Restructure many nodes at once | `deploy --agent-id <id>` (full redeploy) |
 
-5. **Full redeploy caution:** `deploy --agent-id` drops any node not in your spec. Include every node to keep. Matching is by `toolFunctionName`, so keep node names stable across updates.
+5. **Full redeploy caution:** `deploy --agent-id` drops any node not in your spec. Include every node to keep. Nodes are matched by derived `toolFunctionName`, falling back to `objective` — so keep **both** the node name and its objective stable across updates. (Integration nodes only match on objective, since attaching a tool rewrites their `toolFunctionName`.)
 6. Report as draft; ask about publishing.
 
 ---

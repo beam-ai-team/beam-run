@@ -13,8 +13,8 @@
 For every integration the agent needs, search in parallel:
 
 ```bash
-python3 scripts/beam.py search-tools gmail --managed-only
-python3 scripts/beam.py search-tools slack --managed-only
+beam agent-builder search-tools gmail --managed-only
+beam agent-builder search-tools slack --managed-only
 ```
 
 `--managed-only` drops custom-GPT-only tools and keeps real managed integrations. If it returns nothing, remove `--managed-only` and check `references/integrations.md`.
@@ -24,7 +24,7 @@ Each result carries `toolFunctionName`, `requiredArgs`, `integrationProvider`, `
 **Search output is large — filter inline.** Pipe through a one-liner to extract only the fields you need rather than reading a saved file in a second step:
 
 ```bash
-python3 scripts/beam.py search-tools slack --managed-only 2>&1 | \
+beam agent-builder search-tools slack --managed-only | \
   python3 -c "import json,sys; [print(t['toolFunctionName'], t['requiredArgs']) \
   for t in json.load(sys.stdin)['tools'] if 'reply' in t['toolFunctionName'].lower()]"
 ```

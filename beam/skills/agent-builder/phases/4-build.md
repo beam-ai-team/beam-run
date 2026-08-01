@@ -40,8 +40,7 @@ Apply every rule in `templates/lint-checklist.md` against the spec (already load
 ## Step 3 — Dry-run
 
 ```bash
-BEAM_API_KEY='...' BEAM_WORKSPACE_ID='...' BEAM_API_URL='...' \
-  python3 scripts/beam.py deploy /tmp/<slug>.json --dry-run
+beam agent-builder deploy /tmp/<slug>.json --dry-run
 ```
 
 Inspect the payload. Confirm: expected node count, integration nodes show in `integrationsToAttach`, no structural surprises. Fix the spec if anything looks wrong, re-lint, re-dry-run.
@@ -51,8 +50,7 @@ Inspect the payload. Confirm: expected node count, integration nodes show in `in
 ## Step 4 — Deploy
 
 ```bash
-BEAM_API_KEY='...' BEAM_WORKSPACE_ID='...' BEAM_API_URL='...' \
-  python3 scripts/beam.py deploy /tmp/<slug>.json
+beam agent-builder deploy /tmp/<slug>.json
 ```
 
 `deploy` creates the agent, attaches every integration, re-links downstream params, and verifies — in one call. It does **not** publish.
@@ -68,8 +66,7 @@ Check the result:
 Test the most important nodes individually before running a full task. This catches prompt/param wiring failures cheaply.
 
 ```bash
-BEAM_API_KEY='...' BEAM_WORKSPACE_ID='...' BEAM_API_URL='...' \
-  python3 scripts/beam.py test-node AGENT_ID NODE_ID "Realistic task input for this node"
+beam agent-builder test-node AGENT_ID NODE_ID "Realistic task input for this node"
 ```
 
 Pick nodes that: (a) do the core reasoning or extraction, (b) have the most complex prompt, (c) feed their output into other linked nodes. A bad node here fails silently in full task runs.

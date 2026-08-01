@@ -1,13 +1,22 @@
 # Troubleshooting
 
-When a `beam.py` command fails it prints `{"ok": false, "error": "..."}` and
-exits non-zero. Match the message below.
+When a command fails it prints `{"ok": false, "code": "...", "error": "...",
+"next": "..."}` on **stdout** and exits 1 internal / 2 validation / 3 auth /
+5 network. **Do the `next` field first** — it names the command to run. Come here
+only when `next` is absent or did not resolve it.
+
+Parse stdout alone: `2>&1` merges the human `[beam.py] ERROR:` line into the JSON
+and makes it unparseable.
 
 ## Credentials & connectivity
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `Missing credentials: ...` | One or more credential env vars were not passed on the command. | Ask the user for the missing value(s). Prefix the command with all three: `BEAM_API_KEY=... BEAM_WORKSPACE_ID=... BEAM_API_URL=... python3 scripts/beam.py ...` |
+| `Not signed in to Beam.` (`auth_error`, exit 3) | No API key in the environment or in `~/.config/beam/credentials`. | Tell the user to run `beam login` in a terminal. **Never** ask them to paste a key into the chat. |
+| `No Beam workspace selected.` (`validation_error`, exit 2) | A key resolved but no workspace is set. | `beam workspace list <search>`, then `beam workspace <id>`. Do not guess — the wrong workspace looks empty. |
+| `beam: command not found` | The CLI is not on PATH. | Run the plugin's `setup` skill, or `beam setup`. Open a new terminal afterwards. |
+| `bundled agent builder not found` | Plugin files are incomplete. | Reinstall the plugin, then `beam setup`. |
+| `the agent builder needs python3` | No Python 3.8+. | Install Python 3, then retry. |
 | `Authentication failed (401)` / `(403)` | API key or workspace ID is wrong, expired, or revoked. | Ask the user for fresh credentials. A 403 can also mean the key lacks access to that workspace. |
 | `cannot reach the Beam API` | `BEAM_API_URL` is wrong, or the API is down. | Confirm the URL with the user — it must point at their Beam API instance. |
 | `auth/access-token did not return an idToken` | Trigger/webhook auth exchange failed. | The API key may be invalid, or the server has no `/auth/access-token`. Verify with `validate` first. |
@@ -17,6 +26,9 @@ exits non-zero. Match the message below.
 | Error | Fix |
 |-------|-----|
 | `Spec is missing 'agentName'` | Add a top-level `agentName`. |
+| `A parameter is missing its 'name'` | Every input/output param needs `name`. `position` is optional — it defaults to list order. |
+| `Duplicate node 'objective' values: [...]` | Integrations map to nodes by exact objective text, so duplicates attach the tool to the wrong node. Make each objective distinct. |
+| `Nodes derive the same toolFunctionName: ...` | Two nodes reduce to the same `GPTAction_Custom_<Name>`, so a re-deploy would collide. Give them distinct `name`/`tool_name`. |
 | `Spec must contain a non-empty 'nodes' array` | Add at least one node. |
 | `Duplicate node keys: [...]` | Every node `key` must be unique within the spec. |
 | `Spec must have exactly one entry node` | Exactly one node needs `is_entry: true`. |

@@ -22,8 +22,8 @@ search, which have no `integrationProvider`), so the result is short and
 trustworthy:
 
 ```bash
-python3 scripts/beam.py search-tools gmail --managed-only
-python3 scripts/beam.py search-tools slack --managed-only
+beam agent-builder search-tools gmail --managed-only
+beam agent-builder search-tools slack --managed-only
 ```
 
 If `--managed-only` returns nothing for an action there is no real tool for it
@@ -48,7 +48,7 @@ Search for every integration the agent needs. Each result includes:
 Add `--wait-only` to list only tools a `condition_based` wait node can await:
 
 ```bash
-python3 scripts/beam.py search-tools slack --wait-only
+beam agent-builder search-tools slack --wait-only
 ```
 
 ---

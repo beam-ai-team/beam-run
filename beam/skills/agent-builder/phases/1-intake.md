@@ -24,7 +24,7 @@ Read everything the user has provided — transcript, PDF, Slack export, file, o
 Then run `search-agents` to find similar existing agents:
 
 ```bash
-python3 scripts/beam.py search-agents "<keyword from the use case>"
+beam agent-builder search-agents "<keyword from the use case>"
 ```
 
 If a close match exists, surface it: "I found an existing agent called X that does Y — want to start from that, or build fresh?"

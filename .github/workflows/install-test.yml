@@ -18,7 +18,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck beam/bin/beam test/smoke.sh test/e2e.sh
+          shellcheck beam/bin/beam test/smoke.sh test/e2e.sh test/e2e-agent-builder.sh
 
   smoke:
     needs: lint
@@ -41,3 +41,10 @@ jobs:
         env:
           BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
         run: sh test/e2e.sh
+
+      # agent-builder CLI: path resolution, credential sourcing, error contract.
+      # All deploys are --dry-run, so no agent is ever created.
+      - name: e2e agent-builder (offline unless BEAM_API_KEY secret is set)
+        env:
+          BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
+        run: sh test/e2e-agent-builder.sh

@@ -310,6 +310,7 @@ Usage:
   beam agents deploy <spec>  build/update an agent from a spec (draft; --publish to go live)
   beam agents publish <gid>  publish a draft graph (graphId from deploy output)
   beam agents delete <id>    delete an agent
+  beam agent-builder <cmd>   bundled agent builder (design/build/patch graphs)
   beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
   beam uninstall
   beam --version | --help
@@ -471,6 +472,18 @@ cmd_agents_deploy() {
   builder="$(script_dir)/../skills/agent-builder/scripts/beam.py"
   [ -f "$builder" ] || die "internal_error" "bundled graph builder not found ($builder) — reinstall the plugin (beam setup)" 1
   BEAM_API_KEY="$key" BEAM_WORKSPACE_ID="$ws" BEAM_API_URL="$API_BASE" python3 "$builder" deploy "$spec" "$@"
+}
+
+cmd_agent_builder() {
+  # Passthrough to the bundled agent-builder CLI. The skill's docs used to say
+  # `python3 scripts/beam.py …`, which only resolves if the agent happens to be
+  # cwd'd into the skill directory — it never is, so every documented command
+  # failed on a fresh install. Going through `beam` resolves the path here.
+  command -v python3 >/dev/null 2>&1 || die "internal_error" "the agent builder needs python3 (3.8+). Install Python, then retry." 1
+  builder="$(script_dir)/../skills/agent-builder/scripts/beam.py"
+  [ -f "$builder" ] || die "internal_error" "bundled agent builder not found ($builder) — reinstall the plugin, then run: beam setup" 1
+  if [ $# -eq 0 ]; then set -- --help; fi
+  exec python3 "$builder" "$@"
 }
 
 cmd_agents_publish() {
@@ -848,6 +861,7 @@ main() {
         delete) cmd_agents_delete "$@" ;;
         *) die "validation_error" "usage: beam agents <list|get|deploy|publish|delete>" 2 ;;
       esac ;;
+    agent-builder) cmd_agent_builder "$@" ;;
     mcp) cmd_mcp ;;
     register) cmd_register ;;
     uninstall) cmd_uninstall ;;
