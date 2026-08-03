@@ -637,8 +637,13 @@ cmd_doctor() {
 
 add_to_path_rc() {
   # Idempotently add ~/.local/bin to the user's shell rc so `beam` is typeable.
+  #
+  # Deliberately does NOT test the current process PATH. An installer launched by
+  # a coding agent, a GUI app, or a CI job routinely has a richer PATH than the
+  # user's own terminal; trusting it made setup skip this step and then report
+  # "beam on your PATH" while `beam` was still command-not-found for the user.
+  # Decide from the rc file, which is what their shell actually reads.
   bindir="$HOME/.local/bin"
-  case ":$PATH:" in *":$bindir:"*) return 0 ;; esac
   sh_name="$(basename "${SHELL:-sh}")"
   case "$sh_name" in
     zsh) rc="$HOME/.zshrc" ;;
@@ -646,7 +651,11 @@ add_to_path_rc() {
     fish) rc="$HOME/.config/fish/config.fish" ;;
     *) rc="$HOME/.profile" ;;
   esac
-  if [ -f "$rc" ] && grep -q 'added by beam setup' "$rc" 2>/dev/null; then return 0; fi
+  # Already handled — by us previously, or by the user's own PATH management.
+  # Returns 0 only when this call wrote the rc line (caller reports "open a new
+  # terminal"); 1 means it was already handled.
+  if [ -f "$rc" ] && grep -q 'added by beam setup' "$rc" 2>/dev/null; then return 1; fi
+  if [ -f "$rc" ] && grep -q '\.local/bin' "$rc" 2>/dev/null; then return 1; fi
   mkdir -p "$(dirname "$rc")" 2>/dev/null || true
   # shellcheck disable=SC2016  # literal $HOME/$PATH must reach the rc file unexpanded
   if [ "$sh_name" = "fish" ]; then
@@ -762,6 +771,16 @@ EOF
   return 2
 }
 
+path_line() {
+  # Honest PATH line: if setup just wrote the shell rc, the user's CURRENT shell
+  # still cannot run `beam` — say so instead of claiming success.
+  if [ "${path_added:-0}" = "1" ]; then
+    printf '  ✅ beam installed — open a NEW terminal for the beam command to work\n'
+  else
+    printf '  ✅ beam on your PATH\n'
+  fi
+}
+
 cmd_setup() {
   emit_event install
   # Install + PATH (always).
@@ -771,7 +790,7 @@ cmd_setup() {
     ln -sf "$bindir/beam" "$HOME/.local/bin/beam" 2>/dev/null || cp "$bindir/beam" "$HOME/.local/bin/beam"
     chmod +x "$HOME/.local/bin/beam" 2>/dev/null || true
   fi
-  add_to_path_rc >/dev/null 2>&1 || true
+  if add_to_path_rc >/dev/null 2>&1; then path_added=1; else path_added=0; fi
   emit_event path_ok
 
   # Signed in? (verify the stored key actually works)
@@ -789,7 +808,7 @@ cmd_setup() {
   if [ "$signed" = "0" ]; then
     printf '🚀 Beam is installed — 2 quick steps to finish.\n\n'
     printf '  ✅ Plugin installed\n'
-    printf '  ✅ beam on your PATH\n'
+    path_line
     printf '  ⬜ Sign in\n'
     printf '  ⬜ Restart your agent\n\n'
     printf 'Next — 3 steps:\n'
@@ -802,7 +821,7 @@ cmd_setup() {
   if [ "$registered" = "1" ]; then printf '🎉 Beam is connected — 1 step left!\n\n'
   else printf '🚀 Almost there — 2 steps left.\n\n'; fi
   printf '  ✅ Plugin installed\n'
-  printf '  ✅ beam on your PATH\n'
+  path_line
   if [ -n "$ws" ]; then printf '  ✅ Signed in (workspace %s)\n' "$ws"; else printf '  ✅ Signed in\n'; fi
   if [ -z "$ws" ]; then
     printf '  ⬜ Choose a workspace\n'

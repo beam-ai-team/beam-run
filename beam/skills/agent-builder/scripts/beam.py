@@ -2367,7 +2367,11 @@ def main(argv=None):
 
     handler = COMMANDS[args.command]
     try:
-        api = Api(*resolve_creds())
+        # `deploy --dry-run` builds the payload purely locally and makes no request,
+        # so it must not require sign-in: linting and previewing a spec is exactly
+        # what someone does *before* they have credentials.
+        offline = args.command == "deploy" and getattr(args, "dry_run", False)
+        api = Api("", "", DEFAULT_API_URL) if offline else Api(*resolve_creds())
         result = handler(api, args)
         print(json.dumps({"ok": True, "command": args.command, **result}, indent=2))
         return 0
