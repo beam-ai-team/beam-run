@@ -1,6 +1,8 @@
 # Testing Beam Run locally (dev)
 
-`v0.4.1` (branch `fix-UX`). API-key auth; OAuth is a future iteration.
+`v0.4.1` (branch `fix-UX`). API-key auth. Browser login is specified in
+[`specs/browser-login.md`](specs/browser-login.md) — it removes the only step that
+forces the user out of their coding agent.
 
 > **Reporting to the user:** this is a dev runbook, but the *message you show the user* should still feel like onboarding. Show `beam setup`'s output (success line + emoji checklist + next steps) — do **not** rewrite it into a "what I did" table or status report. Report their remaining steps, not your actions.
 
