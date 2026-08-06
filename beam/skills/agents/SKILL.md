@@ -30,7 +30,8 @@ Keep node ids available for follow-up edits/tests, but don't lead with them.
 
 For anything beyond inspection — creating a new agent, changing its node graph,
 attaching integrations, wiring triggers — use the **agent-builder** skill. It
-drives the full design → spec → deploy flow and owns the graph-payload details.
+handles conversational flow approval, draft creation or the smallest graph patch,
+and owns the graph-payload details.
 
 Once a spec exists, the CLI deploys it (draft by default):
 
@@ -66,4 +67,8 @@ beam whoami; echo "exit_code=$?"
 beam workspace   # show current
 ```
 
-Wrong workspace → `beam workspace <id>`. Missing auth → run `setup`.
+Resolve workspace from the request/Beam URL, a valid remembered default, or a sole
+membership. If multiple remain possible, ask once and remember with
+`beam workspace <id>`. Missing auth → run `setup`. If a list is empty or an agent is
+not found, name the current workspace and ask whether the user wants to create it
+there or switch. Never search all workspaces automatically.

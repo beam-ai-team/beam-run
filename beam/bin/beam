@@ -32,7 +32,7 @@
 #   - `beam uninstall` removes the MCP entries it created
 set -eu
 
-VERSION="0.4.1"
+VERSION="0.5.0"
 REPO="beam-ai-team/beam-run"
 API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
 MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
@@ -110,6 +110,57 @@ for w in ws:
   fi
 }
 
+resolve_workspace_from_profile() {
+  # Resolve the default without guessing. Results are returned in globals:
+  # resolved_workspace, resolved_workspace_name, workspace_count, workspace_default_stale.
+  # $1 = /v2/user/me response; $2 = preferred workspace; $3 = strict (1 for explicit user input).
+  profile_json="$1"
+  preferred_workspace="${2:-}"
+  strict_preference="${3:-0}"
+  workspace_rows="$(printf '%s' "$profile_json" | workspaces_tsv)"
+  workspace_count=0
+  [ -n "$workspace_rows" ] && workspace_count=$(printf '%s\n' "$workspace_rows" | grep -c .)
+  resolved_workspace=""
+  resolved_workspace_name=""
+  workspace_default_stale=0
+
+  if [ -n "$preferred_workspace" ]; then
+    preferred_row="$(printf '%s\n' "$workspace_rows" | awk -F '\t' -v id="$preferred_workspace" '$1 == id { print; exit }')"
+    if [ -n "$preferred_row" ]; then
+      resolved_workspace="$(printf '%s' "$preferred_row" | cut -f1)"
+      resolved_workspace_name="$(printf '%s' "$preferred_row" | cut -f2-)"
+      return 0
+    fi
+    if [ "$strict_preference" = "1" ]; then return 4; fi
+    workspace_default_stale=1
+  fi
+
+  if [ "$workspace_count" -eq 1 ]; then
+    resolved_workspace="$(printf '%s\n' "$workspace_rows" | head -n1 | cut -f1)"
+    resolved_workspace_name="$(printf '%s\n' "$workspace_rows" | head -n1 | cut -f2-)"
+  fi
+  return 0
+}
+
+print_workspace_resolution() {
+  if [ "$workspace_default_stale" -eq 1 ]; then
+    printf 'Previous workspace is no longer available and was cleared.\n' >&2
+  fi
+  if [ -n "$resolved_workspace" ]; then
+    if [ -n "$resolved_workspace_name" ]; then
+      printf 'Default workspace: %s ✅\n' "$resolved_workspace_name" >&2
+    else
+      printf 'Default workspace: %s ✅\n' "$resolved_workspace" >&2
+    fi
+  elif [ "$workspace_count" -gt 1 ]; then
+    printf '\nWorkspace will be chosen when it is needed.\n' >&2
+    printf 'Your coding agent should ask only if your request does not make the workspace clear, then remember the answer.\n' >&2
+    printf 'Manual override: beam workspace list <search>  then  beam workspace <id>\n' >&2
+  elif [ "$workspace_count" -eq 0 ]; then
+    printf '\nNo workspace is available yet. Create or join one in Beam, then run: beam workspace list\n' >&2
+  fi
+}
+
 extract_workspace_id() {
   # reads /v2/user/me JSON on stdin, prints the first workspace id (or empty).
   # Only safe to use when the caller has confirmed there is exactly ONE workspace —
@@ -158,12 +209,31 @@ _http_get() {
     case "$code" in
       2*) cat "$tmp"; rm -f "$tmp"; return 0 ;;
       401|403) rm -f "$tmp"; return 3 ;;
+      404) cat "$tmp"; rm -f "$tmp"; return 4 ;;
       5*) if [ "$attempt" -lt "$max" ]; then sleep "$delay"; delay=$((delay * 2)); attempt=$((attempt + 1)); continue; fi
           rm -f "$tmp"; return 5 ;;
       *) rm -f "$tmp"; return 5 ;;
     esac
   done
   rm -f "$tmp"; return 5
+}
+
+json_collection_empty() {
+  if command -v jq >/dev/null 2>&1; then
+    jq -e 'if type == "array" then length == 0 else ((.agents // .data // .items // []) | length == 0) end' >/dev/null 2>&1
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+try:
+    data=json.load(sys.stdin)
+    values=data if isinstance(data,list) else data.get("agents",data.get("data",data.get("items",[])))
+    sys.exit(0 if isinstance(values,list) and len(values)==0 else 1)
+except Exception:
+    sys.exit(1)' 2>/dev/null
+  elif command -v node >/dev/null 2>&1; then
+    node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const d=JSON.parse(s);const v=Array.isArray(d)?d:(d.agents??d.data??d.items??[]);process.exit(Array.isArray(v)&&v.length===0?0:1)}catch{process.exit(1)}})' 2>/dev/null
+  else
+    return 1
+  fi
 }
 
 verify_key() {
@@ -300,7 +370,7 @@ Usage:
   beam setup                 guided install: PATH + auth + MCP registration
   beam register              register the Beam MCP server with your agent
   beam doctor                self-diagnose install/auth/connection (human checklist)
-  beam login                 sign in (asks for your key; or --api-key -, or BEAM_API_KEY)
+  beam login                 save an API key (masked terminal prompt)
   beam logout
   beam whoami
   beam workspace [ID]        show/set current workspace
@@ -315,11 +385,10 @@ Usage:
   beam uninstall
   beam --version | --help
 
-Auth (never put the key on the command line — it leaks to shell history):
-  beam login                 # asks for your key (stays hidden as you type)
+Auth:
+  beam login                   # masked prompt (recommended)
   BEAM_API_KEY=... beam login  # env
   printf '%s' "\$KEY" | beam login --api-key -   # stdin
-  Create a key: app.beam.ai -> Personal settings -> API Keys
 
 Docs: https://github.com/$REPO
 EOF
@@ -331,6 +400,7 @@ cmd_login() {
     case "$1" in
       --api-key) key="${2:-}"; shift 2 ;;
       --workspace-id) workspace="${2:-}"; shift 2 ;;
+      --paste) shift ;;
       -h|--help) cmd_help; exit 0 ;;
       *) die "validation_error" "unknown flag: $1 (try beam login --help)" 2 ;;
     esac
@@ -346,45 +416,44 @@ cmd_login() {
         IFS= read -r key || true
       fi
     else
-      die "auth_missing" "no key — use: beam login (interactive), BEAM_API_KEY=... beam login, or pipe to --api-key -. Avoid --api-key <key> (leaks to history)." 3
+      die "auth_missing" "no key — run beam login in a terminal, use BEAM_API_KEY=... beam login, or pipe to --api-key -. Avoid --api-key <key> (leaks to history)." 3
     fi
   fi
   if [ -z "$key" ]; then die "auth_missing" "empty API key" 3; fi
 
   set +e; resp="$(verify_key "$key")"; vc=$?; set -e
-  if [ "$vc" -eq 3 ]; then die "auth_invalid" "API key rejected by $API_BASE/v2/user/me — create a fresh key in app.beam.ai" 3; fi
+  if [ "$vc" -eq 3 ]; then die "auth_invalid" "API key rejected by $API_BASE/v2/user/me — run beam login again" 3; fi
   if [ "$vc" -eq 5 ]; then die "network_error" "could not reach $API_BASE (network/timeout) — key NOT saved; check your connection and retry" 5; fi
 
-  # Workspace: NEVER guess when there is more than one. Picking workspaces[0]
-  # silently drops the user into an arbitrary (often near-empty) workspace, so
-  # their first "list my agents" looks broken. Auto-set only when unambiguous.
-  ws_count=0
-  if [ -z "$workspace" ]; then
-    ws_list="$(printf '%s' "$resp" | workspaces_tsv)"
-    if [ -n "$ws_list" ]; then ws_count=$(printf '%s\n' "$ws_list" | grep -c .); fi
-    prev="$(read_workspace 2>/dev/null || true)"
-    if [ -n "$prev" ]; then
-      workspace="$prev"                       # keep what the user already chose
-    elif [ "$ws_count" -eq 1 ]; then
-      workspace="$(printf '%s\n' "$ws_list" | head -n1 | cut -f1)"
-    fi
+  # Resolve an explicit choice, a still-accessible remembered default, or the
+  # only available workspace. Multiple memberships remain unset until context
+  # or the user provides a deterministic answer.
+  if [ -n "$workspace" ]; then
+    preferred_workspace="$workspace"
+    preference_is_explicit=1
+  elif [ -n "${BEAM_WORKSPACE_ID:-}" ]; then
+    preferred_workspace="$BEAM_WORKSPACE_ID"
+    preference_is_explicit=1
+  else
+    preferred_workspace="$(creds_value BEAM_WORKSPACE_ID 2>/dev/null || true)"
+    preference_is_explicit=0
   fi
+  if ! resolve_workspace_from_profile "$resp" "$preferred_workspace" "$preference_is_explicit"; then
+    die "workspace_not_found" "workspace $preferred_workspace is not available to this account. Run: beam workspace list <search>" 2
+  fi
+  workspace="$resolved_workspace"
 
   write_creds "$key" "$workspace"
   emit_event auth_ok
   printf '{"ok":true,"saved":"%s","workspaceId":%s,"workspaceCount":%s}\n' "$CREDS_FILE" \
-    "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)" "$ws_count"
+    "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)" "$workspace_count"
 
   # Wire the MCP connection now that the key is stored (all supported hosts).
   set +e; cmd_register >/dev/null 2>&1; reg=$?; set -e
 
   printf 'Signed in ✅\n' >&2
   if [ "$reg" -eq 0 ]; then printf 'Beam connection registered ✅\n' >&2; fi
-  if [ -z "$workspace" ]; then
-    printf '\n⚠️  You have %s workspaces — pick one before listing agents:\n' "$ws_count" >&2
-    printf '    beam workspace list <search>   # e.g. beam workspace list acme\n' >&2
-    printf '    beam workspace <id>\n' >&2
-  fi
+  print_workspace_resolution
   printf '\nNext: fully restart your agent, then ask "list my Beam agents".\n' >&2
 }
 
@@ -436,17 +505,28 @@ cmd_workspace() {
     return 0
   fi
   key="$(read_key)" || die "auth_missing" "not signed in — run beam login first" 3
+  if verify_response="$(verify_key "$key")"; then verify_rc=0; else verify_rc=$?; fi
+  if [ "$verify_rc" -eq 3 ]; then die "auth_missing" "API key rejected — run beam login" 3; fi
+  if [ "$verify_rc" -ne 0 ]; then die "network_error" "could not validate workspace access with $API_BASE" 5; fi
+  workspace_ids="$(printf '%s' "$verify_response" | workspaces_tsv | cut -f1)"
+  if ! printf '%s\n' "$workspace_ids" | grep -Fx -- "$1" >/dev/null 2>&1; then
+    die "workspace_not_found" "workspace $1 is not available to this account. Run: beam workspace list <search>" 2
+  fi
   write_creds "$key" "$1"
   printf '{"ok":true,"workspaceId":"%s"}\n' "$1"
 }
 
 cmd_agents_list() {
-  if ! read_workspace >/dev/null 2>&1; then die "validation_error" "no workspace — run: beam workspace list, then beam workspace <id>" 2; fi
+  if ! read_workspace >/dev/null 2>&1; then die "workspace_required" "workspace context is ambiguous. Ask the user which Beam workspace they mean, then remember it with: beam workspace <id>" 2; fi
   # NOTE: capped at pageSize=50 (no pagination yet — deferred, see specs).
   set +e; resp="$(api_request '/agent?pageNum=1&pageSize=50')"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "agents list failed (network/timeout)" 5; fi
   printf '%s\n' "$resp"
+  if printf '%s' "$resp" | json_collection_empty; then
+    ws="$(read_workspace 2>/dev/null || true)"
+    printf 'No agents found in workspace %s. If the user expected an agent here, tell them this workspace and ask whether to switch; do not scan other workspaces silently.\n' "$ws" >&2
+  fi
 }
 
 cmd_agents_get() {
@@ -454,6 +534,10 @@ cmd_agents_get() {
   [ -n "$id" ] || die "validation_error" "usage: beam agents get <agentId>" 2
   set +e; resp="$(api_request "/agent/$id")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 4 ]; then
+    ws="$(read_workspace 2>/dev/null || true)"
+    die "agent_not_found" "agent $id was not found in workspace $ws. Tell the user which workspace was checked and ask whether to switch; do not scan other workspaces silently." 2
+  fi
   if [ "$rc" -eq 5 ]; then die "network_error" "agents get failed (network/timeout)" 5; fi
   printf '%s\n' "$resp"
 }
@@ -500,7 +584,7 @@ cmd_agents_delete() {
   [ -n "$id" ] || die "validation_error" "usage: beam agents delete <agentId>" 2
   # DELETE /agent/{id} is JWT-gated; mint a Bearer token from the API key first.
   set +e; resp="$(api_bearer DELETE "/agent/$id" '')"; rc=$?; set -e
-  if [ "$rc" -eq 3 ]; then die "auth_missing" "delete auth failed (JWT exchange rejected) — run beam login for a fresh key" 3; fi
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "delete auth failed (JWT exchange rejected) — run beam login again" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "delete failed (network/timeout) — agent NOT deleted" 5; fi
   printf '{"ok":true,"deleted":"%s"}\n' "$id"
 }
@@ -592,20 +676,29 @@ cmd_doctor() {
   esac
 
   key="$(read_key 2>/dev/null || true)"
+  verify_response=""
   if [ -z "$key" ]; then
-    printf '  [XX] not signed in — run: beam login   (key from app.beam.ai -> Personal settings -> API Keys)\n'; fail=1
+    printf '  [XX] not signed in — run: beam login\n'; fail=1
   else
-    set +e; verify_key "$key" >/dev/null; vc=$?; set -e
+    set +e; verify_response="$(verify_key "$key")"; vc=$?; set -e
     case "$vc" in
       0) printf '  [ok] API key valid; Beam endpoint reachable\n' ;;
-      3) printf '  [XX] API key rejected — run: beam login   (create a fresh key)\n'; fail=1 ;;
+      3) printf '  [XX] API key rejected — run: beam login\n'; fail=1 ;;
       5) printf '  [XX] cannot reach Beam (network/timeout) — check your internet, then retry\n'; fail=1 ;;
     esac
   fi
 
   ws="$(read_workspace 2>/dev/null || true)"
-  if [ -n "$ws" ]; then printf '  [ok] workspace set (%s)\n' "$ws"
-  else printf '  [--] no workspace set — run: beam workspace list, then beam workspace <id>\n'; fi
+  if [ -n "$ws" ] && [ -n "$verify_response" ]; then
+    workspace_ids="$(printf '%s' "$verify_response" | workspaces_tsv | cut -f1)"
+    if printf '%s\n' "$workspace_ids" | grep -Fx -- "$ws" >/dev/null 2>&1; then
+      printf '  [ok] workspace set and accessible (%s)\n' "$ws"
+    else
+      printf '  [XX] saved workspace is no longer accessible — run: beam workspace list, then beam workspace <id>\n'
+      fail=1
+    fi
+  elif [ -n "$ws" ]; then printf '  [--] workspace set but access could not be checked (%s)\n' "$ws"
+  else printf '  [--] no default workspace — your agent should ask only when a request is ambiguous\n'; fi
 
   # The checks that actually predict "my Beam tools don't work": is Beam
   # registered with the host at all, and does /mcp accept this key?
@@ -617,7 +710,7 @@ cmd_doctor() {
     set +e; mcp_handshake "$key"; mh=$?; set -e
     case "$mh" in
       0) printf '  [ok] MCP endpoint accepted your key\n' ;;
-      3) printf '  [XX] MCP endpoint rejected the key — run: beam login (fresh key), then beam register\n'; fail=1 ;;
+      3) printf '  [XX] MCP endpoint rejected the key — run: beam login, then beam register\n'; fail=1 ;;
       *) printf '  [XX] could not reach the MCP endpoint (%s) — check your network\n' "$MCP_URL"; fail=1 ;;
     esac
   fi
@@ -811,10 +904,9 @@ cmd_setup() {
     path_line
     printf '  ⬜ Sign in\n'
     printf '  ⬜ Restart your agent\n\n'
-    printf 'Next — 3 steps:\n'
-    printf '  1. 🔑 Generate a key in Beam  (app.beam.ai -> Personal settings -> API Keys)\n'
-    printf '  2. 💻 In your terminal, run:  beam login   (paste the key when asked — it stays hidden as you type)\n'
-    printf '  3. 🔄 Restart your agent, then ask "list my Beam agents"\n'
+    printf 'Next — 2 steps:\n'
+    printf '  1. 🔑 Create a key at app.beam.ai → Personal settings → API Keys, then run: beam login\n'
+    printf '  2. 🔄 Restart your agent, then ask "list my Beam agents"\n'
     return 3
   fi
 
@@ -823,19 +915,10 @@ cmd_setup() {
   printf '  ✅ Plugin installed\n'
   path_line
   if [ -n "$ws" ]; then printf '  ✅ Signed in (workspace %s)\n' "$ws"; else printf '  ✅ Signed in\n'; fi
-  if [ -z "$ws" ]; then
-    printf '  ⬜ Choose a workspace\n'
-  fi
   if [ "$registered" = "1" ]; then
     printf '  ✅ Beam connection registered\n'
     printf '  ⬜ Restart your agent\n\n'
-    if [ -z "$ws" ]; then
-      printf 'Last steps:\n'
-      printf '  1. 🗂  Pick a workspace:  beam workspace list <search>   then  beam workspace <id>\n'
-      printf '  2. 🔄 Fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
-    else
-      printf 'Last step: fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
-    fi
+    printf 'Last step: fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
   else
     printf '  ⬜ Register the Beam connection\n'
     printf '  ⬜ Restart your agent\n\n'

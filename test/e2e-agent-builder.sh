@@ -44,6 +44,31 @@ printf '%s' "$OUT" | grep -q "usage:" && ok "'beam agent-builder --help' works f
 grep -rq "python3 scripts/beam.py" "$ROOT/beam/skills/agent-builder" \
   && bad "docs still use the unresolvable relative path" || ok "no relative-path invocations left in docs"
 
+group "conversational flow approval"
+SKILL="$ROOT/beam/skills/agent-builder/SKILL.md"
+FLOW="$ROOT/beam/skills/agent-builder/references/conversation-flow.md"
+grep -q "A Mermaid diagram" "$SKILL" && ok "new flows require a Mermaid proposal" || bad "no Mermaid proposal rule"
+grep -q "list of the integrations" "$SKILL" && ok "new flows name integrations" || bad "no integration-list rule"
+grep -q "Natural acceptance" "$SKILL" && ok "natural approval is accepted" || bad "approval is still command-gated"
+grep -q "material edit" "$FLOW" && ok "material changes re-open approval" || bad "material changes do not re-open approval"
+grep -q 'customer-escalations' "$ROOT/beam/skills/agent-builder/evals/evals.json" \
+  && ok "mock Gmail/Slack conversation is an eval" || bad "missing conversational mock eval"
+python3 - "$ROOT/beam/skills/agent-builder/evals/evals.json" <<'PY' \
+  && ok "mock eval covers approval, draft update, and publish" \
+  || bad "mock eval lost a conversational acceptance step"
+import json, sys
+data = json.load(open(sys.argv[1]))
+scenario = next(e for e in data["evals"]
+                if e["name"] == "conversational-gmail-slack-flow-approval")
+assert len(scenario["turns"]) == 6
+expected = scenario["expected_output"].lower()
+for phrase in ("mermaid", "integrations", "natural-language approval",
+               "skips testing", "routing changes materially", "publishes"):
+    assert phrase in expected, phrase
+PY
+grep -q "Phases 1" "$SKILL" && bad "skill still routes through phases" || ok "skill has no phase routing"
+grep -q "only build trigger" "$SKILL" && bad "skill still requires build keyword" || ok "skill has no build keyword gate"
+
 group "credentials never come from chat"
 grep -rq "BEAM_API_KEY='" "$ROOT/beam/skills/agent-builder" \
   && bad "docs still prefix credentials" || ok "docs no longer prefix credentials"
@@ -53,7 +78,7 @@ OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
 [ "$rc" -eq 3 ] && ok "missing key exits 3" || bad "expected exit 3, got $rc"
 [ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] && ok "code=auth_error" || bad "wrong code"
 printf '%s' "$OUT" | grep -q 'beam login' && ok "next step names 'beam login'" || bad "no next step"
-printf '%s' "$OUT" | grep -qi 'paste' && ok "explicitly warns against pasting the key" || bad "no anti-paste guidance"
+printf '%s' "$OUT" | grep -qi 'do not ask.*API key' && ok "explicitly keeps the key out of chat" || bad "no key-handling guidance"
 
 # Key present but no workspace -> validation_error, never a silent guess.
 OUT="$(env -u BEAM_WORKSPACE_ID BEAM_API_KEY=sk-test BEAM_CONFIG_DIR="$WORK/empty" \

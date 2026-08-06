@@ -228,7 +228,8 @@ a frontier model just because one is available; every node runs on every task.
 
 ## Cost projection
 
-Use this section in Phase 2 to calculate the cost of each design option and show it to the user before they approve.
+Use this section when cost, volume, or model choice affects the user's decision.
+Do not require a cost projection merely to obtain flow approval.
 
 ### Credit rates
 
@@ -280,4 +281,5 @@ At 100 tasks/day (3,000/month):
 - Pro: 13 × $0.10 × 3,000 = **$3,900/month**
 - Enterprise: 13 × $0.049 × 3,000 = **$1,911/month**
 
-If volume is unknown, state the assumption explicitly in the State 4 or State 5 display. Show two volume scenarios if the user has given no signal.
+If you present a cost projection and volume is unknown, state the assumption
+explicitly. Show two scenarios only when that comparison helps the user decide.

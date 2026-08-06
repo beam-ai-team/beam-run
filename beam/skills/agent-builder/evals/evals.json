@@ -10,7 +10,7 @@
       "id": 0,
       "name": "linear-integration-blog-emailer",
       "prompt": "Build me a Beam agent that takes a topic, writes a short blog post about it (around 400 words), and emails the finished post to me. I use Gmail.",
-      "expected_output": "A deployed Beam agent (draft, not published) with an entry node, a custom GPT node that writes the blog post using a proper ## Role/## Task/## Context/## Rules prompt, and a Gmail integration node whose subject/body are linked to the writer node's outputs. Before deploying, the skill asks exactly one clarifying question about the recipient address, shows a Mermaid diagram, and waits for the word `build`. It reports the agent as a draft and asks before publishing.",
+      "expected_output": "Before creating anything, the skill shows a Mermaid diagram, names Gmail as the confirmed integration, states any recipient assumption, and asks whether that is the intended flow. After ordinary-language approval, it creates a draft (not published) with an entry node, a custom GPT writer using a ## Role/## Task/## Context/## Rules prompt, and a Gmail node whose subject/body are linked to the writer outputs. It does not require the word `build`.",
       "files": []
     },
     {
@@ -32,7 +32,7 @@
       "name": "error-not-signed-in",
       "prompt": "Build me a Beam agent that summarises my open support tickets each morning.",
       "setup": "Run with BEAM_CONFIG_DIR pointing at an empty directory and BEAM_API_KEY unset, so `validate` exits 3 with code auth_error.",
-      "expected_output": "The skill runs `validate` first, sees the non-zero exit, and STOPS. It relays the `next` field — telling the user to run `beam login` in a terminal — and does not proceed to intake or design. It must NOT ask the user to paste an API key into the chat, and must not retry the same command unchanged.",
+      "expected_output": "The skill runs `validate` first, sees the non-zero exit, and STOPS. It runs `beam login` so the user can approve in the browser, and does not proceed to intake or design. It must NOT ask the user for an API key, and must not retry the same command unchanged.",
       "files": []
     },
     {
@@ -40,7 +40,7 @@
       "name": "error-no-workspace-selected",
       "prompt": "List my Beam agents and then build one that files expense reports.",
       "setup": "Credentials present but no BEAM_WORKSPACE_ID set, so `validate` exits 2 with code validation_error.",
-      "expected_output": "The skill stops on the non-zero exit and helps the user choose a workspace with `beam workspace list <search>` then `beam workspace <id>`. It does not guess a workspace and does not continue to design.",
+      "expected_output": "The skill stops on the non-zero exit. It uses explicit workspace context when present; otherwise it asks the user once and remembers the answer with `beam workspace <id>`. It does not guess or continue to design.",
       "files": []
     },
     {
@@ -56,7 +56,21 @@
       "name": "update-existing-agent-smallest-patch",
       "prompt": "Change the tone of the reply node on my ticket triage agent to be more formal.",
       "setup": "An existing deployed agent with a reply node.",
-      "expected_output": "The skill identifies the agent, runs `get-nodes` then `get-node`, shows the proposed change and waits for `build`, then applies the SMALLEST command that fits — `update-node-prompt` — rather than a full `deploy --agent-id` redeploy. It reports the result as a draft and asks before publishing.",
+      "expected_output": "The skill identifies the agent, runs `get-nodes` then `get-node`, and applies the SMALLEST command that fits — `update-node-prompt` — rather than a full `deploy --agent-id` redeploy. A direct, unambiguous tone request does not reopen flow approval. It reports the result as a draft and asks before publishing.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "conversational-gmail-slack-flow-approval",
+      "turns": [
+        "Build an agent that watches new Gmail emails, writes a Gemini Flash summary to Beam, and alerts #customer-escalations in Slack for urgent customer issues. Keep it as a draft.",
+        "Yes. Make the Slack alert formal and include sender, subject, summary, and why it is urgent.",
+        "Don't test yet.",
+        "Billing questions should alert Slack only when they are overdue.",
+        "Yes, go ahead.",
+        "Publish it."
+      ],
+      "expected_output": "Turn 1 produces a Mermaid diagram showing Gmail -> extraction -> Beam task result plus an urgent condition to Slack, lists Gmail and Slack integrations, states that the agent remains a draft, and asks for natural-language approval before creating it. Turn 2 creates the formal-tone draft without requiring a command word. Turn 3 skips testing. Turn 4 shows a revised Mermaid diagram and the same integrations because routing changes materially; turn 5 updates the draft after natural approval; turn 6 publishes after naming the live Gmail and Slack consequence.",
       "files": []
     }
   ]

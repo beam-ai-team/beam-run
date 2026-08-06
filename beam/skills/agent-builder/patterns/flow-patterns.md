@@ -2,7 +2,8 @@
 
 **Beam executes nodes sequentially. There is no parallel execution.** A non-condition node has exactly one outgoing edge. To do several things, chain them. To do one of several things, use a condition node. To do a thing for each item in a list, use a looping node.
 
-Use this file in Phase 2 (Design) when translating a verbal brief into a node layout.
+Use this file whenever translating a verbal brief or material requested change
+into a node layout.
 
 ---
 

@@ -12,7 +12,7 @@ Workspace via `BEAM_WORKSPACE_ID` / `beam workspace <id>`.
 beam --help
 beam setup                     # install + PATH + register + verify (guided)
 beam doctor                    # self-diagnose; every red line names its fix
-beam login                     # hidden prompt — NEVER pass the key as an argument
+beam login                     # hidden API-key prompt
 beam register                  # add Beam as an HTTP MCP server in the host config
 beam whoami
 beam workspace                 # show
@@ -29,14 +29,17 @@ beam uninstall
 ```
 
 **Never** run `beam login --api-key <key>` — it leaks the key to shell history.
-Use the hidden prompt, `BEAM_API_KEY=… beam login`, or `--api-key -` (stdin).
+Use the hidden prompt. Automation may use `BEAM_API_KEY=… beam login` or `--api-key -`.
 
 ## Workspace
 
-`beam login` sets the workspace only when the account has exactly one. With more
-than one it deliberately leaves it unset rather than guessing — guessing drops the
-user into an arbitrary workspace whose agent list looks empty. Resolve it with
-`beam workspace list <search>` then `beam workspace <id>`.
+The key is global and login does not choose a workspace. The CLI keeps a
+still-accessible remembered default, auto-selects the only membership, and otherwise
+leaves context unset. Use an explicit workspace from the user's request when present.
+When multiple workspaces are still possible, ask once, then run
+`beam workspace list <search>` and `beam workspace <id>` to remember the answer.
+On empty/not-found results, name the active workspace and ask before switching;
+never search every workspace or change context silently.
 
 ## Exit codes
 

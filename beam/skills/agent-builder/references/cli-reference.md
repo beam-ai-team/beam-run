@@ -229,7 +229,9 @@ Remove an agent's webhook.
 ## Smoke testing
 
 ### `test-node <agentId> <nodeId> "<taskContext>"`
-Run a single node against a task context string. Use in Phase 4 to smoke-test 2–3 representative nodes before running a full task suite. Executes only that node — not the rest of the graph.
+Run a single node against a task context string. Use when the user requests a
+focused test or when diagnosis needs to isolate a representative node. Executes
+only that node — not the rest of the graph.
 ```bash
 beam agent-builder test-node AGENT_ID NODE_ID "Realistic input for this node"
 ```

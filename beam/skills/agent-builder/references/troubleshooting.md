@@ -12,12 +12,12 @@ and makes it unparseable.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `Not signed in to Beam.` (`auth_error`, exit 3) | No API key in the environment or in `~/.config/beam/credentials`. | Tell the user to run `beam login` in a terminal. **Never** ask them to paste a key into the chat. |
-| `No Beam workspace selected.` (`validation_error`, exit 2) | A key resolved but no workspace is set. | `beam workspace list <search>`, then `beam workspace <id>`. Do not guess — the wrong workspace looks empty. |
+| `Not signed in to Beam.` (`auth_error`, exit 3) | No API key in the environment or in `~/.config/beam/credentials`. | Run `beam login`; the user approves in the browser. **Never** ask them for a key. |
+| `No Beam workspace selected.` (`validation_error`, exit 2) | A key resolved but no workspace is set. | Use explicit request context; otherwise ask once, then remember it with `beam workspace <id>`. Do not guess — the wrong workspace looks empty. |
 | `beam: command not found` | The CLI is not on PATH. | Run the plugin's `setup` skill, or `beam setup`. Open a new terminal afterwards. |
 | `bundled agent builder not found` | Plugin files are incomplete. | Reinstall the plugin, then `beam setup`. |
 | `the agent builder needs python3` | No Python 3.8+. | Install Python 3, then retry. |
-| `Authentication failed (401)` / `(403)` | API key or workspace ID is wrong, expired, or revoked. | Ask the user for fresh credentials. A 403 can also mean the key lacks access to that workspace. |
+| `Authentication failed (401)` / `(403)` | The API key was revoked, the workspace is inaccessible, or the user lacks permission. | Run `beam login` again. If it persists, verify the active workspace and the user's permissions. |
 | `cannot reach the Beam API` | `BEAM_API_URL` is wrong, or the API is down. | Confirm the URL with the user — it must point at their Beam API instance. |
 | `auth/access-token did not return an idToken` | Trigger/webhook auth exchange failed. | The API key may be invalid, or the server has no `/auth/access-token`. Verify with `validate` first. |
 

@@ -23,6 +23,12 @@ proxy, no Node/uv. Where the host only supports stdio, the plugin bridges via `b
 Exact tool names depend on the server version — discover what's connected in the
 host's MCP panel rather than assuming this list is exhaustive.
 
+Workspace-specific tools require an explicit workspace ID. Resolve it from the
+user's request or Beam URL first, then `beam workspace`, then a sole membership.
+If multiple remain possible, ask once and remember the answer. On empty/not-found
+results, name the active workspace and offer a switch; never search every workspace
+or change the default without the user's choice.
+
 ## MCP vs CLI vs API
 
 | Need | Use |

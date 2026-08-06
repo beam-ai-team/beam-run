@@ -169,8 +169,8 @@ def resolve_creds():
         raise BeamError(
             "Not signed in to Beam.",
             code="auth_error",
-            next_step="Run `beam login` in a terminal (it prompts for the key without "
-                      "echoing it). Do not ask the user to paste the key into the chat.",
+            next_step="Run `beam login` and approve in the browser. Do not ask the user "
+                      "for an API key.",
         )
     if not workspace_id:
         raise BeamError(
@@ -213,8 +213,7 @@ def _http(method, url, headers, body=None, params=None, timeout=HTTP_TIMEOUT):
                 f"Authentication failed ({exc.code}) on {path}. "
                 f"Your Beam API key may be invalid or expired. {detail}",
                 code="auth_error",
-                next_step="Run `beam login` with a fresh key from app.beam.ai -> "
-                          "Personal settings -> API Keys, then retry.",
+                next_step="Run `beam login` and approve in the browser, then retry.",
             )
         raise BeamError(
             f"{method} {path} failed ({exc.code}): {detail}",
@@ -1355,7 +1354,13 @@ def cmd_search_agents(api, args):
     data = api.get("/agent", params={"searchKeyword": args.keyword})
     raw = data.get("data") or data.get("agents") or []
     agents = [{"id": a.get("id"), "name": a.get("name")} for a in raw]
-    return {"agents": agents, "total": len(agents)}
+    result = {"agents": agents, "total": len(agents),
+              "workspaceId": api.workspace_id}
+    if not agents:
+        result["hint"] = ("No agents matched in the current workspace. Ask the user "
+                          "whether to create one here or switch with `beam workspace "
+                          "list <search>` then `beam workspace <id>`. Never switch silently.")
+    return result
 
 
 def cmd_get_nodes(api, args):
