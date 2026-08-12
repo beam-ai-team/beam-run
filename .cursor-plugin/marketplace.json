@@ -1,10 +1,10 @@
 {
-  "name": "beam-plugins",
+  "name": "beam-run",
   "owner": {
     "name": "Beam AI"
   },
   "metadata": {
-    "description": "Official Beam plugins for Cursor"
+    "description": "Official Beam Run plugin for Cursor"
   },
   "plugins": [
     {

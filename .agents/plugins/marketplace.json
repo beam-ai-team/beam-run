@@ -1,7 +1,7 @@
 {
-  "name": "beam-plugins",
+  "name": "beam-run",
   "interface": {
-    "displayName": "Beam"
+    "displayName": "Beam Run"
   },
   "plugins": [
     {

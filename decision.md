@@ -1,5 +1,11 @@
 # Beam Production Validation Decisions
 
+## 2026-08-12 — Rename the Beam plugin marketplace to Beam Run
+
+- **Problem:** Plugin directories display the marketplace identifier alongside the plugin name. The identifier `beam-plugins` produced the user-facing label `Beam — beam-plugins`, which is a repository-oriented name rather than the product name.
+- **Decision:** Rename the marketplace identifier to `beam-run` in the Codex, Claude Code, and Cursor marketplace manifests. Set Codex's marketplace display name to `Beam Run` and update the Claude installation selector to `beam@beam-run`.
+- **Compatibility:** This is a new marketplace identifier, so previously imported copies remain under their old `beam-plugins` name until removed and re-imported. It does not change the plugin package identifier (`beam`) or the Beam CLI executable.
+
 ## 2026-08-12 — Validation scope and audit log
 
 - **Decision:** Validate the Beam CLI and agent-builder surfaces against the production workspace manually selected in the Beam app: `Saqib` (`227e402a-e065-492a-ba26-3934bb9ce929`).
