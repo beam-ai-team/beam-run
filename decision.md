@@ -276,3 +276,15 @@
 - The replacement workflow passed lint but its Ubuntu activation E2E failed only at the file-permission assertion. The test tried BSD `stat -f` before GNU `stat -c`; GNU `stat` accepts `-f` with different meaning, so the fallback never ran.
 - **Decision:** Select the BSD or GNU mode command from `uname -s` before asserting mode `600`. The behavior under test is unchanged; this fixes only the test's cross-platform observation.
 - **Verification:** ShellCheck remains clean, and both offline suites again pass 23/23 and 35/35 locally. macOS had already passed the same E2E before its matrix sibling failure cancelled the remaining job.
+
+## 2026-08-12 — Add Beam branding to the Codex plugin
+
+- **Asset:** Added the user-approved 400×400 Beam JPEG as the shared asset `beam/assets/beam-logo.jpg`.
+- **Decision:** Use the same approved mark for `composerIcon`, `logo`, and `logoDark`, with Beam blue (`#3F76F6`) as the plugin brand color. The image includes its own blue background and is suitable for both light and dark presentation.
+- **Delivery:** Updated the Codex cachebuster version so a subsequent installation fetches the icon-bearing plugin. `validate_plugin.py` passes and `git diff --check` remains clean. No plugin installation was performed; the user requested a clean uninstall before their later KETTA installation.
+
+## 2026-08-12 — Extend Beam branding across plugin packages
+
+- **Decision:** Keep one canonical, repository-relative logo asset at `beam/assets/beam-logo.jpg` and reference it from the Codex and Cursor packages. Codex uses it for the composer icon and both theme logos; Cursor uses its documented `logo` manifest field.
+- **Claude Code compatibility:** Claude Code's available plugin-manifest documentation and the local environment do not provide a documented logo field or installed CLI schema to validate one. Its plugin package therefore ships the shared Beam asset but deliberately leaves the existing supported manifest fields unchanged rather than adding unverified metadata that could be ignored or rejected.
+- **Verification:** Validate the Codex manifest, parse every plugin JSON manifest, confirm the shared asset exists, and check the full diff for whitespace errors. No plugin was installed, and no browser action was used.
