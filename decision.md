@@ -264,3 +264,9 @@
 
 - The first completed run exercised the loop mechanics successfully, but the LLM item-generator filtered the labelled batch to `alpha` and `gamma` despite the fixture instruction to preserve every item. The fixture prompt was tightened to say explicitly not to filter, classify, or omit items; the prompt-only draft update again passed `All links OK` and remained unpublished.
 - Follow-up task `971b5500-965b-4672-95f2-0b5ce408588b` (`BEA-T-12`) completed. The model still chose the two actionable items, but the runtime result is unambiguous: both linked inputs were resolved without pause, the loop completed its two iterations, and the post-loop compiler completed. This is an LLM-output-quality limitation of the disposable synthetic parser/classifier, not a loop-graph failure. No production integration, external action, or browser write was used.
+
+## 2026-08-12 — Repair GitHub Actions ShellCheck failure
+
+- **Evidence:** PR #2's `install-test` workflow failed only in the `lint` job. ShellCheck reported SC2015 for two new CLI argument guards and for the intentional `cond && ok || bad` test-accounting idiom in `test/e2e.sh`.
+- **Decision:** Replace the production CLI guards with explicit `if` statements. Add a narrowly documented SC2015 directive to the E2E harness, matching the existing Agent Builder E2E harness, because both `ok` and `bad` intentionally return success.
+- **Verification:** `shellcheck beam/bin/beam test/smoke.sh test/e2e.sh test/e2e-agent-builder.sh` passes; `sh test/e2e.sh` passes 23/23; `sh test/e2e-agent-builder.sh` passes 35/35; and `git diff --check` passes.

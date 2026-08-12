@@ -609,8 +609,9 @@ json_quote() {
 
 cmd_tasks_test() {
   agent_id="${1:-}"; task_query="${2:-}"
-  [ -n "$agent_id" ] && [ -n "$task_query" ] || \
+  if [ -z "$agent_id" ] || [ -z "$task_query" ]; then
     die "validation_error" "usage: beam tasks test <agentId> <task input>" 2
+  fi
 
   # `isDraftTask` is the API's graph-selection flag. `isTestTask` is returned
   # by some task APIs but is ignored when supplied during task creation.
@@ -635,8 +636,9 @@ cmd_tasks_get() {
 
 cmd_tasks_submit_input() {
   task_id="${1:-}"; task_node_id="${2:-}"; parameter="${3:-}"; answer="${4:-}"
-  [ -n "$task_id" ] && [ -n "$task_node_id" ] && [ -n "$parameter" ] && [ -n "$answer" ] || \
+  if [ -z "$task_id" ] || [ -z "$task_node_id" ] || [ -z "$parameter" ] || [ -z "$answer" ]; then
     die "validation_error" "usage: beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>" 2
+  fi
 
   task_node_json="$(json_quote "$task_node_id")"
   parameter_json="$(json_quote "$parameter")"

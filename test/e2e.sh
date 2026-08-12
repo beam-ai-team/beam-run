@@ -2,6 +2,9 @@
 # End-to-end activation tests. Runs inside a throwaway HOME.
 # Local: sh test/e2e.sh
 # Authenticated: BEAM_API_KEY='<key>' sh test/e2e.sh
+# Assertions deliberately use `cond && ok || bad`; both helpers always
+# succeed, so this is a compact test-accounting pattern rather than control flow.
+# shellcheck disable=SC2015
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
