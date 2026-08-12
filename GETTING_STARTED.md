@@ -24,7 +24,7 @@ and shows no error. Use the UI instead:
 
 ```
 /plugin marketplace add beam-ai-team/beam-run
-/plugin install beam@beam-plugins
+/plugin install beam@beam-run
 ```
 
 Either way, **fully restart** Claude Code afterwards. The desktop app and the CLI share
