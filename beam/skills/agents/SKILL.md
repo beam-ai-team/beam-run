@@ -12,6 +12,20 @@ Prefer **MCP tools** when available; fall back to the CLI/API.
 - MCP: `listAgents`
 - CLI: `beam agents list` (requires workspace set via `beam whoami` / `beam workspace`)
 
+When the MCP tool is unavailable in the current host, use the CLI before offering
+setup. Missing MCP tools alone do **not** mean that Beam is disconnected: the
+host loads its MCP tools at startup, while an already-signed-in CLI can still
+list the user's agents.
+
+If `beam` is not on the current shell's PATH, resolve and invoke the bundled
+`bin/beam` launcher (using the setup skill's launcher fallback) and retry
+`agents list`. Do **not** run `beam setup` solely because `beam` was not found
+on PATH. Run setup only when the CLI reports missing or invalid authentication,
+or when no usable launcher can be found.
+
+Tell the user to fully restart the host only after they sign in or change the
+MCP configuration. A new task by itself does not require a restart.
+
 Summarize as a short table: name, type, id. Don't dump full JSON unless asked.
 
 ## Inspect a graph

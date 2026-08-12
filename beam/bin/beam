@@ -197,7 +197,10 @@ _http_get() {
     # Capture curl's status via an `if` so errexit stays untouched: toggling
     # `set +e`/`set -e` in here silently re-enabled it for the CALLER, which made
     # `beam doctor` abort mid-checklist on a rejected key (the one case it exists for).
-    if code=$(curl -sS --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then
+    # Ask for a compressed response.  /v2/user/me can include thousands of
+    # workspaces; without this, a valid key can look rejected when the large
+    # uncompressed profile cannot finish inside the timeout.
+    if code=$(curl -sS --compressed --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then
       cx=0
     else
       cx=$?
@@ -263,11 +266,11 @@ _http_send() {
   tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")
   # As in _http_get: never toggle errexit here — it leaks to the caller.
   if [ -n "$body" ]; then
-    if code=$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 60 \
+    if code=$(printf '%s' "$body" | curl -sS --compressed --connect-timeout 5 --max-time 60 \
       -X "$method" -H "Content-Type: application/json" --data-binary @- \
       -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then cx=0; else cx=$?; fi
   else
-    if code=$(curl -sS --connect-timeout 5 --max-time 60 \
+    if code=$(curl -sS --compressed --connect-timeout 5 --max-time 60 \
       -X "$method" -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then cx=0; else cx=$?; fi
   fi
   if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
@@ -380,6 +383,10 @@ Usage:
   beam agents deploy <spec>  build/update an agent from a spec (draft; --publish to go live)
   beam agents publish <gid>  publish a draft graph (graphId from deploy output)
   beam agents delete <id>    delete an agent
+  beam tasks test <id> <q>   run a task against the agent's draft graph
+  beam tasks get <id>        inspect a task or draft test task
+  beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>
+                             provide a requested value to a paused task
   beam agent-builder <cmd>   bundled agent builder (design/build/patch graphs)
   beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
   beam uninstall
@@ -587,6 +594,59 @@ cmd_agents_delete() {
   if [ "$rc" -eq 3 ]; then die "auth_missing" "delete auth failed (JWT exchange rejected) — run beam login again" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "delete failed (network/timeout) — agent NOT deleted" 5; fi
   printf '{"ok":true,"deleted":"%s"}\n' "$id"
+}
+
+json_quote() {
+  # Quote arbitrary task input without putting it in shell history. jq is
+  # preferred, with Python available on every agent-builder installation.
+  if command -v jq >/dev/null 2>&1; then printf '%s' "$1" | jq -Rs .; return; fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+    return
+  fi
+  die "internal_error" "beam tasks test needs jq or python3 to encode task input safely" 1
+}
+
+cmd_tasks_test() {
+  agent_id="${1:-}"; task_query="${2:-}"
+  [ -n "$agent_id" ] && [ -n "$task_query" ] || \
+    die "validation_error" "usage: beam tasks test <agentId> <task input>" 2
+
+  # `isDraftTask` is the API's graph-selection flag. `isTestTask` is returned
+  # by some task APIs but is ignored when supplied during task creation.
+  aid_json="$(json_quote "$agent_id")"
+  query_json="$(json_quote "$task_query")"
+  body="{\"agentId\":$aid_json,\"taskQuery\":{\"query\":$query_json},\"isDraftTask\":true}"
+  set +e; resp="$(api_write POST "/agent-tasks" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "draft test task could not be created" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_get() {
+  task_id="${1:-}"
+  [ -n "$task_id" ] || die "validation_error" "usage: beam tasks get <taskId>" 2
+  set +e; resp="$(api_request "/agent-tasks/$task_id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 4 ]; then die "task_not_found" "task $task_id was not found in the current workspace" 2; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_submit_input() {
+  task_id="${1:-}"; task_node_id="${2:-}"; parameter="${3:-}"; answer="${4:-}"
+  [ -n "$task_id" ] && [ -n "$task_node_id" ] && [ -n "$parameter" ] && [ -n "$answer" ] || \
+    die "validation_error" "usage: beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>" 2
+
+  task_node_json="$(json_quote "$task_node_id")"
+  parameter_json="$(json_quote "$parameter")"
+  answer_json="$(json_quote "$answer")"
+  body="{\"taskNodeId\":$task_node_json,\"userInputs\":[{\"question\":$parameter_json,\"answer\":$answer_json,\"parameter\":$parameter_json}]}"
+  set +e; resp="$(api_write PATCH "/agent-tasks/execution/$task_id/user-input" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 4 ]; then die "task_not_found" "task $task_id was not found in the current workspace" 2; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task input could not be submitted" 5; fi
+  printf '%s\n' "$resp"
 }
 
 cmd_mcp() {
@@ -899,6 +959,16 @@ cmd_setup() {
 
   # ---- onboarding output: success line + emoji checklist + last steps ----
   if [ "$signed" = "0" ]; then
+    # A person running setup in a terminal should not have to discover and run
+    # a second command just to provide their API key. The login prompt masks
+    # input, validates the key before saving it, and registers MCP on success.
+    # Agents and CI are non-interactive, so retain explicit, safe next steps
+    # for those callers instead of attempting to read a key from stdin.
+    if [ -t 0 ]; then
+      printf '🔑 Finish setup by signing in now.\n\n' >&2
+      cmd_login
+      return 0
+    fi
     printf '🚀 Beam is installed — 2 quick steps to finish.\n\n'
     printf '  ✅ Plugin installed\n'
     path_line
@@ -962,6 +1032,14 @@ main() {
         publish) cmd_agents_publish "$@" ;;
         delete) cmd_agents_delete "$@" ;;
         *) die "validation_error" "usage: beam agents <list|get|deploy|publish|delete>" 2 ;;
+      esac ;;
+    tasks)
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        test) cmd_tasks_test "$@" ;;
+        get) cmd_tasks_get "$@" ;;
+        submit-input) cmd_tasks_submit_input "$@" ;;
+        *) die "validation_error" "usage: beam tasks <test|get|submit-input>" 2 ;;
       esac ;;
     agent-builder) cmd_agent_builder "$@" ;;
     mcp) cmd_mcp ;;

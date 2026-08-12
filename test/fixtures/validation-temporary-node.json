@@ -1,0 +1,23 @@
+{
+  "name": "Temporary CLI mutation check",
+  "objective": "Pass through the synthetic validation text without side effects",
+  "node_type": "executionNode",
+  "model": "GEMINI_3_FLASH",
+  "prompt": "Return the supplied text exactly once. Do not call external services.",
+  "input_params": [
+    {
+      "name": "message",
+      "description": "Synthetic validation text",
+      "fill_type": "ai_fill",
+      "required": true,
+      "type": "string"
+    }
+  ],
+  "output_params": [
+    {
+      "name": "passthrough_message",
+      "description": "Unmodified synthetic validation text",
+      "type": "string"
+    }
+  ]
+}

@@ -22,9 +22,9 @@ Wait for clear natural-language approval.
 ```bash
 beam setup
 ```
-It installs `beam`, puts it on PATH (and your shell rc), and — if you're already signed in — registers the Beam MCP server and runs `beam doctor`. Branch on the exit code:
+It installs `beam`, puts it on PATH (and your shell rc), and, in an interactive terminal, immediately opens the masked sign-in prompt. If the caller has no terminal (as in an agent or CI), it prints the secure next step instead. Once signed in, it registers the Beam MCP server. Branch on the exit code:
 - **0** → installed, signed in, registered → go to step 4.
-- **3** (not signed in) → do step 3, then re-run `beam setup`.
+- **3** (non-interactive and not signed in) → do step 3, then re-run `beam setup`.
 - **127 / `beam` not found** → resolve the launcher (see Fallbacks) and re-run with its absolute path.
 
 ### 3 · Sign in

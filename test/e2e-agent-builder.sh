@@ -80,6 +80,14 @@ OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
 printf '%s' "$OUT" | grep -q 'beam login' && ok "next step names 'beam login'" || bad "no next step"
 printf '%s' "$OUT" | grep -qi 'do not ask.*API key' && ok "explicitly keeps the key out of chat" || bad "no key-handling guidance"
 
+# A new-agent dry-run is offline, but an update dry-run must read the current
+# graph before it can merge the proposed changes. It therefore must not build
+# an empty client and send an empty access-token request.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  "$BEAM" agent-builder deploy "$SPECS/linear-blog-emailer.json" --agent-id test-agent --dry-run 2>/dev/null)"; rc=$?
+[ "$rc" -eq 3 ] && ok "update dry-run requires credentials" || bad "update dry-run should require credentials, got $rc"
+[ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] && ok "update dry-run reports auth_error" || bad "update dry-run has wrong auth error"
+
 # Key present but no workspace -> validation_error, never a silent guess.
 OUT="$(env -u BEAM_WORKSPACE_ID BEAM_API_KEY=sk-test BEAM_CONFIG_DIR="$WORK/empty" \
   "$BEAM" agent-builder validate 2>/dev/null)"; rc=$?
@@ -143,6 +151,50 @@ for f in "$SPECS"/*.json; do
   "$BEAM" agent-builder deploy "$f" --dry-run --summary >/dev/null 2>&1 \
     && ok "$n" || bad "$n no longer builds"
 done
+
+group "variable loops use linked iteration inputs and canonical edges"
+python3 - "$ROOT/beam/skills/agent-builder/scripts/beam.py" "$SPECS/loop-article-digest.json" <<'PY' \
+  && ok "loop payload has linked item input and no semantic alias" \
+  || bad "loop payload uses a semantic alias or non-canonical edges"
+import importlib.util, json, sys
+script, fixture = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("beam_builder", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+payload = module.build_payload(json.load(open(fixture)))
+nodes = {node["objective"]: node for node in payload["nodes"]}
+body = nodes["Summarize the current article"]
+loop = nodes["Loop over each candidate article"]
+source = nodes["List candidate articles for the topic"]
+compile_node = nodes["Compile all article summaries into a digest"]
+assert body["parentNodeId"] == loop["id"]
+assert "alias" not in loop["nodeConfigurations"]
+assert "nodeConfigurations" not in body or "alias" not in body["nodeConfigurations"]
+item = body["toolConfiguration"]["inputParams"][0]
+assert item["fillType"] == "linked"
+assert item["linkedOutputParamNodeId"] == source["id"]
+assert item["linkedOutputParamName"] == "articles"
+assert [e["targetAgentGraphNodeId"] for e in loop["childEdges"]] == [compile_node["id"]]
+assert body["childEdges"] == []
+PY
+
+group "condition updates keep the intended objective"
+python3 - "$ROOT/beam/skills/agent-builder/scripts/beam.py" "$SPECS/condition-ticket-router.json" <<'PY' \
+  && ok "condition objective refreshes on update" \
+  || bad "condition update keeps a stale objective"
+import copy, importlib.util, json, sys
+script, fixture = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("beam_builder", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+original = json.load(open(fixture))
+existing = {"graph": {"nodes": module.build_payload(original)["nodes"]}}
+revised = copy.deepcopy(original)
+revised["nodes"][2]["objective"] = "Route the ticket through the revised condition"
+payload = module.build_payload_update(revised, existing)
+condition = next(node for node in payload["nodes"] if node.get("nodeType") == "conditionNode")
+assert condition["objective"] == "Route the ticket through the revised condition"
+PY
 
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY for the authenticated checks.\n' "$pass" "$fail"

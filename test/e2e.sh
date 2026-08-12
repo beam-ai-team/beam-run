@@ -74,6 +74,17 @@ if NO_KEY="$(sandbox BEAM_API_KEY= sh "$BEAM" login </dev/null 2>&1)"; then no_k
 [ "$no_key_rc" -eq 3 ] && printf '%s' "$NO_KEY" | grep -q 'BEAM_API_KEY' && ok "non-interactive login gives secure options" || bad "missing API-key login guidance"
 printf '%s' "$(sh "$BEAM" --help)" | grep -q 'masked prompt' && ok "help documents masked API-key login" || bad "help still describes browser login"
 
+group "draft test-task CLI"
+printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam tasks test' && ok "help documents draft test tasks" || bad "missing draft test command"
+printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam tasks get' && ok "help documents task inspection" || bad "missing task inspect command"
+printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam tasks submit-input' && ok "help documents paused task input" || bad "missing task input command"
+if sandbox BEAM_API_KEY= sh "$BEAM" tasks test test-agent >/dev/null 2>&1; then test_rc=0; else test_rc=$?; fi
+[ "$test_rc" -eq 2 ] && ok "missing task input exits validation" || bad "missing task input should exit 2"
+if sandbox BEAM_API_KEY= sh "$BEAM" tasks get >/dev/null 2>&1; then get_rc=0; else get_rc=$?; fi
+[ "$get_rc" -eq 2 ] && ok "missing task ID exits validation" || bad "missing task ID should exit 2"
+if sandbox BEAM_API_KEY= sh "$BEAM" tasks submit-input test-task test-node work_item >/dev/null 2>&1; then submit_rc=0; else submit_rc=$?; fi
+[ "$submit_rc" -eq 2 ] && ok "tasks submit-input validates its arguments" || bad "tasks submit-input missing argument should exit 2"
+
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY to run the authenticated checks.\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] || exit 1

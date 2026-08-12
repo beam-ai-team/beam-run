@@ -252,22 +252,36 @@ class Api:
         self._bearer = None
         self._bearer_expires = 0
 
-    # -- x-api-key endpoints (agent-graphs, tools) --------------------------
+    def _headers_for(self, path):
+        """Return the auth headers accepted by the requested API surface.
+
+        Most Beam APIs accept ``x-api-key`` directly.  The production
+        ``/agent-graphs`` routes also require a short-lived Bearer token on
+        newer deployments, even when the same key is accepted by ``/agent``.
+        Send both for graph calls so the builder remains compatible with both
+        server versions.
+        """
+        headers = _api_headers(self.api_key, self.workspace_id)
+        if path.startswith("/agent-graphs"):
+            headers["Authorization"] = "Bearer " + self._bearer_token()
+        return headers
+
+    # -- API-key endpoints, with Bearer added for agent-graph routes --------
     def get(self, path, params=None):
         return _http("GET", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), params=params)
+                     self._headers_for(path), params=params)
 
     def post(self, path, body):
         return _http("POST", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), body=body)
+                     self._headers_for(path), body=body)
 
     def put(self, path, body):
         return _http("PUT", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), body=body)
+                     self._headers_for(path), body=body)
 
     def patch(self, path, body=None):
         return _http("PATCH", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), body=body)
+                     self._headers_for(path), body=body)
 
     # -- Bearer-JWT endpoints (triggers, webhooks) --------------------------
     def _bearer_token(self):
@@ -461,6 +475,10 @@ def _resolve_loop_node_refs(config, node_ids):
     if not isinstance(config, dict):
         return config
     out = dict(config)
+    # `alias` is backend-owned bookkeeping for loop execution children.  It is
+    # not a user-facing iteration variable; the API assigns numeric aliases as
+    # it persists the graph.  Never send a semantic alias from a builder spec.
+    out.pop("alias", None)
     lvid = out.get("linkedVariableId")
     if isinstance(lvid, str) and ":" in lvid:
         src_key, _, param = lvid.partition(":")
@@ -471,6 +489,32 @@ def _resolve_loop_node_refs(config, node_ids):
     if isinstance(lagn, str) and lagn in node_ids:
         out["linkedAgentGraphNodeId"] = node_ids[lagn]
     return out
+
+
+def _normalize_loop_edges(edges, nodes_spec, node_ids):
+    """Compile authored loop edges into the product Builder's canonical form.
+
+    Membership in a loop is represented solely by ``parentNodeId``.  Loop body
+    nodes may have internal edges, but neither loop->body nor body->outside
+    edges belong in the persisted subflow: the latter becomes loop->outside so
+    the runtime resumes normal flow only after all iterations complete.
+    """
+    by_key = {node["key"]: node for node in nodes_spec}
+    loop_bodies = {}
+    for node in nodes_spec:
+        parent = node.get("parent")
+        if parent and by_key.get(parent, {}).get("node_type") == "loopingNode":
+            loop_bodies.setdefault(parent, set()).add(node["key"])
+
+    for loop_key, bodies in loop_bodies.items():
+        for edge_key, edge in list(edges.items()):
+            source_key, target_key = edge_key.split("->", 1)
+            if source_key == loop_key and target_key in bodies:
+                del edges[edge_key]
+            elif source_key in bodies and target_key not in bodies:
+                del edges[edge_key]
+                edge["sourceAgentGraphNodeId"] = node_ids[loop_key]
+                edges[f"{loop_key}->{target_key}"] = edge
 
 
 # Graph layout spacing (pixels). Tunable; explicit spec coords override these.
@@ -663,6 +707,33 @@ def _validate_spec(spec):
                     f"Looping node '{node.get('key')}' cannot itself sit inside another "
                     f"loop — loops cannot be nested."
                 , code="validation_error")
+            config = node.get("node_configurations") or {}
+            count = config.get("iterationCount")
+            variable = config.get("linkedVariableId")
+            has_count = count is not None
+            has_variable = isinstance(variable, str) and bool(variable.strip())
+            if has_count == has_variable:
+                raise BeamError(
+                    f"Looping node '{node.get('key')}' must set exactly one of "
+                    "iterationCount or linkedVariableId.", code="validation_error")
+            if has_count and (isinstance(count, bool) or not isinstance(count, int) or count < 1):
+                raise BeamError(
+                    f"Looping node '{node.get('key')}' has invalid iterationCount; "
+                    "use an integer of at least 1.", code="validation_error")
+            if has_variable:
+                source_key, separator, param_name = variable.partition(":")
+                source = by_key.get(source_key)
+                if not separator or not source or not param_name:
+                    raise BeamError(
+                        f"Looping node '{node.get('key')}' linkedVariableId must be "
+                        "'<sourceNodeKey>:<arrayParamName>'.", code="validation_error")
+                source_param = next(
+                    (op for op in source.get("output_params", []) or []
+                     if _param_name(op) == param_name), None)
+                if not source_param or not source_param.get("is_array"):
+                    raise BeamError(
+                        f"Looping node '{node.get('key')}' must reference an array "
+                        f"output; '{variable}' is not one.", code="validation_error")
 
     # Integrations are matched to nodes by exact 'objective' string, so a
     # duplicate silently attaches the tool to the wrong node.
@@ -739,6 +810,7 @@ def build_payload(spec, integ_outputs=None):
                 edge["conditionGroups"] = _resolve_condition_group_refs(
                     e["condition_groups"], NODE)
             EDGES[f'{ns["key"]}->{e["target"]}'] = edge
+    _normalize_loop_edges(EDGES, nodes_spec, NODE)
 
     def child_edges(src):
         return [v for k, v in EDGES.items() if k.startswith(src + "->")]
@@ -832,13 +904,14 @@ def build_payload(spec, integ_outputs=None):
         criteria = ns.get("evaluation_criteria", []) or []
         if not node_type:
             node_type = "entryNode" if is_entry else "executionNode"
+        is_exit = node_type == "exitNode"
 
         node = {
             "id": NODE[ns["key"]],
             "objective": ns["objective"],
             "evaluationCriteria": criteria,
             "isEntryNode": is_entry,
-            "isExitNode": False,
+            "isExitNode": is_exit,
             "nodeType": node_type,
             "parentNodeId": NODE[ns["parent"]] if ns.get("parent") else None,
             "xCoordinate": ns["x"] if "x" in ns else layout[ns["key"]][0],
@@ -905,10 +978,14 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
 
     existing_by_fn = {
         get_fn(n): n for n in existing_nodes
-        if not n.get("isEntryNode") and n.get("nodeType") not in ("conditionNode", "loopingNode")
+        if not n.get("isEntryNode") and n.get("nodeType") not in ("conditionNode", "loopingNode", "exitNode")
     }
     existing_entry = next((n for n in existing_nodes if n.get("isEntryNode")), None)
     existing_conditions = [n for n in existing_nodes if n.get("nodeType") == "conditionNode"]
+    existing_conditions_by_objective = {
+        (n.get("objective") or "").strip(): n for n in existing_conditions
+        if (n.get("objective") or "").strip()
+    }
 
     # Objective is the only identity that survives tool attachment: once a node
     # has an integration, its live toolFunctionName becomes e.g.
@@ -935,7 +1012,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
     spec_fn = {
         ns["key"]: _tool_function_name(ns.get("tool_name") or ns.get("name") or "")
         for ns in nodes_spec
-        if not ns.get("is_entry") and ns.get("node_type") not in ("conditionNode", "loopingNode")
+        if not ns.get("is_entry") and ns.get("node_type") not in ("conditionNode", "loopingNode", "exitNode")
     }
 
     # Assign node UUIDs - reuse existing where matched.
@@ -946,9 +1023,17 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
         if ns.get("is_entry"):
             NODE[k] = existing_entry["id"] if existing_entry else _g()
         elif ns.get("node_type") == "conditionNode":
-            NODE[k] = remaining_conditions.pop(0)["id"] if remaining_conditions else _g()
+            exact = existing_conditions_by_objective.get((ns.get("objective") or "").strip())
+            if exact:
+                NODE[k] = exact["id"]
+                remaining_conditions = [n for n in remaining_conditions if n["id"] != exact["id"]]
+            else:
+                NODE[k] = remaining_conditions.pop(0)["id"] if remaining_conditions else _g()
         elif ns.get("node_type") == "loopingNode":
             NODE[k] = _g()
+        elif ns.get("node_type") == "exitNode":
+            ex = existing_by_objective.get(ns.get("objective", "").strip())
+            NODE[k] = ex["id"] if ex else _g()
         else:
             ex = find_existing(spec_fn[k], ns.get("objective"))
             NODE[k] = ex["id"] if ex else _g()
@@ -957,7 +1042,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
     # For matched nodes: reuse the API's existing TC id and output param ids.
     TC, OP = {}, {}
     for ns in nodes_spec:
-        if ns.get("is_entry") or ns.get("node_type") in ("conditionNode", "loopingNode"):
+        if ns.get("is_entry") or ns.get("node_type") in ("conditionNode", "loopingNode", "exitNode"):
             continue
         k = ns["key"]
         ex = find_existing(spec_fn[k], ns.get("objective"))
@@ -991,6 +1076,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 edge["conditionGroups"] = _resolve_condition_group_refs(
                     e["condition_groups"], NODE)
             EDGES[f'{ns["key"]}->{e["target"]}'] = edge
+    _normalize_loop_edges(EDGES, nodes_spec, NODE)
 
     def child_edges(src):
         return [v for k, v in EDGES.items() if k.startswith(src + "->")]
@@ -1081,7 +1167,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
             "objective": ns["objective"],
             "evaluationCriteria": criteria,
             "isEntryNode": False,
-            "isExitNode": False,
+            "isExitNode": node_type == "exitNode",
             "nodeType": node_type,
             "xCoordinate": ns.get("x", 250),
             "yCoordinate": ns.get("y", 150),
@@ -1182,6 +1268,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 (n for n in existing_conditions if n["id"] == node_id), None)
             if existing_cond and node_id not in reused_condition_ids:
                 node = copy.deepcopy(existing_cond)
+                node["objective"] = ns.get("objective", "")
                 node["childEdges"], node["parentEdges"] = ce, pe
                 if ns.get("node_configurations"):
                     node["nodeConfigurations"] = ns["node_configurations"]
@@ -1191,6 +1278,16 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 final_nodes.append(build_new_condition_node(ns))
         elif ns.get("node_type") == "loopingNode":
             final_nodes.append(build_new_node(ns))
+        elif ns.get("node_type") == "exitNode":
+            ex = existing_by_objective.get(ns.get("objective", "").strip())
+            node = copy.deepcopy(ex) if ex else build_new_node(ns)
+            node["isEntryNode"] = False
+            node["isExitNode"] = True
+            node["nodeType"] = "exitNode"
+            node.pop("toolConfiguration", None)
+            node.pop("nodeConfigurations", None)
+            node["childEdges"], node["parentEdges"] = ce, pe
+            final_nodes.append(node)
         else:
             ex = find_existing(spec_fn[k], ns.get("objective"))
             if ex:
@@ -1594,6 +1691,8 @@ def cmd_deploy(api, args):
             clean_params.append(p)
         objective = next((sn["objective"] for sn in spec["nodes"]
                           if sn["key"] == node_key), "")
+        node_model = next((sn.get("model", DEFAULT_NODE_MODEL) for sn in spec["nodes"]
+                           if sn["key"] == node_key), DEFAULT_NODE_MODEL)
         node_payload = {
             "id": node_id, "objective": objective,
             "isAttachmentDataPulledIn": True, "evaluationCriteria": [],
@@ -1603,7 +1702,9 @@ def cmd_deploy(api, args):
                 "shortDescription": integ.get("description", ""),
                 "description": integ.get("description", ""),
                 "iconSrc": integ.get("icon_src"),
-                "preferredModel": integ.get("preferred_model"),
+                # The integration's model is optional. Preserve the model
+                # chosen on the graph node instead of overwriting it with null.
+                "preferredModel": integ.get("preferred_model") or node_model,
                 "requiresConsent": integ.get("requires_consent", False),
                 "isMemoryTool": False, "isBackgroundTool": False,
                 "isBatchExecutionEnabled": False, "integrationProviderId": None,
@@ -1613,7 +1714,7 @@ def cmd_deploy(api, args):
         }
         api.patch_body = None
         _http("PATCH", api.base + "/agent-graphs/update-node",
-              _api_headers(api.api_key, api.workspace_id),
+              api._headers_for("/agent-graphs/update-node"),
               body={"agentId": agent_id, "graphId": graph_id, "node": node_payload})
         return {"step": "attach_tool", "status": "ok",
                 "detail": f"Attached {integ['tool_function_name']} to '{node_key}'."}
@@ -1679,7 +1780,7 @@ def cmd_deploy(api, args):
     def relink(op):
         key, node_payload = op
         _http("PATCH", api.base + "/agent-graphs/update-node",
-              _api_headers(api.api_key, api.workspace_id),
+              api._headers_for("/agent-graphs/update-node"),
               body={"agentId": agent_id, "graphId": graph_id, "node": node_payload})
         return {"step": "relink", "status": "ok", "detail": f"Re-linked '{key}'."}
 
@@ -1850,12 +1951,18 @@ def cmd_update_metadata(api, args):
         payload["settings"] = settings
     result = api.put(f"/agent-graphs/{args.agent_id}", payload)
     graph_id = result.get("draftGraphId")
+    # Beam may materialize a fresh draft-node set for a whole-graph update.
+    # Return the authoritative IDs so a CLI caller can safely issue its next
+    # node/edge command without relying on IDs read before this mutation.
+    nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
+    current_nodes = [{"id": n.get("id"), "objective": n.get("objective")}
+                     for n in nodes_data.get("nodes", []) or []]
     published = False
     if args.publish and graph_id:
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"updated": True, "agentId": args.agent_id, "agentName": payload["agentName"],
-            "graphId": graph_id, "published": published}
+            "graphId": graph_id, "nodes": current_nodes, "published": published}
 
 
 def cmd_add_node(api, args):
@@ -1886,7 +1993,7 @@ def cmd_add_node(api, args):
     new_node = {
         "id": new_node_id, "objective": ns["objective"],
         "evaluationCriteria": ns.get("evaluation_criteria", []) or [],
-        "isEntryNode": False, "isExitNode": False, "nodeType": node_type,
+        "isEntryNode": False, "isExitNode": node_type == "exitNode", "nodeType": node_type,
         "parentNodeId": ns.get("parentNodeId"),
         "xCoordinate": new_x, "yCoordinate": new_y,
         "isEvaluationEnabled": bool(ns.get("evaluation_criteria")),
@@ -1942,7 +2049,7 @@ def cmd_add_node(api, args):
                  "outputExample": op.get("output_example"),
                  "agentToolConfigurationId": new_tc_id, "parentId": None,
                  "paramPath": None, "typeOptions": None}
-                for op in ns.get("output_params", []) or []
+                for i, op in enumerate(ns.get("output_params", []) or [])
             ],
         }
 
@@ -1972,12 +2079,19 @@ def cmd_add_node(api, args):
     # value would send null and blank the agent).
     result = api.put(f"/agent-graphs/{args.agent_id}", {"nodes": existing_nodes})
     graph_id = result.get("draftGraphId")
+    # Do not report the client-generated ID as authoritative: Beam can replace
+    # IDs when it writes a draft graph. Resolve the node we just added by its
+    # distinctive objective from the active draft.
+    current_nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
+    actual_new_node_id = next(
+        (n.get("id") for n in current_nodes_data.get("nodes", []) or []
+         if n.get("objective") == ns["objective"]),
+        new_node_id,
+    )
     steps = [{"step": "add_node", "status": "ok", "detail": f"Added node '{ns['objective']}'."}]
 
     if integration and graph_id:
-        nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
-        actual_id = next((n["id"] for n in nodes_data.get("nodes", []) or []
-                          if n.get("objective") == ns["objective"]), None)
+        actual_id = actual_new_node_id
         if actual_id:
             clean = [_clean_integration_param(ip)
                      for ip in integration.get("input_params", []) or []]
@@ -2007,7 +2121,7 @@ def cmd_add_node(api, args):
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"added": True, "agentId": args.agent_id, "graphId": graph_id,
-            "newNodeId": new_node_id, "verificationPassed": all_ok,
+            "newNodeId": actual_new_node_id, "verificationPassed": all_ok,
             "published": published, "steps": steps}
 
 
@@ -2028,6 +2142,17 @@ def cmd_remove_node(api, args):
                             if e["sourceAgentGraphNodeId"] != args.node_id]
 
     def link(src, tgt):
+        # A temporary node may have been inserted alongside an existing direct
+        # edge. Restoring its parent -> child route must not create a duplicate
+        # edge: duplicate unconditional edges can leave a task unable to choose
+        # a unique next node.
+        for n in nodes:
+            if n["id"] == src and any(
+                e.get("sourceAgentGraphNodeId") == src
+                and e.get("targetAgentGraphNodeId") == tgt
+                for e in n.get("childEdges", []) or []
+            ):
+                return
         edge = {"sourceAgentGraphNodeId": src, "targetAgentGraphNodeId": tgt,
                 "condition": "", "isAttachmentDataPulledIn": True}
         for n in nodes:
@@ -2155,7 +2280,7 @@ def _maybe_publish(api, args):
 
 def _api_patch_with_body(self, path, body):
     return _http("PATCH", self.base + path,
-                 _api_headers(self.api_key, self.workspace_id), body=body)
+                 self._headers_for(path), body=body)
 
 
 Api.patch_with_body = _api_patch_with_body
@@ -2311,21 +2436,31 @@ def build_parser():
 
     s = sub.add_parser(
         "test-node",
-        help="Run a single node with a task context string (smoke test before full deploy).",
+        help="Run a single graph node with explicit JSON params (smoke test before full deploy).",
     )
     s.add_argument("agent_id", help="Agent ID")
+    s.add_argument("graph_id", help="Draft graph ID")
     s.add_argument("node_id", help="Node ID to test")
-    s.add_argument("task_context", help="Realistic task input string for this node")
+    s.add_argument("params", help='JSON object of input values, for example: {"message":"sample"}')
 
     return p
 
 
 def cmd_test_node(api, args):
-    """POST /agent-graphs/test-node — run a single node with a task context string."""
+    """POST /agent-graphs/test-node using the documented graph-bound payload."""
+    try:
+        params = json.loads(args.params)
+    except json.JSONDecodeError as exc:
+        raise BeamError("test-node params must be a JSON object.", code="validation_error",
+                        next_step='Pass JSON such as: {"message":"sample"}.') from exc
+    if not isinstance(params, dict):
+        raise BeamError("test-node params must be a JSON object.", code="validation_error",
+                        next_step='Pass JSON such as: {"message":"sample"}.')
     payload = {
         "agentId": args.agent_id,
+        "graphId": args.graph_id,
         "nodeId": args.node_id,
-        "taskContext": args.task_context,
+        "params": params,
     }
     result = api.post("/agent-graphs/test-node", payload)
     return {"result": result}
@@ -2372,10 +2507,12 @@ def main(argv=None):
 
     handler = COMMANDS[args.command]
     try:
-        # `deploy --dry-run` builds the payload purely locally and makes no request,
-        # so it must not require sign-in: linting and previewing a spec is exactly
-        # what someone does *before* they have credentials.
-        offline = args.command == "deploy" and getattr(args, "dry_run", False)
+        # A new-agent `deploy --dry-run` builds purely locally and does not need
+        # credentials.  An update dry-run (`--agent-id`) must first read the
+        # current graph in order to merge and verify the proposed patch, so it
+        # requires the normal authenticated client.
+        offline = (args.command == "deploy" and getattr(args, "dry_run", False)
+                   and not getattr(args, "agent_id", None))
         api = Api("", "", DEFAULT_API_URL) if offline else Api(*resolve_creds())
         result = handler(api, args)
         print(json.dumps({"ok": True, "command": args.command, **result}, indent=2))
