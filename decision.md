@@ -270,3 +270,9 @@
 - **Evidence:** PR #2's `install-test` workflow failed only in the `lint` job. ShellCheck reported SC2015 for two new CLI argument guards and for the intentional `cond && ok || bad` test-accounting idiom in `test/e2e.sh`.
 - **Decision:** Replace the production CLI guards with explicit `if` statements. Add a narrowly documented SC2015 directive to the E2E harness, matching the existing Agent Builder E2E harness, because both `ok` and `bad` intentionally return success.
 - **Verification:** `shellcheck beam/bin/beam test/smoke.sh test/e2e.sh test/e2e-agent-builder.sh` passes; `sh test/e2e.sh` passes 23/23; `sh test/e2e-agent-builder.sh` passes 35/35; and `git diff --check` passes.
+
+### Follow-up CI finding
+
+- The replacement workflow passed lint but its Ubuntu activation E2E failed only at the file-permission assertion. The test tried BSD `stat -f` before GNU `stat -c`; GNU `stat` accepts `-f` with different meaning, so the fallback never ran.
+- **Decision:** Select the BSD or GNU mode command from `uname -s` before asserting mode `600`. The behavior under test is unchanged; this fixes only the test's cross-platform observation.
+- **Verification:** ShellCheck remains clean, and both offline suites again pass 23/23 and 35/35 locally. macOS had already passed the same E2E before its matrix sibling failure cancelled the remaining job.

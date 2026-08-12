@@ -54,7 +54,12 @@ assert b["headers"]["Authorization"].startswith("Bearer ")
 assert d["numStartups"] == 7
 PY
 [ -f "$FAKE/.claude.json.beam-backup" ] && ok "original config backed up" || bad "no backup"
-[ "$(stat -f '%Lp' "$FAKE/.claude.json" 2>/dev/null || stat -c '%a' "$FAKE/.claude.json" 2>/dev/null)" = "600" ] && ok "key-bearing config is chmod 600" || bad "wrong permissions"
+if [ "$(uname -s)" = "Darwin" ]; then
+  file_mode="$(stat -f '%Lp' "$FAKE/.claude.json")"
+else
+  file_mode="$(stat -c '%a' "$FAKE/.claude.json")"
+fi
+[ "$file_mode" = "600" ] && ok "key-bearing config is chmod 600" || bad "wrong permissions"
 
 printf 'not json at all' > "$FAKE/.claude.json"
 sandbox BEAM_API_KEY=sk-test-key sh "$BEAM" register >/dev/null 2>&1
