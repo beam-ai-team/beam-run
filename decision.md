@@ -6,6 +6,12 @@
 - **Decision:** Rename the marketplace identifier to `beam-run` in the Codex, Claude Code, and Cursor marketplace manifests. Set Codex's marketplace display name to `Beam Run` and update the Claude installation selector to `beam@beam-run`.
 - **Compatibility:** This is a new marketplace identifier, so previously imported copies remain under their old `beam-plugins` name until removed and re-imported. It does not change the plugin package identifier (`beam`) or the Beam CLI executable.
 
+## 2026-08-12 — Protect fresh production installs from local endpoint leakage
+
+- **Problem:** A fresh `beam login` inherited `BEAM_API_URL=http://localhost:4000`, `BEAM_MCP_URL=http://localhost:4000/mcp`, and `BEAM_CONFIG_DIR=~/.config/beam-local` from a developer's shell profile. The valid production API key was therefore verified against the local API and misleadingly reported as invalid.
+- **Decision:** Normal Beam CLI, Agent Builder, and MCP proxy runs ignore loopback endpoint overrides and the legacy `~/.config/beam-local` credentials directory unless `BEAM_LOCAL_DEV=1` is explicitly set. Non-loopback custom API URLs remain supported.
+- **User outcome:** A newly installed production CLI uses `https://api.beamstudio.ai` and `~/.config/beam` even in a shell that contains old local Beam-development exports; intentional local work remains opt-in.
+
 ## 2026-08-12 — Validation scope and audit log
 
 - **Decision:** Validate the Beam CLI and agent-builder surfaces against the production workspace manually selected in the Beam app: `Saqib` (`227e402a-e065-492a-ba26-3934bb9ce929`).

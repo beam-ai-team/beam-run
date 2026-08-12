@@ -17,7 +17,9 @@ Resolved automatically, first hit wins. There is no .env file:
 
   BEAM_API_KEY        env var, else ~/.config/beam/credentials (from `beam login`)
   BEAM_WORKSPACE_ID   env var, else ~/.config/beam/credentials
-  BEAM_API_URL        env var, else https://api.beamstudio.ai
+  BEAM_API_URL        env var, else https://api.beamstudio.ai. Loopback URLs
+                      require BEAM_LOCAL_DEV=1 so a developer shell cannot
+                      redirect a production plugin installation.
 
 So the normal invocation carries no credentials at all:
 
@@ -124,6 +126,35 @@ EXIT_CODES = {
 DEFAULT_API_URL = "https://api.beamstudio.ai"
 
 
+def _is_loopback_url(url):
+    """Return whether *url* targets localhost or a loopback address."""
+    try:
+        host = urllib.parse.urlparse(url).hostname
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _local_development_enabled():
+    return os.environ.get("BEAM_LOCAL_DEV") == "1"
+
+
+def _config_dir():
+    """Resolve the shared CLI credentials directory without dev-shell leakage."""
+    configured = os.environ.get("BEAM_CONFIG_DIR") or ""
+    legacy_dev_dir = os.path.expanduser("~/.config/beam-local")
+    if configured == legacy_dev_dir and not _local_development_enabled():
+        return os.path.expanduser("~/.config/beam")
+    return configured or os.path.expanduser("~/.config/beam")
+
+
+def _base_url():
+    candidate = os.environ.get("BEAM_API_URL", "").strip()
+    if _is_loopback_url(candidate) and not _local_development_enabled():
+        return DEFAULT_API_URL
+    return candidate or DEFAULT_API_URL
+
+
 def _creds_file_values():
     """Read BEAM_* values from the `beam` CLI's credentials file, if present.
 
@@ -132,7 +163,7 @@ def _creds_file_values():
     into the chat (which the plugin's setup skill explicitly forbids).
     Parsed line by line - the file is never sourced or executed.
     """
-    config_dir = os.environ.get("BEAM_CONFIG_DIR") or os.path.expanduser("~/.config/beam")
+    config_dir = _config_dir()
     path = os.path.join(config_dir, "credentials")
     values = {}
     try:
@@ -163,7 +194,7 @@ def resolve_creds():
     api_key = os.environ.get("BEAM_API_KEY", "").strip() or stored.get("BEAM_API_KEY", "")
     workspace_id = (os.environ.get("BEAM_WORKSPACE_ID", "").strip()
                     or stored.get("BEAM_WORKSPACE_ID", ""))
-    base_url = os.environ.get("BEAM_API_URL", "").strip() or DEFAULT_API_URL
+    base_url = _base_url()
 
     if not api_key:
         raise BeamError(

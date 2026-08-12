@@ -34,9 +34,52 @@ set -eu
 
 VERSION="0.5.0"
 REPO="beam-ai-team/beam-run"
-API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
-MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
-CONFIG_DIR="${BEAM_CONFIG_DIR:-$HOME/.config/beam}"
+PRODUCTION_API_BASE="https://api.beamstudio.ai"
+PRODUCTION_MCP_URL="https://api.beamstudio.ai/mcp"
+
+# A developer shell often exports localhost endpoints for a running Beam stack.
+# Plugins inherit that shell environment, so silently honouring those values can
+# send a newly installed production CLI to the wrong server. Local development
+# remains available, but must be explicit: BEAM_LOCAL_DEV=1.
+is_loopback_url() {
+  raw="$1"
+  [ -n "$raw" ] || return 1
+  host="${raw#*://}"
+  host="${host%%/*}"
+  host="${host##*@}"
+  host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
+  case "$host" in
+    localhost|localhost:*|127.0.0.1|127.0.0.1:*|'[::1]'|'[::1]:'*|::1|::1:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+resolve_endpoint() {
+  candidate="$1"
+  fallback="$2"
+  if is_loopback_url "$candidate" && [ "${BEAM_LOCAL_DEV:-}" != "1" ]; then
+    ignored_loopback_endpoint=1
+    resolved_endpoint="$fallback"
+  elif [ -n "$candidate" ]; then
+    resolved_endpoint="$candidate"
+  else
+    resolved_endpoint="$fallback"
+  fi
+}
+
+ignored_loopback_endpoint=0
+loopback_warning_emitted=0
+resolve_endpoint "${BEAM_API_URL:-}" "$PRODUCTION_API_BASE"
+API_BASE="$resolved_endpoint"
+resolve_endpoint "${BEAM_MCP_URL:-}" "$PRODUCTION_MCP_URL"
+MCP_URL="$resolved_endpoint"
+if [ "${BEAM_CONFIG_DIR:-}" = "$HOME/.config/beam-local" ] && [ "${BEAM_LOCAL_DEV:-}" != "1" ]; then
+  CONFIG_DIR="$HOME/.config/beam"
+  ignored_loopback_config=1
+else
+  CONFIG_DIR="${BEAM_CONFIG_DIR:-$HOME/.config/beam}"
+  ignored_loopback_config=0
+fi
 CREDS_FILE="$CONFIG_DIR/credentials"
 # The stdio bridge needs a REMOTE-streamable-HTTP -> stdio proxy:
 #   - uvx: PyPI `mcp-proxy` (sparfenyuk) — proven; args: <url> --transport streamablehttp -H ...
@@ -50,6 +93,13 @@ die() {
   msg=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
   printf '{"error":{"code":"%s","message":"%s"}}\n' "$1" "$msg" >&2
   exit "$3"
+}
+
+warn_if_loopback_was_ignored() {
+  [ "$ignored_loopback_endpoint" = "1" ] || [ "$ignored_loopback_config" = "1" ] || return 0
+  [ "$loopback_warning_emitted" = "0" ] || return 0
+  printf 'Ignoring inherited Beam localhost development settings; using the production API and credentials. Set BEAM_LOCAL_DEV=1 to opt into local development.\n' >&2
+  loopback_warning_emitted=1
 }
 
 ensure_config_dir() {
@@ -241,11 +291,13 @@ except Exception:
 
 verify_key() {
   # $1 = key to test; prints /v2/user/me body on success
+  warn_if_loopback_was_ignored
   _http_get "$API_BASE/v2/user/me" -H "x-api-key: $1"
 }
 
 api_request() {
   # $1 = path; uses stored/env key + workspace
+  warn_if_loopback_was_ignored
   path="$1"
   key="$(read_key)" || return 3
   ws="$(read_workspace 2>/dev/null || true)"
@@ -284,6 +336,7 @@ _http_send() {
 api_write() {
   # $1 = method ; $2 = path ; $3 = body ('' for none). x-api-key + workspace.
   # The /agent-graphs/* routes (create, update, publish) accept the API key.
+  warn_if_loopback_was_ignored
   method="$1"; path="$2"; body="${3:-}"
   key="$(read_key)" || return 3
   ws="$(read_workspace 2>/dev/null || true)"
@@ -313,6 +366,7 @@ print(d.get("idToken") or d.get("accessToken") or d.get("token") or "")' 2>/dev/
 mint_bearer() {
   # Exchange the stored API key for a short-lived Bearer JWT (idToken). Some routes
   # (agent delete, triggers, webhooks) are JWT-gated and reject the raw API key.
+  warn_if_loopback_was_ignored
   key="$(read_key)" || return 3
   set +e
   resp="$(_http_send POST "$API_BASE/auth/access-token" "{\"apiKey\":\"$key\"}")"
@@ -656,6 +710,7 @@ cmd_mcp() {
   # user has ever run `beam login`; exiting would leave a dead MCP server as the
   # first thing they see. The vendored bridge serves a live "finish setup"
   # session instead, so the agent can explain the next step.
+  warn_if_loopback_was_ignored
   key="$(read_key 2>/dev/null || true)"
   emit_event mcp_connected
 
@@ -891,6 +946,7 @@ PY
 cmd_register() {
   # Register the Beam MCP server WITHOUT the caller handling the key: read it from
   # stored creds and write it into every host config we can find.
+  warn_if_loopback_was_ignored
   key="$(read_key 2>/dev/null || true)"
   if [ -z "$key" ]; then die "auth_missing" "sign in first: beam login" 3; fi
   hosts=""
