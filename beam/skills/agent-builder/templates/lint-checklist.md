@@ -20,9 +20,13 @@ Scan every `prompt` field for orphan single braces. A single `{` that is not a p
 
 ## Rule 2 — conditionType valid
 
-Every `conditionNode` must have `node_configurations.condition_type` set to exactly `"rule_based"` or `"llm_based"`. Any other value (empty string, `"custom"`, `null`) is rejected by Beam.
+Every `conditionNode` must have `node_configurations.conditionType` set to exactly `"rule_based"` or `"llm_based"`. Any other value (empty string, `"custom"`, `null`) is rejected by Beam.
 
-**Fix:** set `condition_type` to one of the two valid values.
+`node_configurations` is sent to the API verbatim, so the key is **camelCase**. A
+snake_case `condition_type` is ignored and the node silently falls back to
+`{"conditionType": "llm_based", "llmModel": "GPT40"}` — a real behaviour change.
+
+**Fix:** set `conditionType` to one of the two valid values.
 
 ---
 
@@ -64,21 +68,24 @@ Check: is the source node reachable before this node in the execution path? Is t
 
 ---
 
-## Rule 6 — objectSchema on object outputs
+## Rule 6 — Do not rely on an object output's schema
 
-Every output param with `data_type: "object"` should have `type_options.object_schema` populated.
+Output-param schemas are **not** deployable today: the builder writes
+`"typeOptions": null` on every output param, so a `type_options` /
+`object_schema` block in a spec is silently discarded.
 
-An absent schema means downstream nodes cannot rely on field names for `linked` params, and Beam cannot validate the output shape.
-
-**Fix:** add `type_options: { object_schema: { field1: "string", field2: "number", ... } }` to the output param.
-
-*(Warn, do not block — unless a downstream node uses `linked` on a specific field from this output.)*
+**Fix:** do not author one. If a downstream node needs specific fields, either
+have the upstream node emit them as separate scalar output params (which *can*
+be `linked`), or read the object with `ai_fill`.
 
 ---
 
 ## Rule 7 — Integration nodes have an empty prompt
 
-Every integration node (any node where `toolFunctionName` is NOT `GPTAction_Custom_*`, `StandAloneAction_CodeExecutor`, or `BeamSystemAction_*`) must have `prompt: ""`.
+Every integration node — any node with a matching entry in the spec's
+`integrations` array — must have `prompt: ""`. (Check the `integrations` array,
+not `toolFunctionName`: that field is derived at build time and never appears in
+a spec.)
 
 An integration node with a non-empty prompt has conflicting behaviour — the tool's own execution logic and the prompt instruction fight each other.
 
@@ -90,9 +97,12 @@ An integration node with a non-empty prompt has conflicting behaviour — the to
 
 Every `conditionNode` must have all its `childEdges` (or `branches`) with explicit, non-empty `condition` strings. Blank conditions, single-word labels (`"yes"`, `"no"`, `"else"`), and missing labels are invalid.
 
-Also confirm: every `conditionNode` has at least one `default: true` edge covering the unmatched fallback case.
+There is **no** `default: true` edge flag — it does not exist in the edge schema.
+Cover the fallback case with an explicit final branch whose condition names it
+(e.g. `"anything else"`), not with a blank or flagged edge.
 
-**Fix:** write explicit condition strings for every branch. Add a fallback edge if missing.
+**Fix:** write explicit condition strings for every branch, including the
+catch-all.
 
 ---
 
@@ -109,8 +119,8 @@ Every `executionNode`, `waitingNode`, and `loopingNode` must have exactly one ou
 1. Open the spec file
 2. For each node, check rules 7, 8, 9 by node type
 3. For every `prompt` field, scan for single braces (Rule 1)
-4. For every `conditionNode`, check `condition_type` (Rule 2) and edge labels (Rule 8)
+4. For every `conditionNode`, check `conditionType` (Rule 2) and edge labels (Rule 8)
 5. For every `TriggerAgent` node, check param count and names (Rule 3)
 6. For every `CodeExecutor` node, check `code` is non-empty (Rule 4)
 7. Trace every `linked` param to its upstream source (Rule 5)
-8. Check every `object` output for `objectSchema` (Rule 6)
+8. Confirm no spec relies on an object output's schema (Rule 6)

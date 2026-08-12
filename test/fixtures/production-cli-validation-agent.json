@@ -1,0 +1,48 @@
+{
+  "agentName": "Beam Run CLI Validation — 2026-08-12",
+  "agentDescription": "Disposable draft-only agent for validating Beam Run CLI endpoints with synthetic data.",
+  "personality": "Precise and concise.",
+  "restrictions": "Process synthetic test input only. Do not call external services.",
+  "prompts": [],
+  "nodes": [
+    {
+      "key": "entry",
+      "name": "Entry",
+      "objective": "Entry Node",
+      "is_entry": true,
+      "edges": [{ "target": "normalize" }]
+    },
+    {
+      "key": "normalize",
+      "name": "Normalize Synthetic Input",
+      "objective": "Normalize synthetic validation input",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a deterministic validation assistant.\n\n## Task:\nNormalize the supplied synthetic test text into one concise line.\n\n## Context:\n```\n{message}\n```\n\n## Rules:\n1. Return only the normalized text.\n2. Do not call or reference any external service.\n3. Output normalized_message containing the concise normalized text.",
+      "input_params": [
+        {
+          "name": "message",
+          "description": "Synthetic text provided by a draft test task",
+          "type": "string",
+          "fill_type": "ai_fill",
+          "position": 0
+        }
+      ],
+      "output_params": [
+        {
+          "name": "normalized_message",
+          "description": "Normalized synthetic text",
+          "type": "string",
+          "position": 0
+        }
+      ],
+      "edges": [{ "target": "exit" }]
+    },
+    {
+      "key": "exit",
+      "name": "Finish Validation",
+      "objective": "Finish validation without side effects",
+      "node_type": "exitNode",
+      "edges": []
+    }
+  ]
+}

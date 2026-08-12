@@ -1,0 +1,9 @@
+[
+  {
+    "position": 0,
+    "paramName": "normalized_message",
+    "paramDescription": "Normalized synthetic text",
+    "dataType": "string",
+    "isArray": false
+  }
+]

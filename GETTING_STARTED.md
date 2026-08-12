@@ -11,11 +11,35 @@ Build with Beam in your AI coding agent — skills, MCP tools, and the Beam CLI.
 
 ### Claude Code
 
-Requires a recent Claude Code with plugin marketplace support.
+How you install depends on **which Claude Code you're using** — this matters, because
+the slash commands below exist only in the terminal CLI.
+
+**Desktop app (Mac/Windows):** there is no `/plugin` command. Typing one does nothing
+and shows no error. Use the UI instead:
+
+> **+** button next to the prompt box → **Plugins** → **Add plugin** → add the
+> marketplace `beam-ai-team/beam-run`, then install **beam**.
+
+**Terminal (`claude` CLI):**
 
 ```
 /plugin marketplace add beam-ai-team/beam-run
 /plugin install beam@beam-plugins
+```
+
+Either way, **fully restart** Claude Code afterwards. The desktop app and the CLI share
+the same `~/.claude/plugins/` registry, so installing in one shows up in the other.
+
+**No plugin at all?** You don't need one for the MCP tools — install the CLI to a
+durable location and let it register itself (you'll miss only the bundled skills):
+
+```
+mkdir -p ~/.config/beam-plugin/beam/bin
+base=https://raw.githubusercontent.com/beam-ai-team/beam-run/main/beam/bin
+curl -fsSL $base/beam        -o ~/.config/beam-plugin/beam/bin/beam
+curl -fsSL $base/mcp_proxy.py -o ~/.config/beam-plugin/beam/bin/mcp_proxy.py
+chmod +x ~/.config/beam-plugin/beam/bin/beam
+~/.config/beam-plugin/beam/bin/beam setup
 ```
 
 ### Codex
@@ -44,7 +68,9 @@ needs to a permanent location.
 
 ## Run the `setup` skill
 
-Once installed, run the bundled **`setup` skill** — it shows a short, gamified checklist and walks you through the one thing left: your **API key**, then a restart. On **Claude Code**, `/plugin install` already registered the Beam connection, so setup just captures the key and verifies. (`beam` on PATH, `beam login`, and manual MCP registration are only needed on the developer / CLI fallback path — not for a normal `/plugin` install.)
+Once installed, run the bundled **`setup` skill** — when run in a terminal, `beam setup` immediately opens the masked API-key prompt. When an agent or CI runs it without a terminal, it prints the exact next command instead. Either path ends with one restart. Workspace choice stays in the coding-agent conversation: a sole or remembered workspace is automatic, and the agent asks only when the request is genuinely ambiguous.
+
+Installing the plugin wires up the connection, but it can't authenticate you: until you run `beam login`, the Beam server has no key and exposes a single `beam_setup_status` tool that tells your agent exactly what to do next. `beam login` then stores the key and registers the connection with your agent automatically — including the Claude desktop app, which has no `claude` CLI.
 
 **Important — restarting your agent afterward is not optional:** MCP servers resolve credentials at startup. An already-running MCP server won't see a key that was saved after it launched — skipping the restart is the most common reason `beam whoami` looks like it worked but the MCP tools still fail. How you restart is platform-specific; see the skill for the exact steps.
 

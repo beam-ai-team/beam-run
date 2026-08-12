@@ -13,19 +13,27 @@ Python 3.8+ exists.
 --------------------------------------------------------------------------
 CREDENTIALS
 --------------------------------------------------------------------------
-Three values are required, read only from environment variables. There is no
-.env file and no default URL - the caller passes every value explicitly:
+Resolved automatically, first hit wins. There is no .env file:
 
-  BEAM_API_KEY        Beam platform API key
-  BEAM_WORKSPACE_ID   Workspace UUID
-  BEAM_API_URL        Beam API base URL
+  BEAM_API_KEY        env var, else ~/.config/beam/credentials (from `beam login`)
+  BEAM_WORKSPACE_ID   env var, else ~/.config/beam/credentials
+  BEAM_API_URL        env var, else https://api.beamstudio.ai
 
-Prefix every invocation with all three, e.g.:
+So the normal invocation carries no credentials at all:
 
-  BEAM_API_KEY=... BEAM_WORKSPACE_ID=... BEAM_API_URL=... python3 beam.py validate
+  beam agent-builder validate
 
-If any value is missing the command stops and reports which one - the calling
-agent should ask the user for the missing value rather than guess.
+NEVER ask the user to paste an API key into the chat. If the key is missing the
+command exits 3 and says to run `beam login`; if the workspace is missing it
+exits 2 and says to run `beam workspace list` / `beam workspace <id>`.
+
+--------------------------------------------------------------------------
+ERRORS
+--------------------------------------------------------------------------
+Failures print {"ok": false, "code", "error", "next"} to stdout and exit with a
+categorical status matching the `beam` shell CLI: 1 internal, 2 validation,
+3 auth, 5 network. "next" names the command to run. Human progress goes to
+stderr - callers must not merge it into stdout with 2>&1 before parsing.
 
 --------------------------------------------------------------------------
 QUICK START
@@ -85,36 +93,92 @@ MAX_PARALLEL = 8
 
 
 class BeamError(Exception):
-    """Any expected, user-facing failure (bad input, API error, missing creds)."""
+    """Any expected, user-facing failure (bad input, API error, missing creds).
+
+    Carries a machine-branchable `code` and, wherever possible, the concrete
+    `next_step` to take. Codes and the exit codes they map to match the `beam`
+    shell CLI, so an agent can branch the same way against either tool.
+    """
+
+    def __init__(self, message, code="internal_error", next_step=None):
+        super().__init__(message)
+        self.code = code
+        self.next_step = next_step
+
+
+# code -> process exit status (mirrors bin/beam: 1 internal, 2 validation,
+# 3 auth, 5 network). Anything unmapped is an internal error.
+EXIT_CODES = {
+    "internal_error": 1,
+    "validation_error": 2,
+    "auth_error": 3,
+    "network_error": 5,
+    "api_error": 5,
+}
 
 
 # ===========================================================================
 # Credentials
 # ===========================================================================
 
-def resolve_creds():
-    """Return (api_key, workspace_id, base_url), read only from the environment.
+DEFAULT_API_URL = "https://api.beamstudio.ai"
 
-    All three are required. There is no .env file and no default URL: the
-    calling agent obtains every value from the user and passes it in the
-    environment. If any value is missing the command stops with a clear error
-    so the agent asks the user instead of guessing or using a stale value.
+
+def _creds_file_values():
+    """Read BEAM_* values from the `beam` CLI's credentials file, if present.
+
+    The CLI already stores the key and workspace after `beam login`; reading
+    them here means the agent never has to ask the user to paste an API key
+    into the chat (which the plugin's setup skill explicitly forbids).
+    Parsed line by line - the file is never sourced or executed.
     """
-    api_key = os.environ.get("BEAM_API_KEY", "").strip()
-    workspace_id = os.environ.get("BEAM_WORKSPACE_ID", "").strip()
-    base_url = os.environ.get("BEAM_API_URL", "").strip()
-    missing = [name for name, value in (
-        ("BEAM_API_KEY", api_key),
-        ("BEAM_WORKSPACE_ID", workspace_id),
-        ("BEAM_API_URL", base_url),
-    ) if not value]
-    if missing:
+    config_dir = os.environ.get("BEAM_CONFIG_DIR") or os.path.expanduser("~/.config/beam")
+    path = os.path.join(config_dir, "credentials")
+    values = {}
+    try:
+        with open(path) as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, _, value = line.partition("=")
+                values[name.strip()] = value.strip()
+    except OSError:
+        pass
+    return values
+
+
+def resolve_creds():
+    """Return (api_key, workspace_id, base_url).
+
+    Resolution order, first hit wins:
+      1. environment variables (explicit caller intent)
+      2. ~/.config/beam/credentials, written by `beam login`
+      3. for the URL only: the public Beam API
+
+    Never ask the user to paste an API key into the chat - if nothing resolves,
+    the fix is `beam login`, which stores it once for the CLI and this script.
+    """
+    stored = _creds_file_values()
+    api_key = os.environ.get("BEAM_API_KEY", "").strip() or stored.get("BEAM_API_KEY", "")
+    workspace_id = (os.environ.get("BEAM_WORKSPACE_ID", "").strip()
+                    or stored.get("BEAM_WORKSPACE_ID", ""))
+    base_url = os.environ.get("BEAM_API_URL", "").strip() or DEFAULT_API_URL
+
+    if not api_key:
         raise BeamError(
-            "Missing credentials: " + ", ".join(missing) + ". "
-            "Ask the user for the missing value(s) - do not guess. Pass all "
-            "three as environment variables on the command, e.g.: "
-            "BEAM_API_KEY=... BEAM_WORKSPACE_ID=... BEAM_API_URL=... "
-            "python3 beam.py <command>"
+            "Not signed in to Beam.",
+            code="auth_error",
+            next_step="Run `beam login` and approve in the browser. Do not ask the user "
+                      "for an API key.",
+        )
+    if not workspace_id:
+        raise BeamError(
+            "No Beam workspace selected.",
+            code="validation_error",
+            next_step="Run `beam workspace list <search>` to find the right one, then "
+                      "`beam workspace <id>`. Do not guess - picking the wrong workspace "
+                      "makes the agent list look empty.",
         )
     return api_key, workspace_id, base_url.rstrip("/")
 
@@ -147,16 +211,25 @@ def _http(method, url, headers, body=None, params=None, timeout=HTTP_TIMEOUT):
         if exc.code in (401, 403):
             raise BeamError(
                 f"Authentication failed ({exc.code}) on {path}. "
-                f"Your BEAM_API_KEY or BEAM_WORKSPACE_ID may be invalid or expired. {detail}"
+                f"Your Beam API key may be invalid or expired. {detail}",
+                code="auth_error",
+                next_step="Run `beam login` and approve in the browser, then retry.",
             )
-        raise BeamError(f"{method} {path} failed ({exc.code}): {detail}")
+        raise BeamError(
+            f"{method} {path} failed ({exc.code}): {detail}",
+            code="api_error",
+            next_step="Check the request payload against references/spec-format.md; "
+                      "if it looks right, run `beam doctor`.",
+        )
     except urllib.error.URLError as exc:
         raise BeamError(
-            f"{method} {url} failed: cannot reach the Beam API ({exc.reason}). "
-            f"Check BEAM_API_URL."
+            f"{method} {url} failed: cannot reach the Beam API ({exc.reason}).",
+            code="network_error",
+            next_step="Check your connection and BEAM_API_URL, then run `beam doctor`.",
         )
     except (TimeoutError, OSError) as exc:
-        raise BeamError(f"{method} {url} failed: {exc}")
+        raise BeamError(f"{method} {url} failed: {exc}", code="network_error",
+                        next_step="Retry; if it persists, run `beam doctor`.")
     if not text.strip():
         return {}
     try:
@@ -179,22 +252,36 @@ class Api:
         self._bearer = None
         self._bearer_expires = 0
 
-    # -- x-api-key endpoints (agent-graphs, tools) --------------------------
+    def _headers_for(self, path):
+        """Return the auth headers accepted by the requested API surface.
+
+        Most Beam APIs accept ``x-api-key`` directly.  The production
+        ``/agent-graphs`` routes also require a short-lived Bearer token on
+        newer deployments, even when the same key is accepted by ``/agent``.
+        Send both for graph calls so the builder remains compatible with both
+        server versions.
+        """
+        headers = _api_headers(self.api_key, self.workspace_id)
+        if path.startswith("/agent-graphs"):
+            headers["Authorization"] = "Bearer " + self._bearer_token()
+        return headers
+
+    # -- API-key endpoints, with Bearer added for agent-graph routes --------
     def get(self, path, params=None):
         return _http("GET", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), params=params)
+                     self._headers_for(path), params=params)
 
     def post(self, path, body):
         return _http("POST", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), body=body)
+                     self._headers_for(path), body=body)
 
     def put(self, path, body):
         return _http("PUT", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), body=body)
+                     self._headers_for(path), body=body)
 
     def patch(self, path, body=None):
         return _http("PATCH", self.base + path,
-                     _api_headers(self.api_key, self.workspace_id), body=body)
+                     self._headers_for(path), body=body)
 
     # -- Bearer-JWT endpoints (triggers, webhooks) --------------------------
     def _bearer_token(self):
@@ -388,6 +475,10 @@ def _resolve_loop_node_refs(config, node_ids):
     if not isinstance(config, dict):
         return config
     out = dict(config)
+    # `alias` is backend-owned bookkeeping for loop execution children.  It is
+    # not a user-facing iteration variable; the API assigns numeric aliases as
+    # it persists the graph.  Never send a semantic alias from a builder spec.
+    out.pop("alias", None)
     lvid = out.get("linkedVariableId")
     if isinstance(lvid, str) and ":" in lvid:
         src_key, _, param = lvid.partition(":")
@@ -398,6 +489,32 @@ def _resolve_loop_node_refs(config, node_ids):
     if isinstance(lagn, str) and lagn in node_ids:
         out["linkedAgentGraphNodeId"] = node_ids[lagn]
     return out
+
+
+def _normalize_loop_edges(edges, nodes_spec, node_ids):
+    """Compile authored loop edges into the product Builder's canonical form.
+
+    Membership in a loop is represented solely by ``parentNodeId``.  Loop body
+    nodes may have internal edges, but neither loop->body nor body->outside
+    edges belong in the persisted subflow: the latter becomes loop->outside so
+    the runtime resumes normal flow only after all iterations complete.
+    """
+    by_key = {node["key"]: node for node in nodes_spec}
+    loop_bodies = {}
+    for node in nodes_spec:
+        parent = node.get("parent")
+        if parent and by_key.get(parent, {}).get("node_type") == "loopingNode":
+            loop_bodies.setdefault(parent, set()).add(node["key"])
+
+    for loop_key, bodies in loop_bodies.items():
+        for edge_key, edge in list(edges.items()):
+            source_key, target_key = edge_key.split("->", 1)
+            if source_key == loop_key and target_key in bodies:
+                del edges[edge_key]
+            elif source_key in bodies and target_key not in bodies:
+                del edges[edge_key]
+                edge["sourceAgentGraphNodeId"] = node_ids[loop_key]
+                edges[f"{loop_key}->{target_key}"] = edge
 
 
 # Graph layout spacing (pixels). Tunable; explicit spec coords override these.
@@ -515,32 +632,60 @@ def compute_layout(nodes_spec):
     return coords
 
 
+def _param_name(param):
+    """Every param needs a name; say which one is wrong instead of KeyError-ing."""
+    name = (param or {}).get("name")
+    if not name:
+        raise BeamError(
+            "A parameter is missing its 'name': " + json.dumps(param)[:200],
+            code="validation_error",
+            next_step="Give every input/output param a 'name'. See "
+                      "references/spec-format.md for the param shape.",
+        )
+    return name
+
+
+def _payload_summary(payload):
+    """One compact line per node — the full dry-run payload runs to ~5k tokens."""
+    out = []
+    for n in payload.get("nodes", []) or []:
+        # Tools are not in the create payload by design — see integrationsToAttach.
+        out.append({
+            "objective": n.get("objective"),
+            "nodeType": n.get("nodeType"),
+            "entry": bool(n.get("isEntryNode")),
+            "exit": bool(n.get("isExitNode")),
+            "outgoingEdges": len(n.get("childEdges") or []),
+        })
+    return out
+
+
 def _validate_spec(spec):
     """Catch the most common spec mistakes before any UUIDs are generated."""
     if not isinstance(spec, dict):
-        raise BeamError("Spec must be a JSON object.")
+        raise BeamError("Spec must be a JSON object.", code="validation_error")
     if not spec.get("agentName"):
-        raise BeamError("Spec is missing 'agentName'.")
+        raise BeamError("Spec is missing 'agentName'.", code="validation_error")
     nodes = spec.get("nodes")
     if not isinstance(nodes, list) or not nodes:
-        raise BeamError("Spec must contain a non-empty 'nodes' array.")
+        raise BeamError("Spec must contain a non-empty 'nodes' array.", code="validation_error")
     keys = [n.get("key") for n in nodes]
     if any(not k for k in keys):
-        raise BeamError("Every node must have a non-empty 'key'.")
+        raise BeamError("Every node must have a non-empty 'key'.", code="validation_error")
     dupes = {k for k in keys if keys.count(k) > 1}
     if dupes:
-        raise BeamError(f"Duplicate node keys: {sorted(dupes)}. Keys must be unique.")
+        raise BeamError(f"Duplicate node keys: {sorted(dupes)}. Keys must be unique.", code="validation_error")
     key_set = set(keys)
     entries = [n for n in nodes if n.get("is_entry")]
     if len(entries) != 1:
-        raise BeamError(f"Spec must have exactly one entry node (is_entry: true); found {len(entries)}.")
+        raise BeamError(f"Spec must have exactly one entry node (is_entry: true); found {len(entries)}.", code="validation_error")
     for node in nodes:
         for edge in node.get("edges", []) or []:
             target = edge.get("target")
             if target not in key_set:
                 raise BeamError(
                     f"Node '{node.get('key')}' has an edge to unknown node '{target}'."
-                )
+                , code="validation_error")
     by_key = {n.get("key"): n for n in nodes}
     for node in nodes:
         parent = node.get("parent")
@@ -548,20 +693,76 @@ def _validate_spec(spec):
             if parent not in key_set:
                 raise BeamError(
                     f"Node '{node.get('key')}' has parent '{parent}', which is not a node key."
-                )
+                , code="validation_error")
             if by_key[parent].get("node_type") != "loopingNode":
                 raise BeamError(
                     f"Node '{node.get('key')}' has parent '{parent}', but '{parent}' is "
                     f"not a loopingNode. Only a loopingNode can be a parent."
-                )
+                , code="validation_error")
         if node.get("node_type") == "loopingNode":
             if node.get("is_entry"):
-                raise BeamError(f"Looping node '{node.get('key')}' cannot be the entry node.")
+                raise BeamError(f"Looping node '{node.get('key')}' cannot be the entry node.", code="validation_error")
             if parent is not None:
                 raise BeamError(
                     f"Looping node '{node.get('key')}' cannot itself sit inside another "
                     f"loop — loops cannot be nested."
-                )
+                , code="validation_error")
+            config = node.get("node_configurations") or {}
+            count = config.get("iterationCount")
+            variable = config.get("linkedVariableId")
+            has_count = count is not None
+            has_variable = isinstance(variable, str) and bool(variable.strip())
+            if has_count == has_variable:
+                raise BeamError(
+                    f"Looping node '{node.get('key')}' must set exactly one of "
+                    "iterationCount or linkedVariableId.", code="validation_error")
+            if has_count and (isinstance(count, bool) or not isinstance(count, int) or count < 1):
+                raise BeamError(
+                    f"Looping node '{node.get('key')}' has invalid iterationCount; "
+                    "use an integer of at least 1.", code="validation_error")
+            if has_variable:
+                source_key, separator, param_name = variable.partition(":")
+                source = by_key.get(source_key)
+                if not separator or not source or not param_name:
+                    raise BeamError(
+                        f"Looping node '{node.get('key')}' linkedVariableId must be "
+                        "'<sourceNodeKey>:<arrayParamName>'.", code="validation_error")
+                source_param = next(
+                    (op for op in source.get("output_params", []) or []
+                     if _param_name(op) == param_name), None)
+                if not source_param or not source_param.get("is_array"):
+                    raise BeamError(
+                        f"Looping node '{node.get('key')}' must reference an array "
+                        f"output; '{variable}' is not one.", code="validation_error")
+
+    # Integrations are matched to nodes by exact 'objective' string, so a
+    # duplicate silently attaches the tool to the wrong node.
+    objectives = [n.get("objective") for n in nodes if n.get("objective")]
+    dupe_obj = sorted({o for o in objectives if objectives.count(o) > 1})
+    if dupe_obj:
+        raise BeamError(
+            "Duplicate node 'objective' values: " + repr(dupe_obj) + ". Integrations are "
+            "matched to nodes by exact objective text, so duplicates attach the tool to "
+            "the wrong node.",
+            code="validation_error",
+            next_step="Give each node a distinct objective, then re-run deploy.",
+        )
+
+    # Node identity on re-deploy is the DERIVED toolFunctionName; two nodes that
+    # derive the same name collide and one silently replaces the other.
+    derived = {}
+    for node in nodes:
+        fn = _tool_function_name(node.get("tool_name") or node.get("name") or "")
+        derived.setdefault(fn, []).append(node.get("key"))
+    collisions = {fn: ks for fn, ks in derived.items() if len(ks) > 1}
+    if collisions:
+        detail = "; ".join(f"{fn} <- {ks}" for fn, ks in sorted(collisions.items()))
+        raise BeamError(
+            "Nodes derive the same toolFunctionName: " + detail + ". Re-deploy matches "
+            "nodes by this name, so they would collide.",
+            code="validation_error",
+            next_step="Give the colliding nodes distinct 'name' (or 'tool_name') values.",
+        )
 
 
 # ===========================================================================
@@ -582,8 +783,8 @@ def build_payload(spec, integ_outputs=None):
     TC = {k: _g() for k in node_keys}
     OP = {}
     for ns in nodes_spec:
-        for op in ns.get("output_params", []) or []:
-            OP[f'{ns["key"]}.{op["name"]}'] = _g()
+        for i, op in enumerate(ns.get("output_params", []) or []):
+            OP[f'{ns["key"]}.{_param_name(op)}'] = _g()
     # An integration node carries its output params in the `integrations` array,
     # not on the node. Register them (value None) so a downstream `linked` param
     # builds cleanly; the integration is not attached yet, so deploy's
@@ -609,6 +810,7 @@ def build_payload(spec, integ_outputs=None):
                 edge["conditionGroups"] = _resolve_condition_group_refs(
                     e["condition_groups"], NODE)
             EDGES[f'{ns["key"]}->{e["target"]}'] = edge
+    _normalize_loop_edges(EDGES, nodes_spec, NODE)
 
     def child_edges(src):
         return [v for k, v in EDGES.items() if k.startswith(src + "->")]
@@ -616,11 +818,11 @@ def build_payload(spec, integ_outputs=None):
     def parent_edges(tgt):
         return [v for k, v in EDGES.items() if k.endswith("->" + tgt)]
 
-    def build_input_param(ip):
+    def build_input_param(ip, idx=0):
         ft = ip.get("fill_type", "user_fill")
         base = {
-            "position": ip["position"],
-            "paramName": ip["name"],
+            "position": ip.get("position", idx),
+            "paramName": _param_name(ip),
             "paramDescription": ip.get("description", ""),
             "fillType": ft,
             "required": ip.get("required", True),
@@ -656,11 +858,11 @@ def build_payload(spec, integ_outputs=None):
             base["linkedOutputParamName"] = linked_param
         return base
 
-    def build_output_param(op, node_key):
+    def build_output_param(op, node_key, idx=0):
         return {
-            "id": OP[f'{node_key}.{op["name"]}'],
-            "position": op["position"],
-            "paramName": op["name"],
+            "id": OP[f'{node_key}.{_param_name(op)}'],
+            "position": op.get("position", idx),
+            "paramName": _param_name(op),
             "paramDescription": op.get("description", ""),
             "dataType": op.get("type", "string"),
             "isArray": op.get("is_array", False),
@@ -692,8 +894,8 @@ def build_payload(spec, integ_outputs=None):
             "isAvailableToWorkspace": False,
             "dynamicPropsId": None,
             "integrationProviderId": None,
-            "inputParams": [build_input_param(ip) for ip in ns.get("input_params", []) or []],
-            "outputParams": [build_output_param(op, ns["key"]) for op in ns.get("output_params", []) or []],
+            "inputParams": [build_input_param(ip, i) for i, ip in enumerate(ns.get("input_params", []) or [])],
+            "outputParams": [build_output_param(op, ns["key"], i) for i, op in enumerate(ns.get("output_params", []) or [])],
         }
 
     def build_node(ns):
@@ -702,13 +904,14 @@ def build_payload(spec, integ_outputs=None):
         criteria = ns.get("evaluation_criteria", []) or []
         if not node_type:
             node_type = "entryNode" if is_entry else "executionNode"
+        is_exit = node_type == "exitNode"
 
         node = {
             "id": NODE[ns["key"]],
             "objective": ns["objective"],
             "evaluationCriteria": criteria,
             "isEntryNode": is_entry,
-            "isExitNode": False,
+            "isExitNode": is_exit,
             "nodeType": node_type,
             "parentNodeId": NODE[ns["parent"]] if ns.get("parent") else None,
             "xCoordinate": ns["x"] if "x" in ns else layout[ns["key"]][0],
@@ -775,23 +978,41 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
 
     existing_by_fn = {
         get_fn(n): n for n in existing_nodes
-        if not n.get("isEntryNode") and n.get("nodeType") not in ("conditionNode", "loopingNode")
+        if not n.get("isEntryNode") and n.get("nodeType") not in ("conditionNode", "loopingNode", "exitNode")
     }
     existing_entry = next((n for n in existing_nodes if n.get("isEntryNode")), None)
     existing_conditions = [n for n in existing_nodes if n.get("nodeType") == "conditionNode"]
+    existing_conditions_by_objective = {
+        (n.get("objective") or "").strip(): n for n in existing_conditions
+        if (n.get("objective") or "").strip()
+    }
 
-    def find_existing(spec_fn):
+    # Objective is the only identity that survives tool attachment: once a node
+    # has an integration, its live toolFunctionName becomes e.g.
+    # GmailAction_SendEmail, which never matches the derived
+    # GPTAction_Custom_<Name>. Without this fallback every integration node is
+    # dropped and recreated on each re-deploy (new UUIDs, triggers cascade off).
+    existing_by_objective = {
+        (n.get("objective") or "").strip(): n
+        for n in existing_nodes
+        if not n.get("isEntryNode") and n.get("nodeType") not in ("conditionNode", "loopingNode")
+        and (n.get("objective") or "").strip()
+    }
+
+    def find_existing(spec_fn, objective=None):
         if spec_fn in existing_by_fn:
             return existing_by_fn[spec_fn]
         for fn_key, node in existing_by_fn.items():
             if fn_key.startswith(spec_fn + "_"):
                 return node
+        if objective:
+            return existing_by_objective.get(objective.strip())
         return None
 
     spec_fn = {
         ns["key"]: _tool_function_name(ns.get("tool_name") or ns.get("name") or "")
         for ns in nodes_spec
-        if not ns.get("is_entry") and ns.get("node_type") not in ("conditionNode", "loopingNode")
+        if not ns.get("is_entry") and ns.get("node_type") not in ("conditionNode", "loopingNode", "exitNode")
     }
 
     # Assign node UUIDs - reuse existing where matched.
@@ -802,21 +1023,29 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
         if ns.get("is_entry"):
             NODE[k] = existing_entry["id"] if existing_entry else _g()
         elif ns.get("node_type") == "conditionNode":
-            NODE[k] = remaining_conditions.pop(0)["id"] if remaining_conditions else _g()
+            exact = existing_conditions_by_objective.get((ns.get("objective") or "").strip())
+            if exact:
+                NODE[k] = exact["id"]
+                remaining_conditions = [n for n in remaining_conditions if n["id"] != exact["id"]]
+            else:
+                NODE[k] = remaining_conditions.pop(0)["id"] if remaining_conditions else _g()
         elif ns.get("node_type") == "loopingNode":
             NODE[k] = _g()
+        elif ns.get("node_type") == "exitNode":
+            ex = existing_by_objective.get(ns.get("objective", "").strip())
+            NODE[k] = ex["id"] if ex else _g()
         else:
-            ex = find_existing(spec_fn[k])
+            ex = find_existing(spec_fn[k], ns.get("objective"))
             NODE[k] = ex["id"] if ex else _g()
 
     # For new (unmatched) execution/waiting nodes: generate TC + OP UUIDs.
     # For matched nodes: reuse the API's existing TC id and output param ids.
     TC, OP = {}, {}
     for ns in nodes_spec:
-        if ns.get("is_entry") or ns.get("node_type") in ("conditionNode", "loopingNode"):
+        if ns.get("is_entry") or ns.get("node_type") in ("conditionNode", "loopingNode", "exitNode"):
             continue
         k = ns["key"]
-        ex = find_existing(spec_fn[k])
+        ex = find_existing(spec_fn[k], ns.get("objective"))
         if ex:
             ex_tc = ex.get("toolConfiguration") or {}
             TC[k] = ex_tc.get("id") or _g()
@@ -825,7 +1054,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
         else:
             TC[k] = _g()
             for op in ns.get("output_params", []) or []:
-                OP[f'{k}.{op["name"]}'] = _g()
+                OP[f'{k}.{_param_name(op)}'] = _g()
     # Register integration-node output params (see build_payload) so a
     # downstream node may `link` to them. `setdefault` keeps a reused
     # integration node's real output ids intact.
@@ -847,6 +1076,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 edge["conditionGroups"] = _resolve_condition_group_refs(
                     e["condition_groups"], NODE)
             EDGES[f'{ns["key"]}->{e["target"]}'] = edge
+    _normalize_loop_edges(EDGES, nodes_spec, NODE)
 
     def child_edges(src):
         return [v for k, v in EDGES.items() if k.startswith(src + "->")]
@@ -854,11 +1084,11 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
     def parent_edges(tgt):
         return [v for k, v in EDGES.items() if k.endswith("->" + tgt)]
 
-    def build_ip(ip):
+    def build_ip(ip, idx=0):
         ft = ip.get("fill_type", "user_fill")
         base = {
-            "position": ip["position"],
-            "paramName": ip["name"],
+            "position": ip.get("position", idx),
+            "paramName": _param_name(ip),
             "paramDescription": ip.get("description", ""),
             "fillType": ft,
             "required": ip.get("required", True),
@@ -888,11 +1118,11 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
             base["linkedOutputParamName"] = lp
         return base
 
-    def build_op(op, nk):
+    def build_op(op, nk, idx=0):
         return {
-            "id": OP[f'{nk}.{op["name"]}'],
-            "position": op["position"],
-            "paramName": op["name"],
+            "id": OP[f'{nk}.{_param_name(op)}'],
+            "position": op.get("position", idx),
+            "paramName": _param_name(op),
             "paramDescription": op.get("description", ""),
             "dataType": op.get("type", "string"),
             "isArray": op.get("is_array", False),
@@ -937,7 +1167,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
             "objective": ns["objective"],
             "evaluationCriteria": criteria,
             "isEntryNode": False,
-            "isExitNode": False,
+            "isExitNode": node_type == "exitNode",
             "nodeType": node_type,
             "xCoordinate": ns.get("x", 250),
             "yCoordinate": ns.get("y", 150),
@@ -988,8 +1218,8 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 "isAvailableToWorkspace": False,
                 "dynamicPropsId": None,
                 "integrationProviderId": None,
-                "inputParams": [build_ip(ip) for ip in ns.get("input_params", []) or []],
-                "outputParams": [build_op(op, ns["key"]) for op in ns.get("output_params", []) or []],
+                "inputParams": [build_ip(ip, i) for i, ip in enumerate(ns.get("input_params", []) or [])],
+                "outputParams": [build_op(op, ns["key"], i) for i, op in enumerate(ns.get("output_params", []) or [])],
             }
         return node
 
@@ -998,7 +1228,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
         tc = node.get("toolConfiguration")
         if not tc:
             return
-        spec_ips = {ip["name"]: ip for ip in spec_node.get("input_params", []) or []}
+        spec_ips = {_param_name(ip): ip for ip in spec_node.get("input_params", []) or []}
         for collection in (tc.get("inputParams", []),
                            (tc.get("originalTool") or {}).get("inputParams", [])):
             for ip in collection or []:
@@ -1038,6 +1268,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 (n for n in existing_conditions if n["id"] == node_id), None)
             if existing_cond and node_id not in reused_condition_ids:
                 node = copy.deepcopy(existing_cond)
+                node["objective"] = ns.get("objective", "")
                 node["childEdges"], node["parentEdges"] = ce, pe
                 if ns.get("node_configurations"):
                     node["nodeConfigurations"] = ns["node_configurations"]
@@ -1047,8 +1278,18 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 final_nodes.append(build_new_condition_node(ns))
         elif ns.get("node_type") == "loopingNode":
             final_nodes.append(build_new_node(ns))
+        elif ns.get("node_type") == "exitNode":
+            ex = existing_by_objective.get(ns.get("objective", "").strip())
+            node = copy.deepcopy(ex) if ex else build_new_node(ns)
+            node["isEntryNode"] = False
+            node["isExitNode"] = True
+            node["nodeType"] = "exitNode"
+            node.pop("toolConfiguration", None)
+            node.pop("nodeConfigurations", None)
+            node["childEdges"], node["parentEdges"] = ce, pe
+            final_nodes.append(node)
         else:
-            ex = find_existing(spec_fn[k])
+            ex = find_existing(spec_fn[k], ns.get("objective"))
             if ex:
                 node = copy.deepcopy(ex)
                 node["childEdges"], node["parentEdges"] = ce, pe
@@ -1154,11 +1395,11 @@ def do_verify(api, agent_id, node_list=None):
 # ===========================================================================
 
 def cmd_validate(api, args):
-    try:
-        api.get("/agent", params={"searchKeyword": "_validate_"})
-        return {"valid": True, "baseUrl": api.base}
-    except BeamError as exc:
-        return {"valid": False, "baseUrl": api.base, "error": str(exc)}
+    # Must FAIL loudly: this previously returned {"valid": false} wrapped in
+    # {"ok": true} with exit 0, so an agent branching on $? treated bad
+    # credentials as success and carried on into the build.
+    api.get("/agent", params={"searchKeyword": "_validate_"})
+    return {"valid": True, "baseUrl": api.base, "workspaceId": api.workspace_id}
 
 
 def cmd_search_tools(api, args):
@@ -1210,7 +1451,13 @@ def cmd_search_agents(api, args):
     data = api.get("/agent", params={"searchKeyword": args.keyword})
     raw = data.get("data") or data.get("agents") or []
     agents = [{"id": a.get("id"), "name": a.get("name")} for a in raw]
-    return {"agents": agents, "total": len(agents)}
+    result = {"agents": agents, "total": len(agents),
+              "workspaceId": api.workspace_id}
+    if not agents:
+        result["hint"] = ("No agents matched in the current workspace. Ask the user "
+                          "whether to create one here or switch with `beam workspace "
+                          "list <search>` then `beam workspace <id>`. Never switch silently.")
+    return result
 
 
 def cmd_get_nodes(api, args):
@@ -1310,6 +1557,9 @@ def cmd_create(api, args):
         payload = build_payload_update(spec, existing)
     else:
         payload = build_payload(spec)
+    if args.dry_run and getattr(args, "summary", False):
+        return {"dryRun": True, "summary": True, "nodeCount": len(payload["nodes"]),
+                "nodes": _payload_summary(payload)}
     if args.dry_run:
         return {"dryRun": True, "nodeCount": len(payload["nodes"]), "payload": payload}
     if args.agent_id:
@@ -1351,6 +1601,13 @@ def cmd_deploy(api, args):
     else:
         payload = build_payload(spec_no_integ, integ_outputs)
 
+    if args.dry_run and getattr(args, "summary", False):
+        return {"dryRun": True, "summary": True,
+                "nodeCount": len(payload["nodes"]),
+                "integrationCount": len(integrations),
+                "nodes": _payload_summary(payload),
+                "integrationsToAttach": [i.get("node_key") for i in integrations],
+                "note": "Counts only. Re-run without --summary for the full payload."}
     if args.dry_run:
         return {"dryRun": True, "nodeCount": len(payload["nodes"]),
                 "integrationCount": len(integrations), "payload": payload,
@@ -1434,6 +1691,8 @@ def cmd_deploy(api, args):
             clean_params.append(p)
         objective = next((sn["objective"] for sn in spec["nodes"]
                           if sn["key"] == node_key), "")
+        node_model = next((sn.get("model", DEFAULT_NODE_MODEL) for sn in spec["nodes"]
+                           if sn["key"] == node_key), DEFAULT_NODE_MODEL)
         node_payload = {
             "id": node_id, "objective": objective,
             "isAttachmentDataPulledIn": True, "evaluationCriteria": [],
@@ -1443,7 +1702,9 @@ def cmd_deploy(api, args):
                 "shortDescription": integ.get("description", ""),
                 "description": integ.get("description", ""),
                 "iconSrc": integ.get("icon_src"),
-                "preferredModel": integ.get("preferred_model"),
+                # The integration's model is optional. Preserve the model
+                # chosen on the graph node instead of overwriting it with null.
+                "preferredModel": integ.get("preferred_model") or node_model,
                 "requiresConsent": integ.get("requires_consent", False),
                 "isMemoryTool": False, "isBackgroundTool": False,
                 "isBatchExecutionEnabled": False, "integrationProviderId": None,
@@ -1453,7 +1714,7 @@ def cmd_deploy(api, args):
         }
         api.patch_body = None
         _http("PATCH", api.base + "/agent-graphs/update-node",
-              _api_headers(api.api_key, api.workspace_id),
+              api._headers_for("/agent-graphs/update-node"),
               body={"agentId": agent_id, "graphId": graph_id, "node": node_payload})
         return {"step": "attach_tool", "status": "ok",
                 "detail": f"Attached {integ['tool_function_name']} to '{node_key}'."}
@@ -1519,7 +1780,7 @@ def cmd_deploy(api, args):
     def relink(op):
         key, node_payload = op
         _http("PATCH", api.base + "/agent-graphs/update-node",
-              _api_headers(api.api_key, api.workspace_id),
+              api._headers_for("/agent-graphs/update-node"),
               body={"agentId": agent_id, "graphId": graph_id, "node": node_payload})
         return {"step": "relink", "status": "ok", "detail": f"Re-linked '{key}'."}
 
@@ -1690,12 +1951,18 @@ def cmd_update_metadata(api, args):
         payload["settings"] = settings
     result = api.put(f"/agent-graphs/{args.agent_id}", payload)
     graph_id = result.get("draftGraphId")
+    # Beam may materialize a fresh draft-node set for a whole-graph update.
+    # Return the authoritative IDs so a CLI caller can safely issue its next
+    # node/edge command without relying on IDs read before this mutation.
+    nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
+    current_nodes = [{"id": n.get("id"), "objective": n.get("objective")}
+                     for n in nodes_data.get("nodes", []) or []]
     published = False
     if args.publish and graph_id:
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"updated": True, "agentId": args.agent_id, "agentName": payload["agentName"],
-            "graphId": graph_id, "published": published}
+            "graphId": graph_id, "nodes": current_nodes, "published": published}
 
 
 def cmd_add_node(api, args):
@@ -1706,7 +1973,7 @@ def cmd_add_node(api, args):
     existing_nodes = (existing.get("graph") or {}).get("nodes", []) or []
 
     new_node_id, new_tc_id = _g(), _g()
-    new_ops = {op["name"]: _g() for op in ns.get("output_params", []) or []}
+    new_ops = {_param_name(op): _g() for op in ns.get("output_params", []) or []}
     node_type = ns.get("node_type") or "executionNode"
 
     # Place the new node relative to its source (or target) so it does not
@@ -1726,7 +1993,7 @@ def cmd_add_node(api, args):
     new_node = {
         "id": new_node_id, "objective": ns["objective"],
         "evaluationCriteria": ns.get("evaluation_criteria", []) or [],
-        "isEntryNode": False, "isExitNode": False, "nodeType": node_type,
+        "isEntryNode": False, "isExitNode": node_type == "exitNode", "nodeType": node_type,
         "parentNodeId": ns.get("parentNodeId"),
         "xCoordinate": new_x, "yCoordinate": new_y,
         "isEvaluationEnabled": bool(ns.get("evaluation_criteria")),
@@ -1762,7 +2029,7 @@ def cmd_add_node(api, args):
             "isAvailableToWorkspace": False, "dynamicPropsId": None,
             "integrationProviderId": None,
             "inputParams": [
-                {"position": ip["position"], "paramName": ip["name"],
+                {"position": ip.get("position", i), "paramName": _param_name(ip),
                  "paramDescription": ip.get("description", ""),
                  "fillType": ip.get("fill_type", "ai_fill"),
                  "required": ip.get("required", True),
@@ -1773,16 +2040,16 @@ def cmd_add_node(api, args):
                  "options": None, "paramTip": None,
                  "staticValue": ip.get("static_value") if ip.get("fill_type") == "static" else None,
                  "linkParamOutputId": None}
-                for ip in ns.get("input_params", []) or []
+                for i, ip in enumerate(ns.get("input_params", []) or [])
             ],
             "outputParams": [
-                {"id": new_ops[op["name"]], "position": op["position"],
-                 "paramName": op["name"], "paramDescription": op.get("description", ""),
+                {"id": new_ops[_param_name(op)], "position": op.get("position", i),
+                 "paramName": _param_name(op), "paramDescription": op.get("description", ""),
                  "dataType": op.get("type", "string"), "isArray": op.get("is_array", False),
                  "outputExample": op.get("output_example"),
                  "agentToolConfigurationId": new_tc_id, "parentId": None,
                  "paramPath": None, "typeOptions": None}
-                for op in ns.get("output_params", []) or []
+                for i, op in enumerate(ns.get("output_params", []) or [])
             ],
         }
 
@@ -1812,12 +2079,19 @@ def cmd_add_node(api, args):
     # value would send null and blank the agent).
     result = api.put(f"/agent-graphs/{args.agent_id}", {"nodes": existing_nodes})
     graph_id = result.get("draftGraphId")
+    # Do not report the client-generated ID as authoritative: Beam can replace
+    # IDs when it writes a draft graph. Resolve the node we just added by its
+    # distinctive objective from the active draft.
+    current_nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
+    actual_new_node_id = next(
+        (n.get("id") for n in current_nodes_data.get("nodes", []) or []
+         if n.get("objective") == ns["objective"]),
+        new_node_id,
+    )
     steps = [{"step": "add_node", "status": "ok", "detail": f"Added node '{ns['objective']}'."}]
 
     if integration and graph_id:
-        nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
-        actual_id = next((n["id"] for n in nodes_data.get("nodes", []) or []
-                          if n.get("objective") == ns["objective"]), None)
+        actual_id = actual_new_node_id
         if actual_id:
             clean = [_clean_integration_param(ip)
                      for ip in integration.get("input_params", []) or []]
@@ -1847,7 +2121,7 @@ def cmd_add_node(api, args):
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"added": True, "agentId": args.agent_id, "graphId": graph_id,
-            "newNodeId": new_node_id, "verificationPassed": all_ok,
+            "newNodeId": actual_new_node_id, "verificationPassed": all_ok,
             "published": published, "steps": steps}
 
 
@@ -1868,6 +2142,17 @@ def cmd_remove_node(api, args):
                             if e["sourceAgentGraphNodeId"] != args.node_id]
 
     def link(src, tgt):
+        # A temporary node may have been inserted alongside an existing direct
+        # edge. Restoring its parent -> child route must not create a duplicate
+        # edge: duplicate unconditional edges can leave a task unable to choose
+        # a unique next node.
+        for n in nodes:
+            if n["id"] == src and any(
+                e.get("sourceAgentGraphNodeId") == src
+                and e.get("targetAgentGraphNodeId") == tgt
+                for e in n.get("childEdges", []) or []
+            ):
+                return
         edge = {"sourceAgentGraphNodeId": src, "targetAgentGraphNodeId": tgt,
                 "condition": "", "isAttachmentDataPulledIn": True}
         for n in nodes:
@@ -1995,7 +2280,7 @@ def _maybe_publish(api, args):
 
 def _api_patch_with_body(self, path, body):
     return _http("PATCH", self.base + path,
-                 _api_headers(self.api_key, self.workspace_id), body=body)
+                 self._headers_for(path), body=body)
 
 
 Api.patch_with_body = _api_patch_with_body
@@ -2010,8 +2295,11 @@ def build_parser():
         prog="beam.py",
         description="Beam Agent Builder CLI - build and deploy Beam AI agents.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Credentials: BEAM_API_KEY, BEAM_WORKSPACE_ID, BEAM_API_URL "
-               "(env vars or a .env file). Every command prints JSON to stdout.",
+        epilog="Credentials resolve from env vars, then ~/.config/beam/credentials "
+               "(written by `beam login`); BEAM_API_URL defaults to the public API. "
+               "There is no .env file. Every command prints JSON to stdout; errors "
+               "carry a 'code' and usually a 'next'. Do not merge stderr into stdout "
+               "with 2>&1 before parsing.",
     )
     sub = p.add_subparsers(dest="command", metavar="<command>")
 
@@ -2051,6 +2339,9 @@ def build_parser():
     s.add_argument("--publish", action="store_true",
                    help="Publish after deploy. Omit to leave a draft (default).")
     s.add_argument("--dry-run", action="store_true", help="Print the payload, no API call.")
+    s.add_argument("--summary", action="store_true",
+                   help="With --dry-run, print counts and node names instead of the "
+                        "full payload (which runs to thousands of tokens).")
 
     s = sub.add_parser("create", help="Create/update an agent (no integration attach).")
     s.add_argument("spec_file")
@@ -2145,21 +2436,31 @@ def build_parser():
 
     s = sub.add_parser(
         "test-node",
-        help="Run a single node with a task context string (smoke test before full deploy).",
+        help="Run a single graph node with explicit JSON params (smoke test before full deploy).",
     )
     s.add_argument("agent_id", help="Agent ID")
+    s.add_argument("graph_id", help="Draft graph ID")
     s.add_argument("node_id", help="Node ID to test")
-    s.add_argument("task_context", help="Realistic task input string for this node")
+    s.add_argument("params", help='JSON object of input values, for example: {"message":"sample"}')
 
     return p
 
 
 def cmd_test_node(api, args):
-    """POST /agent-graphs/test-node — run a single node with a task context string."""
+    """POST /agent-graphs/test-node using the documented graph-bound payload."""
+    try:
+        params = json.loads(args.params)
+    except json.JSONDecodeError as exc:
+        raise BeamError("test-node params must be a JSON object.", code="validation_error",
+                        next_step='Pass JSON such as: {"message":"sample"}.') from exc
+    if not isinstance(params, dict):
+        raise BeamError("test-node params must be a JSON object.", code="validation_error",
+                        next_step='Pass JSON such as: {"message":"sample"}.')
     payload = {
         "agentId": args.agent_id,
+        "graphId": args.graph_id,
         "nodeId": args.node_id,
-        "taskContext": args.task_context,
+        "params": params,
     }
     result = api.post("/agent-graphs/test-node", payload)
     return {"result": result}
@@ -2206,14 +2507,28 @@ def main(argv=None):
 
     handler = COMMANDS[args.command]
     try:
-        api = Api(*resolve_creds())
+        # A new-agent `deploy --dry-run` builds purely locally and does not need
+        # credentials.  An update dry-run (`--agent-id`) must first read the
+        # current graph in order to merge and verify the proposed patch, so it
+        # requires the normal authenticated client.
+        offline = (args.command == "deploy" and getattr(args, "dry_run", False)
+                   and not getattr(args, "agent_id", None))
+        api = Api("", "", DEFAULT_API_URL) if offline else Api(*resolve_creds())
         result = handler(api, args)
         print(json.dumps({"ok": True, "command": args.command, **result}, indent=2))
         return 0
     except BeamError as exc:
-        print(json.dumps({"ok": False, "command": args.command, "error": str(exc)}, indent=2))
+        payload = {"ok": False, "command": args.command,
+                   "code": getattr(exc, "code", "internal_error"), "error": str(exc)}
+        if getattr(exc, "next_step", None):
+            payload["next"] = exc.next_step
+        print(json.dumps(payload, indent=2))
+        # stderr stays human; note that stdout carries the machine-readable copy,
+        # so callers must not merge the streams with 2>&1 before parsing JSON.
         print(f"[beam.py] ERROR: {exc}", file=sys.stderr)
-        return 1
+        if payload.get("next"):
+            print(f"[beam.py] NEXT: {payload['next']}", file=sys.stderr)
+        return EXIT_CODES.get(payload["code"], 1)
     except KeyboardInterrupt:
         print(json.dumps({"ok": False, "command": args.command, "error": "interrupted"}))
         return 130

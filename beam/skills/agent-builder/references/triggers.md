@@ -41,7 +41,7 @@ The available actions are **dynamic per workspace** — always discover them wit
 
 1. **Discover actions** for the integration:
    ```bash
-   python3 scripts/beam.py trigger-actions google-mail
+   beam agent-builder trigger-actions google-mail
    ```
    For an integration (Gmail, Slack, …) the response includes the
    `integrationProviderId` to put in the trigger file. For `timer` the response
@@ -49,13 +49,13 @@ The available actions are **dynamic per workspace** — always discover them wit
 
 2. **Get the entry node ID** — triggers attach to the entry node:
    ```bash
-   python3 scripts/beam.py get-nodes <agentId>
+   beam agent-builder get-nodes <agentId>
    ```
    The entry node is the one with objective `Entry Node`.
 
 3. **Create the trigger** from a JSON file:
    ```bash
-   python3 scripts/beam.py create-trigger trigger.json
+   beam agent-builder create-trigger trigger.json
    ```
 
 ---
@@ -151,9 +151,9 @@ want it running.
 To let an external system start the agent over HTTP:
 
 ```bash
-python3 scripts/beam.py create-webhook <agentId> --entry-node-id <entryNodeId>
-python3 scripts/beam.py get-webhook <agentId>
-python3 scripts/beam.py delete-webhook <agentId>
+beam agent-builder create-webhook <agentId> --entry-node-id <entryNodeId>
+beam agent-builder get-webhook <agentId>
+beam agent-builder delete-webhook <agentId>
 ```
 
 `create-webhook` and `get-webhook` return a `webhookUrl` field — the URL

@@ -5,6 +5,14 @@
 set -eu
 
 BEAM="${BEAM_BIN:-$(cd "$(dirname "$0")/.." && pwd)/beam/bin/beam}"
+# Isolate credentials: without this the "no key" assertions read the developer's
+# real ~/.config/beam (so the suite only passed on a clean CI runner), and the
+# authenticated path below would overwrite their real stored credentials.
+if [ -z "${BEAM_CONFIG_DIR:-}" ]; then
+  BEAM_CONFIG_DIR="${TMPDIR:-/tmp}/beam-smoke-$$"
+  export BEAM_CONFIG_DIR
+  trap 'rm -rf "$BEAM_CONFIG_DIR"' EXIT INT TERM
+fi
 say() { printf '\n=== %s ===\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 

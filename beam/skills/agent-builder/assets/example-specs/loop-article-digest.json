@@ -28,8 +28,8 @@
       "name": "For Each Article",
       "objective": "Loop over each candidate article",
       "node_type": "loopingNode",
-      "node_configurations": { "linkedVariableId": "list-articles:articles", "alias": "article" },
-      "edges": [{ "target": "summarize-article" }]
+      "node_configurations": { "linkedVariableId": "list-articles:articles" },
+      "edges": [{ "target": "compile-digest" }]
     },
     {
       "key": "summarize-article",
@@ -39,12 +39,12 @@
       "tool_name": "Summarize Article",
       "prompt": "## Role:\nYou are a concise summarizer.\n\n## Task:\nWrite a short summary of the current article.\n\n## Context:\n```\n{article}\n```\n\n## Rules:\n1. Two to three sentences.\n2. Output summary.",
       "input_params": [
-        { "name": "article", "description": "The current article from the loop", "type": "string", "fill_type": "ai_fill", "position": 0 }
+        { "name": "article", "description": "The current article from the loop", "type": "string", "fill_type": "linked", "linked_node": "list-articles", "linked_param": "articles", "position": 0 }
       ],
       "output_params": [
         { "name": "summary", "description": "The article summary", "type": "string", "position": 0 }
       ],
-      "edges": [{ "target": "compile-digest" }]
+      "edges": []
     },
     {
       "key": "compile-digest",

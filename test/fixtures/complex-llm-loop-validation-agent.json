@@ -1,0 +1,171 @@
+{
+  "agentName": "Beam Run CLI Validation — 2026-08-12",
+  "agentDescription": "Disposable unpublished LLM-only graph for Beam loop, routing, and revision validation.",
+  "personality": "Precise, deterministic, and concise.",
+  "restrictions": "Use only the supplied synthetic task text. Do not call, suggest, or reference external services.",
+  "prompts": [
+    "Batch process READY and REJECT synthetic work items.",
+    "Process one synthetic work item."
+  ],
+  "nodes": [
+    {
+      "key": "entry",
+      "name": "Entry",
+      "objective": "Entry Node",
+      "is_entry": true,
+      "edges": [{ "target": "parse-request" }]
+    },
+    {
+      "key": "parse-request",
+      "name": "Parse Synthetic Request",
+      "objective": "Parse a synthetic batch or single-item validation request",
+      "tool_name": "Parse Synthetic Request",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a deterministic test-request parser.\n\n## Task:\nExtract whether the supplied synthetic request is batch mode or single mode, and preserve its work-item text.\n\n## Context:\n```\n{request_text}\n```\n\n## Rules:\n1. mode must be exactly batch or single.\n2. Treat a request beginning with BATCH as batch; otherwise use single.\n3. Output mode and source_text only.\n4. Do not infer facts not present in the input.",
+      "input_params": [
+        { "name": "request_text", "description": "Synthetic user request", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "mode", "description": "batch or single", "type": "string", "position": 0 },
+        { "name": "source_text", "description": "Original synthetic request text", "type": "string", "position": 1 }
+      ],
+      "edges": [{ "target": "route-mode" }]
+    },
+    {
+      "key": "route-mode",
+      "name": "Route Synthetic Request",
+      "objective": "Route a parsed synthetic request to batch or single handling",
+      "node_type": "conditionNode",
+      "node_configurations": { "conditionType": "llm_based", "llmModel": "GEMINI_3_FLASH", "fallbackModels": null },
+      "edges": [
+        { "target": "generate-work-items", "condition": "the parsed request is batch mode or asks to process multiple work items" },
+        { "target": "create-single-result", "condition": "the parsed request is single mode or asks to process exactly one work item" }
+      ]
+    },
+    {
+      "key": "generate-work-items",
+      "name": "Generate Synthetic Work Items",
+      "objective": "Convert the batch request into a synthetic work item array",
+      "tool_name": "Generate Synthetic Work Items",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a structured batch parser.\n\n## Task:\nExtract every synthetic work item from the supplied batch request as a separate array entry.\n\n## Context:\n```\n{source_text}\n```\n\n## Rules:\n1. Split the text after BATCH into individual semicolon-separated items.\n2. Preserve each item label and text exactly enough to evaluate READY versus REJECT.\n3. Output work_items as an array of strings.\n4. If no items are present, output an empty array.",
+      "input_params": [
+        { "name": "source_text", "description": "Parsed request source text", "type": "string", "fill_type": "linked", "linked_node": "parse-request", "linked_param": "source_text", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "work_items", "description": "Synthetic work items", "type": "string", "is_array": true, "position": 0 }
+      ],
+      "edges": [{ "target": "for-each-work-item" }]
+    },
+    {
+      "key": "for-each-work-item",
+      "name": "For Each Synthetic Work Item",
+      "objective": "Loop over every generated synthetic work item",
+      "node_type": "loopingNode",
+      "node_configurations": { "linkedVariableId": "generate-work-items:work_items", "alias": "work_item" },
+      "edges": [{ "target": "evaluate-current-item" }]
+    },
+    {
+      "key": "evaluate-current-item",
+      "name": "Evaluate Current Synthetic Work Item",
+      "objective": "Evaluate the current loop work item for readiness",
+      "parent": "for-each-work-item",
+      "tool_name": "Evaluate Current Synthetic Work Item",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a strict synthetic work-item evaluator.\n\n## Task:\nClassify the current loop work item as accepted or rejected.\n\n## Context:\n```\n{work_item}\n```\n\n## Rules:\n1. Only an item explicitly labelled READY is accepted; every other item is rejected.\n2. Output decision exactly as accepted or rejected.\n3. Output evaluation_reason in one short sentence.\n4. Do not change the supplied item text.",
+      "input_params": [
+        { "name": "work_item", "description": "Current loop item supplied by alias", "type": "string", "fill_type": "ai_fill", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "decision", "description": "accepted or rejected", "type": "string", "position": 0 },
+        { "name": "evaluation_reason", "description": "Short evaluation reason", "type": "string", "position": 1 }
+      ],
+      "edges": [{ "target": "route-current-item" }]
+    },
+    {
+      "key": "route-current-item",
+      "name": "Route Current Synthetic Work Item",
+      "objective": "Route the evaluated loop item to its result branch",
+      "parent": "for-each-work-item",
+      "node_type": "conditionNode",
+      "node_configurations": { "conditionType": "llm_based", "llmModel": "GEMINI_3_FLASH", "fallbackModels": null },
+      "edges": [
+        { "target": "record-accepted-item", "condition": "the current item evaluation decision is accepted" },
+        { "target": "record-rejected-item", "condition": "the current item evaluation decision is rejected" }
+      ]
+    },
+    {
+      "key": "record-accepted-item",
+      "name": "Record Accepted Synthetic Work Item",
+      "objective": "Record the accepted result for the current loop item",
+      "parent": "for-each-work-item",
+      "tool_name": "Record Accepted Synthetic Work Item",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a concise validation recorder.\n\n## Task:\nCreate an accepted-item result from the current loop context.\n\n## Context:\n```\n{work_item}\n```\n\n```\n{evaluation_reason}\n```\n\n## Rules:\n1. State that the item is accepted.\n2. Include the original item and short reason.\n3. Output accepted_result as one concise line.",
+      "input_params": [
+        { "name": "work_item", "description": "Current loop item", "type": "string", "fill_type": "ai_fill", "position": 0 },
+        { "name": "evaluation_reason", "description": "Current evaluator reason", "type": "string", "fill_type": "linked", "linked_node": "evaluate-current-item", "linked_param": "evaluation_reason", "position": 1 }
+      ],
+      "output_params": [
+        { "name": "accepted_result", "description": "Accepted item result", "type": "string", "position": 0 }
+      ],
+      "edges": [{ "target": "compile-loop-results" }]
+    },
+    {
+      "key": "record-rejected-item",
+      "name": "Record Rejected Synthetic Work Item",
+      "objective": "Record the rejected result for the current loop item",
+      "parent": "for-each-work-item",
+      "tool_name": "Record Rejected Synthetic Work Item",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a concise validation recorder.\n\n## Task:\nCreate a rejected-item result from the current loop context.\n\n## Context:\n```\n{work_item}\n```\n\n```\n{evaluation_reason}\n```\n\n## Rules:\n1. State that the item is rejected.\n2. Include the original item and short reason.\n3. Output rejected_result as one concise line.",
+      "input_params": [
+        { "name": "work_item", "description": "Current loop item", "type": "string", "fill_type": "ai_fill", "position": 0 },
+        { "name": "evaluation_reason", "description": "Current evaluator reason", "type": "string", "fill_type": "linked", "linked_node": "evaluate-current-item", "linked_param": "evaluation_reason", "position": 1 }
+      ],
+      "output_params": [
+        { "name": "rejected_result", "description": "Rejected item result", "type": "string", "position": 0 }
+      ],
+      "edges": [{ "target": "compile-loop-results" }]
+    },
+    {
+      "key": "compile-loop-results",
+      "name": "Compile Synthetic Loop Results",
+      "objective": "Compile accumulated accepted and rejected loop results",
+      "tool_name": "Compile Synthetic Loop Results",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are an audit-summary compiler.\n\n## Task:\nCompile the accumulated loop outputs into a concise synthetic batch report.\n\n## Context:\n```\n{accepted_results}\n```\n\n```\n{rejected_results}\n```\n\n## Rules:\n1. Include accepted and rejected outcomes that are present.\n2. Do not invent outcomes for missing arrays.\n3. Output final_report as a compact multi-line report.\n4. Do not call or reference external services.",
+      "input_params": [
+        { "name": "accepted_results", "description": "Accumulated accepted loop outputs", "type": "string", "is_array": true, "fill_type": "ai_fill", "position": 0 },
+        { "name": "rejected_results", "description": "Accumulated rejected loop outputs", "type": "string", "is_array": true, "fill_type": "ai_fill", "position": 1 }
+      ],
+      "output_params": [
+        { "name": "final_report", "description": "Synthetic batch report", "type": "string", "position": 0 }
+      ],
+      "edges": [{ "target": "exit" }]
+    },
+    {
+      "key": "create-single-result",
+      "name": "Create Single Synthetic Result",
+      "objective": "Create a synthetic result for a single-item request",
+      "tool_name": "Create Single Synthetic Result",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a deterministic single-item validator.\n\n## Task:\nProduce one concise synthetic result for the supplied single-item request.\n\n## Context:\n```\n{source_text}\n```\n\n## Rules:\n1. State whether the supplied item is explicitly READY or not.\n2. Output final_report as one concise line.\n3. Do not call or reference external services.",
+      "input_params": [
+        { "name": "source_text", "description": "Parsed single request text", "type": "string", "fill_type": "linked", "linked_node": "parse-request", "linked_param": "source_text", "position": 0 }
+      ],
+      "output_params": [
+        { "name": "final_report", "description": "Single-item synthetic report", "type": "string", "position": 0 }
+      ],
+      "edges": [{ "target": "exit" }]
+    },
+    {
+      "key": "exit",
+      "name": "Finish Complex Validation Without Side Effects",
+      "objective": "Finish complex validation without side effects",
+      "node_type": "exitNode",
+      "edges": []
+    }
+  ],
+  "integrations": []
+}

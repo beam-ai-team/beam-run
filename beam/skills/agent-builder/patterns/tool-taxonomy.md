@@ -2,7 +2,7 @@
 
 Load when picking a tool type for a node, naming a node, or auditing whether a graph reads clearly on the Beam canvas.
 
-The five categories drive naming, icon style, and the `requiresConsent` / `onError` defaults. Get the category right and the graph becomes scannable for a reviewer or a buyer.
+The five categories drive naming, icon style, and the `requiresConsent` / `onError` defaults. **`requiresConsent` only applies to integration entries** — the builder writes `requiresConsent: false` on every custom-GPT node, so consent on a Custom GPT node is not deployable (and is not meaningful: a pure reasoning step has no external side effect). Get the category right and the graph becomes scannable for a reviewer or a buyer.
 
 **Color discipline: colorful = external system touchpoint; monochrome = internal reasoning or system primitive.** This makes the canvas instantly readable.
 
@@ -74,7 +74,27 @@ Required prompt guardrail on every mock node:
 
 **`StandAloneAction_CodeExecutor`** — runs deterministic JavaScript inside a node. Use for: arithmetic, threshold checks, parsing structured data, format coercion, building lookup results. `onError: STOP` — deterministic code should fail loudly. `code_language: "javascript"`, `code` must be non-empty.
 
-**Before designing a CodeExecutor node:** verify a working example exists in `assets/example-specs/` or that `beam.py` has explicit handling for it (`grep -n CodeExecutor scripts/beam.py`). If neither confirms within 2 lookups, fall back to a Custom GPT executionNode — it is simpler, proven, and costs only 1–2 cr more per run. Do not spend more than 2 tool calls investigating CodeExecutor configuration.
+**How to author both:** they are ordinary platform tools — confirm with
+`beam agent-builder search-tools CodeExecutor` (or `TriggerAgent`) — but they are
+**not** authored as plain nodes. A node's `toolFunctionName` is always derived as
+`GPTAction_Custom_<Name>`, so you cannot name a system action that way. Attach it
+like any other integration instead: give the node no tool of its own, then add an
+`integrations` entry keyed to it:
+
+```json
+{ "node_key": "calc-total",
+  "tool_function_name": "StandAloneAction_CodeExecutor",
+  "tool_name": "CodeExecutor",
+  "description": "Compute the order total",
+  "requires_consent": false,
+  "input_params": [ { "name": "code", "fill_type": "static",
+                      "static_value": "return items.reduce((a,b)=>a+b,0)" } ],
+  "output_params": [] }
+```
+
+Verify with `beam agent-builder deploy <spec> --dry-run --summary`: the node must
+appear under `integrationsToAttach`. If it does not, fall back to a Custom GPT
+executionNode — simpler, proven, and only 1–2 cr more per run.
 
 ---
 

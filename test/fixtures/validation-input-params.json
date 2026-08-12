@@ -1,0 +1,12 @@
+[
+  {
+    "position": 0,
+    "paramName": "message",
+    "paramDescription": "Synthetic text provided by a draft test task",
+    "fillType": "ai_fill",
+    "required": true,
+    "dataType": "string",
+    "isArray": false,
+    "outputExample": "hello world"
+  }
+]
