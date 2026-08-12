@@ -14,16 +14,37 @@ Two modes:
                  install the host launches this before the user has ever run
                  `beam login`.
 
-Env: BEAM_API_KEY (may be empty), BEAM_MCP_URL, BEAM_API_TIMEOUT (seconds).
+Env: BEAM_API_KEY (may be empty), BEAM_MCP_URL, BEAM_LOCAL_DEV=1 (for a
+loopback endpoint), BEAM_API_TIMEOUT (seconds).
 """
 
 import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
-MCP_URL = os.environ.get("BEAM_MCP_URL") or "https://api.beamstudio.ai/mcp"
+PRODUCTION_MCP_URL = "https://api.beamstudio.ai/mcp"
+
+
+def _is_loopback_url(url):
+    """Return whether *url* targets localhost or a loopback address."""
+    try:
+        host = urllib.parse.urlparse(url).hostname
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _resolve_mcp_url():
+    candidate = os.environ.get("BEAM_MCP_URL") or ""
+    if _is_loopback_url(candidate) and os.environ.get("BEAM_LOCAL_DEV") != "1":
+        return PRODUCTION_MCP_URL
+    return candidate or PRODUCTION_MCP_URL
+
+
+MCP_URL = _resolve_mcp_url()
 API_KEY = os.environ.get("BEAM_API_KEY") or ""
 TIMEOUT = float(os.environ.get("BEAM_API_TIMEOUT") or 120)
 PROTOCOL = "2025-06-18"

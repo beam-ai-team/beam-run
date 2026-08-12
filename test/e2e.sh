@@ -82,6 +82,85 @@ if NO_KEY="$(sandbox BEAM_API_KEY= sh "$BEAM" login </dev/null 2>&1)"; then no_k
 [ "$no_key_rc" -eq 3 ] && printf '%s' "$NO_KEY" | grep -q 'BEAM_API_KEY' && ok "non-interactive login gives secure options" || bad "missing API-key login guidance"
 printf '%s' "$(sh "$BEAM" --help)" | grep -q 'masked prompt' && ok "help documents masked API-key login" || bad "help still describes browser login"
 
+group "production endpoint safety"
+mkdir -p "$FAKE/bin"
+cat > "$FAKE/bin/curl" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" > "$BEAM_CURL_CAPTURE"
+printf '401'
+SH
+chmod +x "$FAKE/bin/curl"
+# A user can have old local-development exports in their shell. The installed
+# production CLI must ignore them unless local development is explicitly opted in.
+if PROD_LOGIN="$(env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-production" \
+  BEAM_CONFIG_DIR="$FAKE/.config/beam" BEAM_API_URL="http://localhost:4000" \
+  BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV= \
+  sh "$BEAM" login --api-key sk-test 2>&1)"; then prod_login_rc=0; else prod_login_rc=$?; fi
+[ "$prod_login_rc" -eq 3 ] && ok "loopback login returns auth failure from fake API" || bad "unexpected loopback login exit $prod_login_rc"
+grep -q 'https://api.beamstudio.ai/v2/user/me' "$FAKE/curl-production" && ok "loopback API override falls back to production" || bad "loopback API override leaked into production login"
+printf '%s' "$PROD_LOGIN" | grep -q 'Ignoring inherited Beam localhost' && ok "explains ignored local development settings" || bad "no loopback override guidance"
+
+printf '{"mcpServers":{}}\n' > "$FAKE/.claude.json"
+env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-register" \
+  BEAM_CONFIG_DIR="$FAKE/.config/beam" BEAM_API_URL="http://localhost:4000" \
+  BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV= BEAM_API_KEY=sk-test \
+  sh "$BEAM" register >/dev/null 2>&1
+python3 - "$FAKE/.claude.json" <<'PY' && ok "loopback MCP override registers production endpoint" || bad "loopback MCP override leaked into host registration"
+import json, sys
+entry = json.load(open(sys.argv[1]))["mcpServers"]["beam"]
+assert entry["url"] == "https://api.beamstudio.ai/mcp"
+PY
+
+if DEV_LOGIN="$(env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-local" \
+  BEAM_CONFIG_DIR="$FAKE/.config/beam-local" BEAM_API_URL="http://localhost:4000" \
+  BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV=1 \
+  sh "$BEAM" login --api-key sk-test 2>&1)"; then dev_login_rc=0; else dev_login_rc=$?; fi
+[ "$dev_login_rc" -eq 3 ] && ok "explicit local development keeps fake auth failure" || bad "unexpected local-dev login exit $dev_login_rc"
+grep -q 'http://localhost:4000/v2/user/me' "$FAKE/curl-local" && ok "explicit local development keeps loopback API" || bad "explicit local development did not preserve loopback API"
+printf '%s' "$DEV_LOGIN" | grep -q 'Ignoring inherited Beam localhost' && bad "local-development mode was incorrectly ignored" || ok "explicit local development avoids production fallback warning"
+
+# The builder and stdio proxy can also be invoked directly, so they need the
+# same endpoint rule rather than depending on the shell CLI to normalize env.
+env HOME="$FAKE" BEAM_API_URL="http://localhost:4000" BEAM_MCP_URL="http://localhost:4000/mcp" \
+  BEAM_CONFIG_DIR="$FAKE/.config/beam-local" BEAM_LOCAL_DEV= \
+  BEAM_BUILDER="$ROOT/beam/skills/agent-builder/scripts/beam.py" BEAM_PROXY="$PROXY" \
+  python3 - <<'PY' && ok "direct builder and proxy ignore inherited loopback settings" || bad "direct builder or proxy leaked loopback settings"
+import importlib.util
+import os
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+builder = load("beam_builder_production", os.environ["BEAM_BUILDER"])
+proxy = load("beam_proxy_production", os.environ["BEAM_PROXY"])
+assert builder._base_url() == "https://api.beamstudio.ai"
+assert builder._config_dir().endswith("/.config/beam")
+assert proxy.MCP_URL == "https://api.beamstudio.ai/mcp"
+PY
+
+env HOME="$FAKE" BEAM_API_URL="http://localhost:4000" BEAM_MCP_URL="http://localhost:4000/mcp" \
+  BEAM_CONFIG_DIR="$FAKE/.config/beam-local" BEAM_LOCAL_DEV=1 \
+  BEAM_BUILDER="$ROOT/beam/skills/agent-builder/scripts/beam.py" BEAM_PROXY="$PROXY" \
+  python3 - <<'PY' && ok "direct builder and proxy preserve explicit local development" || bad "direct builder or proxy lost explicit local development"
+import importlib.util
+import os
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+builder = load("beam_builder_local", os.environ["BEAM_BUILDER"])
+proxy = load("beam_proxy_local", os.environ["BEAM_PROXY"])
+assert builder._base_url() == "http://localhost:4000"
+assert builder._config_dir().endswith("/.config/beam-local")
+assert proxy.MCP_URL == "http://localhost:4000/mcp"
+PY
+
 group "draft test-task CLI"
 printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam tasks test' && ok "help documents draft test tasks" || bad "missing draft test command"
 printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam tasks get' && ok "help documents task inspection" || bad "missing task inspect command"
