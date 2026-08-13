@@ -39,8 +39,8 @@ Wait for confirmation — do **not** take the key yourself. The command validate
 
 `beam login` registers the MCP connection itself — including on the Claude desktop app,
 which has no `claude` CLI. Only if it prints **"Could not auto-register"** do you relay the
-manual fallback: add a remote HTTP server named `beam`, url `https://api.beamstudio.ai/mcp`,
-header `Authorization: Bearer <their key>`.
+manual fallback: add a stdio server named `beam`, command `beam`, args `mcp`. This keeps
+Flow-internal operations behind Agent Builder.
 
 Workspace choice happens in the coding-agent conversation, not the browser. Resolve it in this order:
 

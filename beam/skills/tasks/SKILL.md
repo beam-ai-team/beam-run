@@ -46,8 +46,12 @@ whether the user wants to switch with `beam workspace list <search>` and
 
 ## Monitor
 
-- MCP: `listAgentTasks`, `getTaskDetails`, `getTaskUpdates`
-- Narrate status changes; don't stream raw SSE payloads to the user.
+- For one task, use `listenTask`; it returns a bounded final status with the
+  executed steps and their outputs. For task lists or searches, use
+  `getLatestExecutions` or `listAgentTasks`.
+- `getTaskDetails` is currently broken server-side (`structuredContent expected
+  record`), so do not use it as a primary monitoring path. Do not stream raw
+  SSE payloads to the user.
 
 ## Human-in-the-loop
 

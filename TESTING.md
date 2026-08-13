@@ -31,11 +31,14 @@ beam workspace list    # use only when the request needs another workspace
 beam agents list
 ```
 
-## 4. Tier A — direct HTTP MCP (no proxy, no Node/uv) on Claude Code
+## 4. Tier A — policy-enforcing stdio MCP on Claude Code
 ```sh
-claude mcp add --transport http beam https://api.beamstudio.ai/mcp \
-  --header "Authorization: Bearer <your key>"
+claude mcp add --transport stdio beam -- /absolute/path/to/beam mcp
 ```
+
+Do not register the upstream Beam HTTP MCP endpoint directly: that bypasses the
+Beam-run proxy that reserves Flow construction, inspection, testing, and
+mutation for Agent Builder.
 Then **fully restart Claude Code** and ask *"list my Beam agents."*
 
 ## Notes

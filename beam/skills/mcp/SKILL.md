@@ -5,9 +5,10 @@ description: Beam MCP — which Model Context Protocol tools the Beam server exp
 
 # Beam MCP
 
-The Beam MCP server is the primary in-editor surface. **Preferred: register it as a
-direct HTTP MCP server** (`type: http`, url `https://api.beamstudio.ai/mcp`) — no local
-proxy, no Node/uv. Where the host only supports stdio, the plugin bridges via `beam mcp`.
+The Beam MCP server is the operational in-editor surface. Register it through
+`beam mcp`, the bundled policy-enforcing stdio proxy. It exposes workspace,
+task, and observability operations, while Flow-internal operations stay behind
+the Agent Builder skill.
 
 ## Tool groups (from Beam docs)
 
@@ -15,13 +16,29 @@ proxy, no Node/uv. Where the host only supports stdio, the plugin bridges via `b
 | --- | --- |
 | User | `getCurrentUser` |
 | Agents | `listAgents`, `downloadContextFile` |
-| Graphs | `getAgentGraph`, `testGraphNode`, `getTaskNodesByTool` |
 | Tasks | `createAgentTask`, `listAgentTasks`, `getTaskDetails`, `getTaskUpdates` |
 | Control | `submitUserInput`, `approveTaskExecution`, `rejectTaskExecution`, `retryTaskExecution` |
 | Analytics | `getAgentAnalytics`, `rateTaskOutput`, `optimizeTool`, `getToolOptimizationStatus` |
+| Workspace discovery | `listPreferredModels`, `listActiveTools` |
+| Agent Views (read-only) | `listAgentViews`, `getAgentView`, `listAgentViewRecords`, `listLinkedAgentViewRecords` |
 
-Exact tool names depend on the server version — discover what's connected in the
-host's MCP panel rather than assuming this list is exhaustive.
+### Capability boundary
+
+Do not add or call standalone MCP tools for Flow internals: graph/node reads,
+node tests, tool schemas, graph mutation, trigger/webhook invocation, prompt or
+parameter changes, consent configuration, or publishing. These are dependencies
+of the configured agent behavior and must use `beam:agent-builder`.
+
+The proxy blocks `getAgentGraph`, `getTaskNodesByTool`, `getToolOutputSchema`,
+`testGraphNode`, `updateGraphNode`, and `startTask`, even if the upstream MCP
+server advertises them. Use the Agent Builder CLI for guarded inspection,
+testing, and all Flow changes.
+
+Standalone MCP tools qualify only when they operate a workspace or a task from
+outside the Flow: discovery, task lifecycle, consent/input at runtime, and
+observability. The bundled proxy additionally supplies read-only workspace-tool
+discovery and Agent View tools. They do not modify a graph, a view, or any
+agent configuration.
 
 Workspace-specific tools require an explicit workspace ID. Resolve it from the
 user's request or Beam URL first, then `beam workspace`, then a sole membership.
@@ -39,10 +56,9 @@ or change the default without the user's choice.
 
 ## Auth note
 
-The `/mcp` endpoint accepts **`Authorization: Bearer <key>`** (preferred) — and currently
-also tolerates `x-api-key`. Use Bearer; `beam register` sets it for you. MCP reads the key
-**once at startup**, so after `beam login` or any auth/config change, restart the agent host.
-See the `setup` skill.
+The local proxy reads credentials when it starts and forwards them to `/mcp`.
+After `beam login` or any auth/config change, restart the agent host. See the
+`setup` skill.
 
 ## Known issues (server-side, being fixed)
 

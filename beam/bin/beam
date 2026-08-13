@@ -81,11 +81,9 @@ else
   ignored_loopback_config=0
 fi
 CREDS_FILE="$CONFIG_DIR/credentials"
-# The stdio bridge needs a REMOTE-streamable-HTTP -> stdio proxy:
-#   - uvx: PyPI `mcp-proxy` (sparfenyuk) — proven; args: <url> --transport streamablehttp -H ...
-#   - npx: `mcp-remote` (geelen) — the npm equivalent. NOT npm `mcp-proxy`, which is a
-#     DIFFERENT tool (stdio -> HTTP server) with incompatible args that silently fails.
-# Prefer the DIRECT HTTP MCP registration (type:http) — it needs no proxy at all.
+# Use the bundled stdio proxy for registration. It enforces the MCP capability
+# boundary: operational tools stay available, while Flow-internal tools route
+# through Agent Builder.
 
 die() {
   # Categorical exit codes agents can branch on:
@@ -442,7 +440,7 @@ Usage:
   beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>
                              provide a requested value to a paused task
   beam agent-builder <cmd>   bundled agent builder (design/build/patch graphs)
-  beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
+  beam mcp                   policy-enforcing stdio MCP server
   beam uninstall
   beam --version | --help
 
@@ -719,18 +717,7 @@ cmd_mcp() {
   if [ -f "$proxy" ] && command -v python3 >/dev/null 2>&1; then
     BEAM_API_KEY="$key" BEAM_MCP_URL="$MCP_URL" exec python3 "$proxy"
   fi
-
-  if [ -z "$key" ]; then
-    die "auth_missing" "not signed in — run beam login before starting MCP" 3
-  fi
-  # The endpoint accepts either header; send both so any server build works.
-  vendored="$(script_dir)/mcp-proxy"
-  if [ -x "$vendored" ]; then exec "$vendored" "$MCP_URL" --transport streamablehttp -H Authorization "Bearer $key" -H x-api-key "$key"; fi
-  # uvx -> PyPI mcp-proxy (remote streamable-HTTP -> stdio).
-  if command -v uvx >/dev/null 2>&1; then exec uvx mcp-proxy "$MCP_URL" --transport streamablehttp -H Authorization "Bearer $key" -H x-api-key "$key"; fi
-  # npx fallback -> mcp-remote (NOT npm `mcp-proxy`, a different, incompatible tool).
-  if command -v npx >/dev/null 2>&1; then exec npx -y mcp-remote "$MCP_URL" --header "Authorization: Bearer $key" --header "x-api-key: $key"; fi
-  die "internal_error" "no MCP bridge available (python3, uvx and npx all missing). Best fix: run 'beam register' to add Beam as a DIRECT HTTP MCP server — no bridge needed." 1
+  die "internal_error" "the policy-enforcing Beam MCP server requires bundled mcp_proxy.py and python3. Reinstall Beam-run, then run beam setup." 1
 }
 
 mcp_registered_hosts() {
@@ -833,11 +820,10 @@ cmd_doctor() {
   fi
 
   if [ -f "$(script_dir)/mcp_proxy.py" ] && command -v python3 >/dev/null 2>&1; then
-    printf '  [ok] bundled MCP bridge present (stdio hosts need no npx/uvx)\n'
-  elif command -v uvx >/dev/null 2>&1 || command -v npx >/dev/null 2>&1; then
-    printf '  [ok] MCP bridge runtime available (uvx/npx) — only needed for stdio hosts\n'
+    printf '  [ok] policy-enforcing MCP bridge present\n'
   else
-    printf '  [--] no bundled bridge and no uvx/npx — only matters for stdio hosts; direct HTTP needs neither\n'
+    printf '  [XX] policy-enforcing MCP bridge unavailable — reinstall Beam-run (mcp_proxy.py + python3 required)\n'
+    fail=1
   fi
 
   printf '\n  Reminder: if you signed in AFTER starting your agent, fully restart it so MCP picks up the key.\n'
@@ -878,20 +864,18 @@ add_to_path_rc() {
 }
 
 # --- host MCP registration ------------------------------------------------------
-# Register Beam as a DIRECT HTTP MCP server in the host's own JSON config: no
-# proxy, no Node/uv runtime, no PATH dependency, and the key is resolved once
-# here rather than at every MCP startup. Atomic write + one-time backup.
+# Register Beam's local stdio proxy in the host config. The proxy deliberately
+# filters raw Flow tools so all graph work remains behind Agent Builder.
 
 mcp_host_json() {
-  # $1 = add|remove ; $2 = config path. Key passed via BEAM_REG_KEY (never argv).
+  # $1 = add|remove ; $2 = config path.
   command -v python3 >/dev/null 2>&1 || return 1
-  BEAM_REG_ACTION="$1" BEAM_REG_CFG="$2" BEAM_REG_URL="$MCP_URL" python3 - <<'PY'
+  BEAM_REG_ACTION="$1" BEAM_REG_CFG="$2" BEAM_REG_COMMAND="$(script_dir)/beam" python3 - <<'PY'
 import json, os, shutil, sys
 
 action = os.environ["BEAM_REG_ACTION"]
 cfg = os.environ["BEAM_REG_CFG"]
-url = os.environ["BEAM_REG_URL"]
-key = os.environ.get("BEAM_REG_KEY", "")
+command = os.environ["BEAM_REG_COMMAND"]
 
 if os.path.exists(cfg):
     try:
@@ -912,9 +896,8 @@ if not isinstance(servers, dict):
 
 if action == "add":
     servers["beam"] = {
-        "type": "http",
-        "url": url,
-        "headers": {"Authorization": "Bearer " + key},
+        "command": command,
+        "args": ["mcp"],
     }
 else:
     if "beam" not in servers:
@@ -951,19 +934,19 @@ cmd_register() {
   if [ -z "$key" ]; then die "auth_missing" "sign in first: beam login" 3; fi
   hosts=""
 
-  # Claude Code: prefer the official CLI when present (it keeps its own bookkeeping).
+  # Claude Code: use stdio so the local MCP policy cannot be bypassed.
   if command -v claude >/dev/null 2>&1; then
-    if claude mcp add --transport http beam "$MCP_URL" --header "Authorization: Bearer $key" >/dev/null 2>&1; then
+    if claude mcp add --transport stdio beam -- "$(script_dir)/beam" mcp >/dev/null 2>&1; then
       hosts="claude-code"
     fi
   fi
   # Claude desktop app (and any Claude Code install): the shared ~/.claude.json
   # registry. This is the common case where no `claude` binary exists.
   if [ -z "$hosts" ] && [ -f "$HOME/.claude.json" ]; then
-    if BEAM_REG_KEY="$key" mcp_host_json add "$HOME/.claude.json"; then hosts="claude-desktop"; fi
+    if mcp_host_json add "$HOME/.claude.json"; then hosts="claude-desktop"; fi
   fi
   if [ -d "$HOME/.cursor" ]; then
-    if BEAM_REG_KEY="$key" mcp_host_json add "$HOME/.cursor/mcp.json"; then hosts="$hosts cursor"; fi
+    if mcp_host_json add "$HOME/.cursor/mcp.json"; then hosts="$hosts cursor"; fi
   fi
   hosts="${hosts# }"
 
@@ -975,8 +958,8 @@ cmd_register() {
 
   cat >&2 <<EOF
 Could not auto-register (no supported host config found, or python3 is missing).
-Add a remote HTTP MCP server in your agent:
-  name=beam  type=http  url=$MCP_URL  header="Authorization: Bearer <your key>"
+Add a stdio MCP server in your agent:
+  name=beam  command=$(script_dir)/beam  args=["mcp"]
 Then fully restart your agent.
 EOF
   return 2
