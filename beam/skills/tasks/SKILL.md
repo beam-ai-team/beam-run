@@ -16,11 +16,32 @@ whether the user wants to switch with `beam workspace list <search>` and
 
 ## Create
 
-- MCP: `createAgentTask`
+- **Choose the graph before creating anything.** Inspect the agent's active and
+  draft graph IDs. A task is either a live run or a draft test; never assume the
+  two are interchangeable.
+- Infer the target from the strongest available context, without burdening the
+  user with a routine choice: explicit “draft/unpublished/current changes” means
+  draft; explicit “live/production” means live; a test requested after relevant
+  draft work in the current conversation means draft; and a normal task request
+  with no relevant unpublished-work context means live. The mere existence of an
+  old or unrelated draft does not make a normal task ambiguous.
+- If the user explicitly selects the draft, use `beam tasks test <agentId>
+  <input>`. This sends `isDraftTask: true`; `createAgentTask` cannot select a
+  draft graph.
+- If the user explicitly selects the live agent, or asks to run a normal task
+  without relevant unpublished work, use MCP: `createAgentTask`.
+- Ask one focused question only when the coding agent cannot resolve a genuine
+  conflict or missing fact after using the conversation and graph state—for
+  example, the request explicitly refers to both live and draft behavior, or it
+  cannot identify which unpublished change the test should cover. Do not ask
+  merely because both graph versions exist.
+- For multiple cases, create one task first and confirm its returned
+  `agentGraphId` matches the selected graph before creating the rest. State the
+  selected mode and graph in the result: “draft test” or “live task.”
 - When the user has clearly named the agent and supplied the input, treat that as
   authorization to create the task; do not ask them to repeat it. Ask only when
-  the agent or input is ambiguous, or when the task can immediately cause an
-  external side effect that was not clearly authorized.
+  the agent, input, **graph target**, or immediate external side effect is
+  ambiguous.
 - Return the task id and a one-line status, plus a link/path if the tool provides one.
 
 ## Monitor

@@ -158,6 +158,15 @@ change before testing. Use `references/validation.md` for task-level validation
 and diagnosis. Publish only after a direct live-action request; report whether
 the resulting graph is draft or live.
 
+Before any task test, inspect active and draft graph IDs. Infer the target from
+context: a test following relevant unpublished draft work uses the draft; an
+explicit live/production request or a normal run without relevant draft context
+uses the active graph. Do not ask merely because both versions exist. Ask only
+when the available evidence genuinely conflicts or cannot identify the intended
+unpublished change. Use `beam tasks test` for the draft and the ordinary task
+path for live runs. For a batch, verify the first task's returned `agentGraphId`
+before submitting further cases.
+
 ## References
 
 | Read when | File |
