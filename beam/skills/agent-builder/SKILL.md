@@ -4,6 +4,8 @@ description: >-
   Build, inspect, configure, test, and publish Beam AI agents conversationally.
   Use whenever the user wants to create, change, deploy, test, publish, or
   diagnose a Beam agent, graph, node, integration, trigger, or webhook.
+  This skill is mandatory before every Beam flow mutation because it owns the
+  graph's dependency and sub-dependency rules.
   Translate normal language into the smallest safe graph action; show the
   proposed flow and integrations for approval before creating or materially
   changing a draft.
@@ -15,6 +17,17 @@ Act as a conversational builder, not a wizard. Never open with a banner, a
 phase timeline, or a request for a command word. Read the user's latest request,
 the conversation, and the current graph together; the newest clear instruction
 always wins.
+
+## Ownership boundary (mandatory)
+
+This is the sole skill for changing a Beam flow. A flow mutation includes any
+node, edge, prompt, parameter, tool setting, consent setting, integration,
+trigger, webhook, graph metadata, deployment, or publish change. Before making
+one, use this skill's inspection, dependency, smallest-patch, and verification
+rules. Do not bypass them with generic MCP graph tools, `beam agents deploy`,
+or raw API payloads. `agents` may inspect/list/publish/delete at the agent level;
+`tasks` may operate a task at runtime, but neither replaces this skill for graph
+configuration.
 
 ## Connection and workspace
 
@@ -71,10 +84,14 @@ correction followed by acceptance is sufficient. Never require a literal
 `build`, `A`, or `B`.
 
 Treat a change as material when it changes the trigger, graph topology, routing
-logic, integration set, destination, consent posture, or a live external effect.
-Re-show the compact proposal before applying it. A direct minor request—such as
-changing tone, summary length, prompt text, or a model—updates the existing draft
-without restarting design or requiring a second approval screen.
+logic, integration set, destination, or a live external effect. Re-show the
+compact proposal before applying it. A direct request to toggle `requiresConsent`
+on an existing integration node is a targeted **node configuration** update: it
+does not create a graph node, edge, branch, or separate consent step. Apply it
+directly with `update-node-consent`, then report that task execution will request
+consent immediately before that tool runs. A direct minor request—such as
+changing tone, summary length, prompt text, model, or this node setting—updates
+the existing draft without restarting design or requiring a second approval screen.
 
 Use the response patterns in `references/conversation-flow.md` when showing a
 proposal, a draft update, a blocker, a test result, or a publish result.
@@ -125,7 +142,8 @@ Inspect the graph first, then select the smallest matching command:
 | Name or description | `update-metadata` |
 | One node | `add-node` / `remove-node` |
 | Integration | `attach-tool` |
-| Model or node configuration | `update-node` |
+| Consent setting on an integration node | `update-node-consent` |
+| Model or other node configuration | `update-node` |
 | Broad restructure | `deploy --agent-id <id>` |
 
 For a full redeploy, include every node to retain. Matching uses derived

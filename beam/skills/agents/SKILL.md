@@ -1,6 +1,6 @@
 ---
 name: agents
-description: Beam agents — list, inspect, build/deploy, publish, and delete agents in the workspace. Use when the user asks about their agents, agent configuration or graph structure, or wants to create, update, publish, or remove an agent.
+description: Beam agents — list, inspect, publish, and delete agents in the workspace. For every flow, graph, node, trigger, integration, or configuration change, load and follow the agent-builder skill instead of acting from this skill.
 ---
 
 # Beam agents
@@ -40,14 +40,23 @@ Keep node ids available for follow-up edits/tests, but don't lead with them.
 
 - MCP: `downloadContextFile` when the user needs agent knowledge files locally.
 
-## Build or update an agent
+## Flow changes: mandatory handoff
 
-For anything beyond inspection — creating a new agent, changing its node graph,
-attaching integrations, wiring triggers — use the **agent-builder** skill. It
-handles conversational flow approval, draft creation or the smallest graph patch,
-and owns the graph-payload details.
+For **any** flow mutation — creating a new agent flow, changing a node or edge,
+editing a prompt or parameter, altering an integration or trigger, changing tool
+configuration or consent, deploying a graph, or publishing a graph — stop here
+and load the **agent-builder** skill first. This is mandatory, including for
+small setting changes. Do not make the change using generic graph MCP tools,
+`beam agents deploy`, or raw API requests from this skill.
 
-Once a spec exists, the CLI deploys it (draft by default):
+`agent-builder` owns the complete graph contract and its dependency rules. It
+chooses the smallest safe patch, preserves graph relationships, verifies the
+result, and keeps the graph as a draft unless the user explicitly asks to publish.
+
+The commands below are reference-only after `agent-builder` has selected them;
+they are not authorization to bypass that skill.
+
+Once `agent-builder` has prepared a spec, the CLI deploys it (draft by default):
 
 ```bash
 beam agents deploy spec.json                 # create a new agent (DRAFT)

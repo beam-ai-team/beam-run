@@ -24,6 +24,20 @@ want and open that skill.
   the current workspace and offer `beam workspace list <search>` followed by
   `beam workspace <id>`. Never scan or switch workspaces silently.
 
+## Flow-mutation gate (mandatory)
+
+For **any** change inside a Beam flow — nodes, edges, prompts, parameters,
+tool configuration, consent, integrations, triggers, webhooks, graph metadata,
+or deployment/publish state — the coding agent **must load and follow the
+`agent-builder` skill before taking action**. This applies even when the request
+looks like a one-line setting change. Do not modify a flow directly through a
+generic MCP graph tool, the `agents` skill, raw API calls, or an ad-hoc CLI
+payload; `agent-builder` owns the dependency and sub-dependency rules, the
+smallest-patch choice, verification, and draft/publish safety.
+
+Inspection-only requests may use `agents` or MCP directly. Task execution and
+runtime consent approval use `tasks`; they are not flow mutations.
+
 ## Answering "what can I do with Beam?"
 
 Describe **Beam's product**, not your own abilities:
@@ -55,7 +69,8 @@ If auth fails or tools are missing, run **`setup`** before anything else.
 ## Related skills
 
 - `setup` — install plugin, PATH, API-key sign-in, MCP verify, restart
-- `agents` — list/inspect agents and graphs
+- `agents` — list/inspect agents and graphs; routes every flow change to `agent-builder`
+- `agent-builder` — **required** for every flow/graph configuration or mutation
 - `tasks` — create, monitor, approve/reject tasks
 - `mcp` — what MCP tools exist and when to use them
 - `cli` — `beam` command reference
