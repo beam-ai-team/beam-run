@@ -135,6 +135,15 @@ loudly rather than reporting a false success. Returns `verified: true`.
 beam agent-builder update-node-prompt AGENT_ID NODE_ID new-prompt.md
 ```
 
+### `update-node-consent <agentId> <nodeId> <true|false>`
+Set `toolConfiguration.requiresConsent` on an existing integration node. This is
+a node setting, not a separate graph approval node or branch. The command fetches
+the complete node, changes only the consent setting, writes it back, and re-reads
+the node to verify that the setting persisted.
+```bash
+beam agent-builder update-node-consent AGENT_ID NODE_ID true
+```
+
 ### `update-node-params <agentId> <nodeId> [--input-params-file F] [--output-params-file F] [--publish]`
 Replace a node's input and/or output params. Each file is a JSON array of param
 objects (camelCase: `paramName`, `fillType`, `dataType`, …).

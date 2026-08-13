@@ -1934,6 +1934,41 @@ def cmd_update_node_prompt(api, args):
             "graphId": graph_id, "published": published}
 
 
+def cmd_update_node_consent(api, args):
+    """Set an integration node's runtime-consent setting and verify it persisted.
+
+    Consent belongs to toolConfiguration on the existing integration node.  It
+    does not add a graph node, edge, branch, or separate approval step.
+    """
+    requires_consent = args.requires_consent == "true"
+    node = api.get(f"/agent-graphs/{args.agent_id}/nodes/{args.node_id}")
+    node.pop("agentGraph", None)
+    tc = node.get("toolConfiguration")
+    if not tc:
+        raise BeamError(
+            f"Node {args.node_id} has no toolConfiguration, so it cannot have "
+            "a consent setting. Select an integration node instead.")
+    if not tc.get("toolFunctionName"):
+        raise BeamError(
+            f"Node {args.node_id} is not an integration node. Consent applies "
+            "only to an integration tool configuration.")
+    tc["requiresConsent"] = requires_consent
+    nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
+    graph_id = nodes_data.get("graphId")
+    if not graph_id:
+        raise BeamError("Could not resolve the draft graph id for this agent.")
+    api.patch_with_body("/agent-graphs/update-node", {
+        "agentId": args.agent_id, "graphId": graph_id, "node": node})
+    check = api.get(f"/agent-graphs/{args.agent_id}/nodes/{args.node_id}")
+    saved = (check.get("toolConfiguration") or {}).get("requiresConsent")
+    if saved is not requires_consent:
+        raise BeamError(
+            "Consent update did not persist - toolConfiguration.requiresConsent "
+            "still differs after the update. No change was made.")
+    return {"updated": True, "verified": True, "nodeId": args.node_id,
+            "graphId": graph_id, "requiresConsent": saved}
+
+
 def cmd_update_node_params(api, args):
     body = {}
     if args.input_params_file:
@@ -2400,6 +2435,13 @@ def build_parser():
     s.add_argument("prompt_file", help="Text/markdown file containing the new prompt.")
     s.add_argument("--publish", action="store_true")
 
+    s = sub.add_parser("update-node-consent",
+                       help="Set an integration node's requiresConsent setting.")
+    s.add_argument("agent_id")
+    s.add_argument("node_id")
+    s.add_argument("requires_consent", choices=("true", "false"),
+                   help="Whether task execution must request consent before this tool runs.")
+
     s = sub.add_parser("update-node-params", help="Update only a node's input/output params.")
     s.add_argument("agent_id")
     s.add_argument("node_id")
@@ -2511,6 +2553,7 @@ COMMANDS = {
     "attach-tool": cmd_attach_tool,
     "update-node": cmd_update_node,
     "update-node-prompt": cmd_update_node_prompt,
+    "update-node-consent": cmd_update_node_consent,
     "update-node-params": cmd_update_node_params,
     "update-edge": cmd_update_edge,
     "update-metadata": cmd_update_metadata,
