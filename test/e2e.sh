@@ -77,6 +77,18 @@ DOC="$(sandbox BEAM_API_KEY="${KEY:-sk-test-key}" sh "$BEAM" doctor 2>&1)"
 printf '%s' "$DOC" | grep -q 'not registered with any agent' && ok "flags missing registration" || bad "missed it"
 printf '%s' "$DOC" | grep -q 'All good' && bad "false All good while broken" || ok "no false All good"
 
+group "workspace list reports network failures accurately"
+mkdir -p "$FAKE/bin"
+cat > "$FAKE/bin/curl" <<'SH'
+#!/bin/sh
+exit 7
+SH
+chmod +x "$FAKE/bin/curl"
+if NETWORK_LIST="$(env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CONFIG_DIR="$FAKE/.config/beam" \
+  BEAM_API_KEY=sk-test-key sh "$BEAM" workspace list 2>&1)"; then network_list_rc=0; else network_list_rc=$?; fi
+[ "$network_list_rc" -eq 5 ] && ok "workspace list exits 5 on network failure" || bad "workspace list network failure exited $network_list_rc"
+printf '%s' "$NETWORK_LIST" | grep -q '"code":"network_error"' && ok "workspace list names network error" || bad "workspace list mislabeled network error"
+
 group "API-key login guidance"
 if NO_KEY="$(sandbox BEAM_API_KEY= sh "$BEAM" login </dev/null 2>&1)"; then no_key_rc=0; else no_key_rc=$?; fi
 [ "$no_key_rc" -eq 3 ] && printf '%s' "$NO_KEY" | grep -q 'BEAM_API_KEY' && ok "non-interactive login gives secure options" || bad "missing API-key login guidance"
