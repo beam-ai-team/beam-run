@@ -65,4 +65,10 @@ symptoms — a plugin that never appears, missing tools after install, and auth 
 
 ## What's next
 
-Once you're set up, run the bundled **`beam` skill** — it's the entry point for what Beam can do: agents, tasks, graphs, MCP tools, CLI, and the Public API.
+Once you're set up, run the bundled **`beam` skill**. It first helps your coding
+agent choose the right action:
+
+- Use an existing agent's task when it can already do the work.
+- Build or change a Flow only when no existing agent fits.
+- Use MCP for live agent work, the CLI for setup and Flow deployment, and the
+  Public API for your own applications and backends.

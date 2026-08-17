@@ -31,13 +31,25 @@ Describe **Beam's product**, not your own abilities:
   - "Monitor a running task and approve it when it asks for consent."
   - "Pull analytics for an agent over the last 7 days."
 
-## Choosing the right surface
+## Choose the right Beam action first
+
+Before choosing a technical surface, choose the smallest Beam action that fits:
+
+| Need | Start with |
+| --- | --- |
+| An existing agent can do the work | Create and monitor a task on that agent |
+| No existing agent fits, or its process must change | Build or update its Flow with `agent-builder` |
+| Your own app, backend, or webhook must call Beam | Use the Public API |
+
+Do not create a new agent when an existing agent can complete the requested task.
+
+## Choose the right technical surface
 
 | Surface | What it's for |
 | --- | --- |
-| **MCP tools** | Default in-editor actions: list agents, create/monitor tasks, graphs, consent |
-| **CLI (`cli` skill)** | Scripting, whoami, workspace, quick `beam agents list` |
-| **Public API (`public-api` skill)** | Building services/apps on `https://api.beamstudio.ai` |
+| **MCP tools** | Default in-editor surface: run, monitor, approve, and inspect existing agent work |
+| **CLI (`cli` skill)** | Authentication, workspace administration, scripts, and Flow deployment/publishing |
+| **Public API (`public-api` skill)** | Building services, apps, and webhooks on `https://api.beamstudio.ai` |
 
 Escalation order:
 

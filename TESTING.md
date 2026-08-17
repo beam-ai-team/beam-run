@@ -1,6 +1,6 @@
 # Testing Beam Run locally (dev)
 
-`v0.3.0` (branch `activation-v3`). API-key auth; OAuth is a future iteration.
+`v0.4.0` (branch `activation-v3`). API-key auth; OAuth is a future iteration.
 
 > **Reporting to the user:** this is a dev runbook, but the *message you show the user* should still feel like onboarding. Show `beam setup`'s output (success line + emoji checklist + next steps) — do **not** rewrite it into a "what I did" table or status report. Report their remaining steps, not your actions.
 
@@ -11,7 +11,7 @@ Your `~/.local/bin/beam` forwarder resolves the newest launcher under
 ```sh
 cp -R beam "$HOME/.config/beam-plugin/beam"
 chmod +x "$HOME/.config/beam-plugin/beam/bin/beam"
-beam --version    # -> beam 0.3.0
+beam --version    # -> beam 0.4.0
 ```
 
 ## 2. Smoke test (read-only — never creates tasks)

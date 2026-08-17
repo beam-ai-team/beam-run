@@ -49,13 +49,15 @@ only publish when the user says "publish" / "make it live".
 
 ```bash
 beam agents publish <graphId>   # promote a draft graph to live
-beam agents delete <agentId>    # remove an agent (irreversible)
+beam agents delete <agentId> --confirm <agentId>  # remove an agent (irreversible)
 ```
 
 - `publish` takes the `graphId` from `deploy` output (x-api-key auth).
-- `delete` is **irreversible** — confirm the agent name with the user first.
-  The delete route is JWT-gated, so the CLI mints a short-lived token from the
-  API key automatically (`/auth/access-token`); no extra credentials needed.
+- `delete` is **irreversible**. Before deleting, call `beam agents get <agentId>`,
+  show the user the resolved agent name and id, and obtain explicit approval. Then
+  repeat the exact id in `--confirm`; the CLI rejects unconfirmed or mismatched
+  requests. The delete route is JWT-gated, so the CLI mints a short-lived token
+  from the API key automatically (`/auth/access-token`); no extra credentials needed.
 
 ## Auth / workspace
 

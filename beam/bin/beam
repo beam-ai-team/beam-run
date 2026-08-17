@@ -21,7 +21,7 @@
 #   - write-capable HTTP layer (_http_send) + api_write / api_bearer helpers
 set -eu
 
-VERSION="0.4.0"
+VERSION=""
 REPO="beam-ai-team/beam-run"
 API_BASE="${BEAM_API_URL:-https://api.beamstudio.ai}"
 MCP_URL="${BEAM_MCP_URL:-https://api.beamstudio.ai/mcp}"
@@ -40,6 +40,25 @@ die() {
   printf '{"error":{"code":"%s","message":"%s"}}\n' "$1" "$msg" >&2
   exit "$3"
 }
+
+# The plugin manifest and CLI share this version file. Resolve one symlink so
+# `~/.local/bin/beam` reads the version shipped alongside the real launcher.
+script_source_dir() {
+  src="$0"
+  if [ -L "$src" ]; then
+    target="$(readlink "$src" 2>/dev/null || true)"
+    case "$target" in
+      /*) src="$target" ;;
+      *) src="$(dirname "$src")/$target" ;;
+    esac
+  fi
+  (cd "$(dirname "$src")" 2>/dev/null && pwd) || printf '%s' "$(dirname "$0")"
+}
+
+VERSION_FILE="$(script_source_dir)/../VERSION"
+[ -r "$VERSION_FILE" ] || die "internal_error" "version file not found ($VERSION_FILE) — reinstall the plugin" 1
+VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+[ -n "$VERSION" ] || die "internal_error" "version file is empty ($VERSION_FILE) — reinstall the plugin" 1
 
 ensure_config_dir() {
   mkdir -p "$CONFIG_DIR"
@@ -275,7 +294,8 @@ Usage:
   beam agents get <id>       inspect one agent
   beam agents deploy <spec>  build/update an agent from a spec (draft; --publish to go live)
   beam agents publish <gid>  publish a draft graph (graphId from deploy output)
-  beam agents delete <id>    delete an agent
+  beam agents delete <id> --confirm <id>
+                              delete an agent (irreversible; requires exact confirmation)
   beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
   beam uninstall
   beam --version | --help
@@ -416,7 +436,26 @@ cmd_agents_publish() {
 
 cmd_agents_delete() {
   id="${1:-}"
-  [ -n "$id" ] || die "validation_error" "usage: beam agents delete <agentId>" 2
+  case "$id" in
+    -h|--help)
+      printf 'Usage: beam agents delete <agentId> --confirm <agentId>\n'
+      printf 'Deletion is irreversible. Inspect the agent and obtain explicit user approval first.\n'
+      return 0 ;;
+  esac
+  [ -n "$id" ] || die "validation_error" "usage: beam agents delete <agentId> --confirm <agentId>" 2
+  shift || true
+  confirm=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --confirm) confirm="${2:-}"; shift 2 ;;
+      -h|--help)
+        printf 'Usage: beam agents delete <agentId> --confirm <agentId>\n'
+        printf 'Deletion is irreversible. Inspect the agent and obtain explicit user approval first.\n'
+        return 0 ;;
+      *) die "validation_error" "unknown flag for beam agents delete: $1" 2 ;;
+    esac
+  done
+  [ "$confirm" = "$id" ] || die "confirmation_required" "refusing to delete $id — first inspect the agent, obtain explicit user approval, then run: beam agents delete $id --confirm $id" 2
   # DELETE /agent/{id} is JWT-gated; mint a Bearer token from the API key first.
   set +e; resp="$(api_bearer DELETE "/agent/$id" '')"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "delete auth failed (JWT exchange rejected) — run beam login for a fresh key" 3; fi
