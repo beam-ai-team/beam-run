@@ -29,6 +29,19 @@ skills and one CLI.
 No Beam UI required for the loop — your agent uses **MCP tools** and the
 **`beam` CLI** directly.
 
+## Choose the right Beam surface
+
+Start with the smallest action that fits the job:
+
+| Need | Use |
+| --- | --- |
+| An existing agent can do the work | **MCP** to create, monitor, approve, or inspect its task |
+| An agent's process needs to be created or changed | **Agent builder + CLI** to design, deploy, and explicitly publish its Flow |
+| Your application, service, or webhook needs Beam | **Public API** |
+
+This keeps Beam Run simple: MCP operates live agent work, the CLI administers and
+deploys Beam assets, and the API embeds Beam in software.
+
 ## Set up
 
 New here? Point your coding agent at **[`GETTING_STARTED.md`](./GETTING_STARTED.md)**
