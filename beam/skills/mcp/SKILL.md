@@ -23,6 +23,12 @@ proxy, no Node/uv. Where the host only supports stdio, the plugin bridges via `b
 Exact tool names depend on the server version — discover what's connected in the
 host's MCP panel rather than assuming this list is exhaustive.
 
+Workspace-specific tools require an explicit workspace ID. Resolve it from the
+user's request or Beam URL first, then `beam workspace`, then a sole membership.
+If multiple remain possible, ask once and remember the answer. On empty/not-found
+results, name the active workspace and offer a switch; never search every workspace
+or change the default without the user's choice.
+
 ## MCP vs CLI vs API
 
 | Need | Use |
@@ -33,9 +39,10 @@ host's MCP panel rather than assuming this list is exhaustive.
 
 ## Auth note
 
-The `/mcp` endpoint authenticates with **`Authorization: Bearer <key>`** — NOT `x-api-key`
-(that's the REST API header). MCP reads the key **once at startup**; after `beam login` or
-any auth/config change, restart the agent host. See the `setup` skill.
+The `/mcp` endpoint accepts **`Authorization: Bearer <key>`** (preferred) — and currently
+also tolerates `x-api-key`. Use Bearer; `beam register` sets it for you. MCP reads the key
+**once at startup**, so after `beam login` or any auth/config change, restart the agent host.
+See the `setup` skill.
 
 ## Known issues (server-side, being fixed)
 

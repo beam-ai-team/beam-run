@@ -15,9 +15,28 @@ want and open that skill.
   in plain language, using agent/task names the user recognizes.
 - **Summarize, don't dump.** Turn raw JSON into a short takeaway or table. Reserve
   raw output for when the user asks.
-- **Confirm the workspace once.** First use in a session: run `beam whoami` and tell
-  the user which user/workspace you're on. If wrong, `beam workspace <id>` or
-  re-run `beam login`. If whoami fails on auth, run the `setup` skill.
+- **Resolve workspace from context.** Prefer an explicit workspace name/ID or Beam URL
+  in the request, then a valid result from `beam workspace`, then the only membership.
+  If multiple workspaces remain possible, ask once and remember the answer with
+  `beam workspace <id>`. Do not make workspace selection part of login. If auth fails,
+  run the `setup` skill.
+- **Missing may mean wrong workspace.** On an empty list or not-found result, name
+  the current workspace and offer `beam workspace list <search>` followed by
+  `beam workspace <id>`. Never scan or switch workspaces silently.
+
+## Flow-mutation gate (mandatory)
+
+For **any** change inside a Beam flow — nodes, edges, prompts, parameters,
+tool configuration, consent, integrations, triggers, webhooks, graph metadata,
+or deployment/publish state — the coding agent **must load and follow the
+`agent-builder` skill before taking action**. This applies even when the request
+looks like a one-line setting change. Do not modify a flow directly through a
+generic MCP graph tool, the `agents` skill, raw API calls, or an ad-hoc CLI
+payload; `agent-builder` owns the dependency and sub-dependency rules, the
+smallest-patch choice, verification, and draft/publish safety.
+
+Inspection-only requests may use `agents` or MCP directly. Task execution and
+runtime consent approval use `tasks`; they are not flow mutations.
 
 ## Answering "what can I do with Beam?"
 
@@ -61,8 +80,9 @@ If auth fails or tools are missing, run **`setup`** before anything else.
 
 ## Related skills
 
-- `setup` — install plugin, PATH, API key, MCP verify, restart
-- `agents` — list/inspect agents and graphs
+- `setup` — install plugin, PATH, API-key sign-in, MCP verify, restart
+- `agents` — list/inspect agents and graphs; routes every flow change to `agent-builder`
+- `agent-builder` — **required** for every flow/graph configuration or mutation
 - `tasks` — create, monitor, approve/reject tasks
 - `mcp` — what MCP tools exist and when to use them
 - `cli` — `beam` command reference

@@ -4,7 +4,7 @@ Ready-to-deploy Beam agent specs. Copy one, edit the names/prompts/integrations
 for the user's actual goal, and deploy it:
 
 ```bash
-python3 scripts/beam.py deploy assets/example-specs/<file>.json
+beam agent-builder deploy assets/example-specs/<file>.json
 ```
 
 Always run with `--dry-run` first to inspect the generated payload without

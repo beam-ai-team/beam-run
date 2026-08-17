@@ -1,0 +1,55 @@
+{
+  "agentName": "Beam Run CLI Validation — 2026-08-12",
+  "agentDescription": "Disposable unpublished LLM-only count-loop probe for Beam Agent Builder validation.",
+  "personality": "Precise, deterministic, and concise.",
+  "restrictions": "Use only supplied synthetic task text. Do not call or reference external services.",
+  "nodes": [
+    { "key": "entry", "name": "Entry", "objective": "Entry Node", "is_entry": true, "edges": [{ "target": "parse-request" }] },
+    {
+      "key": "parse-request", "name": "Parse Synthetic Request", "objective": "Parse a synthetic batch or single-item validation request", "tool_name": "Parse Synthetic Request", "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a deterministic test-request parser.\n\n## Task:\nExtract whether the supplied synthetic request is batch mode or single mode, and preserve its text.\n\n## Context:\n```\n{request_text}\n```\n\n## Rules:\n1. mode must be exactly batch or single.\n2. Treat a request beginning with BATCH as batch; otherwise use single.\n3. Output mode and source_text only.",
+      "input_params": [{ "name": "request_text", "description": "Synthetic user request", "type": "string", "fill_type": "ai_fill", "position": 0 }],
+      "output_params": [{ "name": "mode", "description": "batch or single", "type": "string", "position": 0 }, { "name": "source_text", "description": "Original request", "type": "string", "position": 1 }],
+      "edges": [{ "target": "route-mode" }]
+    },
+    {
+      "key": "route-mode", "name": "Route Synthetic Request", "objective": "Route a parsed synthetic request to batch or single handling", "node_type": "conditionNode", "node_configurations": { "conditionType": "llm_based", "llmModel": "GEMINI_3_FLASH", "fallbackModels": null },
+      "edges": [{ "target": "generate-work-items", "condition": "the parsed request is batch mode or asks to process multiple work items" }, { "target": "create-single-result", "condition": "the parsed request is single mode or asks to process exactly one work item" }]
+    },
+    {
+      "key": "generate-work-items", "name": "Generate Synthetic Work Items", "objective": "Convert the batch request into a synthetic work item array", "tool_name": "Generate Synthetic Work Items", "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a structured batch parser.\n\n## Task:\nExtract synthetic work items from the supplied batch request.\n\n## Context:\n```\n{source_text}\n```\n\n## Rules:\n1. Split semicolon-separated items.\n2. Output work_items as an array of strings.\n3. Output an empty array when no items are supplied.",
+      "input_params": [{ "name": "source_text", "description": "Parsed source text", "type": "string", "fill_type": "linked", "linked_node": "parse-request", "linked_param": "source_text", "position": 0 }],
+      "output_params": [{ "name": "work_items", "description": "Synthetic items", "type": "string", "is_array": true, "position": 0 }],
+      "edges": [{ "target": "repeat-validation-round" }]
+    },
+    {
+      "key": "repeat-validation-round", "name": "Repeat Synthetic Validation Round", "objective": "Repeat the LLM validation marker exactly three times", "node_type": "loopingNode", "node_configurations": { "iterationCount": 3 }, "edges": [{ "target": "record-validation-round" }]
+    },
+    {
+      "key": "record-validation-round", "name": "Record Synthetic Validation Round", "objective": "Record an input-free marker for the current count-loop iteration", "parent": "repeat-validation-round", "tool_name": "Record Synthetic Validation Round", "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a deterministic loop validation recorder.\n\n## Task:\nEmit one marker proving that the current count-loop body executed.\n\n## Context:\nNo task input is required for this marker.\n\n## Rules:\n1. Output round_marker as exactly `count-loop body completed`.\n2. Do not call or reference external services.\n3. Do not request user input.",
+      "input_params": [], "output_params": [{ "name": "round_marker", "description": "Count-loop execution marker", "type": "string", "position": 0 }], "edges": [{ "target": "compile-count-loop-results" }]
+    },
+    {
+      "key": "compile-count-loop-results", "name": "Compile Count Loop Results", "objective": "Compile the accumulated count-loop markers and synthetic items", "tool_name": "Compile Count Loop Results", "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are an audit-summary compiler.\n\n## Task:\nCompile the loop markers and batch items into a concise synthetic report.\n\n## Context:\n```\n{round_markers}\n```\n\n```\n{work_items}\n```\n\n## Rules:\n1. State how many loop markers are present.\n2. Mention the supplied synthetic items.\n3. Output final_report only.",
+      "input_params": [{ "name": "round_markers", "description": "Accumulated loop markers", "type": "string", "is_array": true, "fill_type": "ai_fill", "position": 0 }, { "name": "work_items", "description": "Generated synthetic items", "type": "string", "is_array": true, "fill_type": "ai_fill", "position": 1 }],
+      "output_params": [{ "name": "final_report", "description": "Count-loop report", "type": "string", "position": 0 }], "edges": [{ "target": "route-batch-report" }]
+    },
+    {
+      "key": "route-batch-report", "name": "Route Count Loop Report", "objective": "Route the compiled count-loop report to an explicit batch exit", "node_type": "conditionNode", "node_configurations": { "conditionType": "llm_based", "llmModel": "GEMINI_3_FLASH", "fallbackModels": null },
+      "edges": [{ "target": "batch-complete-exit", "condition": "the compiled report confirms the count-loop body completed three times" }, { "target": "batch-incomplete-exit", "condition": "the compiled report does not confirm three completed count-loop body executions" }]
+    },
+    {
+      "key": "create-single-result", "name": "Create Single Synthetic Result", "objective": "Create a synthetic result for a single-item request", "tool_name": "Create Single Synthetic Result", "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a deterministic single-item validator.\n\n## Task:\nProduce one concise result for the supplied single-item request.\n\n## Context:\n```\n{source_text}\n```\n\n## Rules:\n1. State whether the item is explicitly READY.\n2. Output final_report as one concise line.\n3. Do not call external services.",
+      "input_params": [{ "name": "source_text", "description": "Parsed single request", "type": "string", "fill_type": "linked", "linked_node": "parse-request", "linked_param": "source_text", "position": 0 }],
+      "output_params": [{ "name": "final_report", "description": "Single result", "type": "string", "position": 0 }], "edges": [{ "target": "single-exit" }]
+    },
+    { "key": "batch-complete-exit", "name": "Finish Completed Count Loop Validation", "objective": "Finish completed count-loop validation without side effects", "node_type": "exitNode", "edges": [] },
+    { "key": "batch-incomplete-exit", "name": "Finish Incomplete Count Loop Validation", "objective": "Finish incomplete count-loop validation without side effects", "node_type": "exitNode", "edges": [] },
+    { "key": "single-exit", "name": "Finish Single Validation", "objective": "Finish single validation without side effects", "node_type": "exitNode", "edges": [] }
+  ],
+  "integrations": []
+}

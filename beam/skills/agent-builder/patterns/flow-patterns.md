@@ -2,7 +2,8 @@
 
 **Beam executes nodes sequentially. There is no parallel execution.** A non-condition node has exactly one outgoing edge. To do several things, chain them. To do one of several things, use a condition node. To do a thing for each item in a list, use a looping node.
 
-Use this file in Phase 2 (Design) when translating a verbal brief into a node layout.
+Use this file whenever translating a verbal brief or material requested change
+into a node layout.
 
 ---
 
@@ -96,6 +97,9 @@ The merge node (`Send Email`) reads the drafted message with `ai_fill` — the o
 ## What is NOT supported
 
 - **Parallel execution** — nodes always run in series; there is no fork-join
-- **Multiple incoming edges on an execution node** — every execution node has exactly one parent edge (except the entry node)
+- **`linked` params across a merge** — a node *may* have several incoming edges
+  (that is the merge pattern above), but it cannot `link` to a specific branch's
+  output, because Beam has no "whichever arrived" semantics. Read merged data
+  with `ai_fill`.
 - **Condition node → condition node directly** — insert an execution or evidence node between them
 - **`is_exit: true` markers** — terminal nodes simply have no outgoing edge; explicit exit nodes are not supported

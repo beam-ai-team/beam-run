@@ -1,13 +1,26 @@
 {
   "name": "beam",
-  "version": "0.4.0",
+  "version": "0.5.0+codex.20260812150012",
   "description": "Build with Beam in Codex",
-  "author": { "name": "Beam AI" },
+  "author": {
+    "name": "Beam AI"
+  },
   "skills": "./skills/",
-  "mcpServers": "./mcp.codex.json",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Beam",
     "shortDescription": "Build with Beam in Codex",
-    "capabilities": ["Read", "Write"]
+    "longDescription": "Build and operate Beam agents from Codex with conversational agent-building guidance, API-key authentication, and MCP tools.",
+    "developerName": "Beam AI",
+    "category": "Developer Tools",
+    "brandColor": "#3F76F6",
+    "composerIcon": "./assets/beam-logo.jpg",
+    "logo": "./assets/beam-logo.jpg",
+    "logoDark": "./assets/beam-logo.jpg",
+    "defaultPrompt": "Help me build or operate a Beam agent.",
+    "capabilities": [
+      "Read",
+      "Write"
+    ]
   }
 }

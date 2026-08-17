@@ -9,6 +9,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION_FILE="$ROOT/beam/VERSION"
 say() { printf '\n=== %s ===\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+# Isolate credentials: without this the offline assertions can read the
+# developer's real ~/.config/beam. A unique temporary directory also prevents
+# authenticated smoke tests from overwriting saved credentials.
 SMOKE_CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/beam-smoke.XXXXXX")" || fail "could not create temporary config directory"
 trap 'rm -rf -- "$SMOKE_CONFIG_DIR"' EXIT HUP INT TERM
 export BEAM_CONFIG_DIR="$SMOKE_CONFIG_DIR"
@@ -19,7 +22,10 @@ EXPECTED_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 [ -n "$EXPECTED_VERSION" ] || fail "empty beam/VERSION"
 for manifest in "$ROOT"/beam/.claude-plugin/plugin.json "$ROOT"/beam/.codex-plugin/plugin.json "$ROOT"/beam/.cursor-plugin/plugin.json; do
   ACTUAL_VERSION="$(awk -F'"' '/"version"/ { print $4; exit }' "$manifest")"
-  [ "$ACTUAL_VERSION" = "$EXPECTED_VERSION" ] || fail "$manifest version ($ACTUAL_VERSION) does not match $VERSION_FILE ($EXPECTED_VERSION)"
+  # Codex appends SemVer build metadata for plugin cache invalidation; it is
+  # still the same release version as the shared VERSION file.
+  ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%%+*}"
+  [ "$ACTUAL_RELEASE_VERSION" = "$EXPECTED_VERSION" ] || fail "$manifest release version ($ACTUAL_VERSION) does not match $VERSION_FILE ($EXPECTED_VERSION)"
 done
 CLI_VERSION="$("$BEAM" --version | awk '{ print $2 }')" || fail "version"
 [ "$CLI_VERSION" = "$EXPECTED_VERSION" ] || fail "CLI version ($CLI_VERSION) does not match $VERSION_FILE ($EXPECTED_VERSION)"

@@ -97,8 +97,9 @@ values must be unique. Every edge `target` must be a node key in the same spec.
 | `input_params` / `output_params` | arrays | See below. **Empty `[]` on integration nodes.** |
 | `edges` | array | Outgoing edges. |
 
-**Do not set `is_exit: true`.** Exit nodes are determined automatically from the
-edge graph; setting it breaks integration attachment. Omit it.
+To end a branch, use `"node_type": "exitNode"` on a node with no outgoing
+edges. The builder sets `isExitNode` and omits a tool configuration. Do not set
+an `is_exit` field directly.
 
 ---
 
@@ -223,6 +224,7 @@ unsupported. To run several actions, chain them.
 | `conditionNode` | Branches the flow. | No | Yes |
 | `waitingNode` | Pauses the flow. | Yes | Yes |
 | `loopingNode` | Repeats a sub-flow (a fixed count, or once per list item). | No | Yes |
+| `exitNode` | Terminates a branch without executing a tool. | No | No |
 
 The entry node is always: `{ "key": "entry", "name": "Entry", "objective": "Entry Node", "is_entry": true, "edges": [{ "target": "..." }] }` — nothing else.
 
@@ -480,26 +482,30 @@ Pick exactly one loop mode, set in `node_configurations`:
 | Loop mode | `node_configurations` | Behaviour |
 |-----------|----------------------|-----------|
 | Count-based | `{ "iterationCount": 3 }` | Runs the loop body a fixed number of times. |
-| Variable-based | `{ "linkedVariableId": "<sourceNodeKey>:<paramName>", "alias": "item" }` | Runs the loop body once per element of the named upstream array output param. `alias` is the variable name the body nodes read the current item from. `beam.py` resolves `<sourceNodeKey>` to a UUID. |
+| Variable-based | `{ "linkedVariableId": "<sourceNodeKey>:<paramName>" }` | Runs the loop body once per element of the named upstream array output param. `beam.py` resolves `<sourceNodeKey>` to a UUID. |
 
 **Structure:**
 
 - The loop node sits in the normal edge flow — an upstream node's edge points at
-  it, and it points one edge at the **first body node**.
+  it, and it points to the node that runs **after all iterations complete**.
 - **Body nodes** are ordinary `executionNode` / `conditionNode` / `waitingNode`
   nodes that add `"parent": "<loopNodeKey>"`. `beam.py` resolves the key to the
-  loop node's id (`parentNodeId`).
-- Body nodes are wired by `edges` like any sub-flow; the last body node's edge
-  leaves the loop, pointing at the downstream node.
+  loop node's id (`parentNodeId`). Backend-generated numeric aliases on body
+  nodes are internal result-aggregation metadata; do not include `alias` in a
+  spec or treat it as an iteration variable.
+- Body-to-body edges remain inside the sub-flow. Do not add loop-to-body or
+  body-to-outside edges. If an older spec contains them, `beam.py` normalizes
+  them to the canonical loop-to-next-step edge before deploying.
 
 **Constraints:** a `loopingNode` cannot be the entry node, and loops cannot nest
 (a `loopingNode` cannot itself carry a `parent`).
 
-**Params in and out of a loop** are the exception to "prefer `linked`": a loop
-body node reads the current item with `ai_fill` (the loop supplies it via the
-`alias`, so there is no upstream output param to `link` to), and a node *after*
-the loop that consumes the loop's results uses `ai_fill` with `is_array: true`
-(the per-iteration outputs accumulate into an array, not a single node output).
+**Params in and out of a loop:** a variable-loop body input that needs the
+current element uses `fill_type: "linked"` to the same upstream array output as
+`linkedVariableId`. Agent OS resolves that link to the current array element by
+iteration index. A node *after* the loop that consumes accumulated body results
+uses `ai_fill` with `is_array: true` (the per-iteration outputs accumulate into
+an array, not a single node output).
 
 ```json
 {
@@ -507,8 +513,8 @@ the loop that consumes the loop's results uses `ai_fill` with `is_array: true`
   "name": "For Each Article",
   "objective": "Loop over each candidate article",
   "node_type": "loopingNode",
-  "node_configurations": { "linkedVariableId": "list-articles:articles", "alias": "article" },
-  "edges": [{ "target": "summarize-article" }]
+  "node_configurations": { "linkedVariableId": "list-articles:articles" },
+  "edges": [{ "target": "compile-digest" }]
 },
 {
   "key": "summarize-article",
@@ -517,14 +523,15 @@ the loop that consumes the loop's results uses `ai_fill` with `is_array: true`
   "parent": "summarize-loop",
   "prompt": "## Role:\n...\n\n## Context:\n```\n{article}\n```\n\n## Rules:\n1. ...",
   "input_params": [
-    { "name": "article", "description": "Current loop item", "type": "string", "fill_type": "ai_fill", "position": 0 }
+    { "name": "article", "description": "Current loop item", "type": "string", "fill_type": "linked", "linked_node": "list-articles", "linked_param": "articles", "position": 0 }
   ],
   "output_params": [ { "name": "summary", "description": "...", "type": "string", "position": 0 } ],
-  "edges": [{ "target": "compile-digest" }]
+  "edges": []
 }
 ```
 
-Flow: `list-articles -> summarize-loop -> summarize-article (parent: summarize-loop) -> compile-digest`.
+Flow: `list-articles -> summarize-loop -> compile-digest`, while
+`summarize-article (parent: summarize-loop)` runs once per array element.
 See `assets/example-specs/loop-article-digest.json` for the full spec.
 
 **A loop body that emits several outputs.** The example above loops a body with
@@ -572,12 +579,9 @@ Spam Reply  --\
 Normal Reply --/
 ```
 
-| User says | Pattern |
-|-----------|---------|
-| "send it to Gmail AND Slack" | Sequential chain |
-| "if urgent alert Slack, else just log it" | Condition node |
-| "classify, respond differently, then send the reply" | Condition + merge |
-| "summarize AND translate" | Sequential chain |
+For the full "what the user said → pattern" translation table (including waiting
+and looping shapes), see `patterns/flow-patterns.md` — it is the single owner of
+graph shapes; this file owns the schema.
 
 ---
 

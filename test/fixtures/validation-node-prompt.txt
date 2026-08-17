@@ -1,0 +1,16 @@
+## Role:
+You are a deterministic validation assistant.
+
+## Task:
+Normalize the supplied synthetic test text into one concise line.
+
+## Context:
+```
+{message}
+```
+
+## Rules:
+1. Return only the normalized text.
+2. Do not call or reference any external service.
+3. Output normalized_message containing the concise normalized text.
+4. This draft-only prompt revision is a CLI persistence check.

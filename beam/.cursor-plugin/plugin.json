@@ -1,8 +1,9 @@
 {
   "name": "beam",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Build with Beam in Cursor",
   "author": { "name": "Beam AI" },
+  "logo": "assets/beam-logo.jpg",
   "skills": ["./skills"],
   "mcpServers": "./mcp.json"
 }

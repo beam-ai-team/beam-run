@@ -1,0 +1,15 @@
+{
+  "agentId": "5badf9b2-c833-4be9-9966-aed3c18264d1",
+  "agentGraphNodeId": "d4af6aec-43c6-4d1c-ac81-589e4ed35690",
+  "title": "Disposable CLI validation timer",
+  "configuration": {
+    "beamAction": "Timer",
+    "integrationIdentifier": "timer",
+    "hasAttachment": false,
+    "shouldTriggerOnReply": false
+  },
+  "userDefinedFrequency": "hour",
+  "userDefinedFrequencyValue": 24,
+  "timezone": "Asia/Karachi",
+  "onlyOnce": false
+}

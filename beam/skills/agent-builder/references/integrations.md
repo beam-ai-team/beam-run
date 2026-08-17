@@ -22,8 +22,8 @@ search, which have no `integrationProvider`), so the result is short and
 trustworthy:
 
 ```bash
-python3 scripts/beam.py search-tools gmail --managed-only
-python3 scripts/beam.py search-tools slack --managed-only
+beam agent-builder search-tools gmail --managed-only
+beam agent-builder search-tools slack --managed-only
 ```
 
 If `--managed-only` returns nothing for an action there is no real tool for it
@@ -48,7 +48,7 @@ Search for every integration the agent needs. Each result includes:
 Add `--wait-only` to list only tools a `condition_based` wait node can await:
 
 ```bash
-python3 scripts/beam.py search-tools slack --wait-only
+beam agent-builder search-tools slack --wait-only
 ```
 
 ---
@@ -89,11 +89,13 @@ that matter most:
 - Never set `is_exit: true`.
 - All the real config — `tool_function_name`, params, links — goes in the
   matching `integrations` array entry.
-- A node that **consumes** an integration's result reads it with `ai_fill`,
-  not `link`. Beam has no output schema for integration tools, so a `linked`
-  name would be a guess — and a guessed name that misses the tool's real
-  output fails at run time. Never `link` from an integration output; leave the
-  integration's `output_params` empty.
+- A node that **consumes** an integration's result should normally read it with
+  `ai_fill`. Beam publishes no output schema for integration tools, so a
+  `linked` name you guessed will fail at run time.
+  Declaring `output_params` on the integration entry *is* supported — the
+  builder registers those names so a downstream node can `link` to them — but
+  only declare names you have actually confirmed from the tool's own response.
+  When in doubt, omit them and use `ai_fill`.
 
 One integration node = one external action. To send to Gmail *and* Slack, that
 is two nodes chained sequentially, each with its own integration entry.

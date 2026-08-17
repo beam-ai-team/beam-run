@@ -1,6 +1,6 @@
 ---
 name: agents
-description: Beam agents — list, inspect, build/deploy, publish, and delete agents in the workspace. Use when the user asks about their agents, agent configuration or graph structure, or wants to create, update, publish, or remove an agent.
+description: Beam agents — list, inspect, publish, and delete agents in the workspace. For every flow, graph, node, trigger, integration, or configuration change, load and follow the agent-builder skill instead of acting from this skill.
 ---
 
 # Beam agents
@@ -11,6 +11,20 @@ Prefer **MCP tools** when available; fall back to the CLI/API.
 
 - MCP: `listAgents`
 - CLI: `beam agents list` (requires workspace set via `beam whoami` / `beam workspace`)
+
+When the MCP tool is unavailable in the current host, use the CLI before offering
+setup. Missing MCP tools alone do **not** mean that Beam is disconnected: the
+host loads its MCP tools at startup, while an already-signed-in CLI can still
+list the user's agents.
+
+If `beam` is not on the current shell's PATH, resolve and invoke the bundled
+`bin/beam` launcher (using the setup skill's launcher fallback) and retry
+`agents list`. Do **not** run `beam setup` solely because `beam` was not found
+on PATH. Run setup only when the CLI reports missing or invalid authentication,
+or when no usable launcher can be found.
+
+Tell the user to fully restart the host only after they sign in or change the
+MCP configuration. A new task by itself does not require a restart.
 
 Summarize as a short table: name, type, id. Don't dump full JSON unless asked.
 
@@ -26,13 +40,23 @@ Keep node ids available for follow-up edits/tests, but don't lead with them.
 
 - MCP: `downloadContextFile` when the user needs agent knowledge files locally.
 
-## Build or update an agent
+## Flow changes: mandatory handoff
 
-For anything beyond inspection — creating a new agent, changing its node graph,
-attaching integrations, wiring triggers — use the **agent-builder** skill. It
-drives the full design → spec → deploy flow and owns the graph-payload details.
+For **any** flow mutation — creating a new agent flow, changing a node or edge,
+editing a prompt or parameter, altering an integration or trigger, changing tool
+configuration or consent, deploying a graph, or publishing a graph — stop here
+and load the **agent-builder** skill first. This is mandatory, including for
+small setting changes. Do not make the change using generic graph MCP tools,
+`beam agents deploy`, or raw API requests from this skill.
 
-Once a spec exists, the CLI deploys it (draft by default):
+`agent-builder` owns the complete graph contract and its dependency rules. It
+chooses the smallest safe patch, preserves graph relationships, verifies the
+result, and keeps the graph as a draft unless the user explicitly asks to publish.
+
+The commands below are reference-only after `agent-builder` has selected them;
+they are not authorization to bypass that skill.
+
+Once `agent-builder` has prepared a spec, the CLI deploys it (draft by default):
 
 ```bash
 beam agents deploy spec.json                 # create a new agent (DRAFT)
@@ -68,4 +92,8 @@ beam whoami; echo "exit_code=$?"
 beam workspace   # show current
 ```
 
-Wrong workspace → `beam workspace <id>`. Missing auth → run `setup`.
+Resolve workspace from the request/Beam URL, a valid remembered default, or a sole
+membership. If multiple remain possible, ask once and remember with
+`beam workspace <id>`. Missing auth → run `setup`. If a list is empty or an agent is
+not found, name the current workspace and ask whether the user wants to create it
+there or switch. Never search all workspaces automatically.

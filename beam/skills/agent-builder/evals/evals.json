@@ -1,18 +1,23 @@
 {
   "skill_name": "beam-agent-builder",
+  "notes": [
+    "Credentials resolve from `beam login`; no eval should expect the skill to ask for an API key.",
+    "Build evals leave a DRAFT agent behind — run them against a non-production workspace.",
+    "Error-path evals (3-5) are read-only: they create nothing."
+  ],
   "evals": [
     {
       "id": 0,
       "name": "linear-integration-blog-emailer",
       "prompt": "Build me a Beam agent that takes a topic, writes a short blog post about it (around 400 words), and emails the finished post to me. I use Gmail.",
-      "expected_output": "A deployed Beam agent (draft, not published) with an entry node, a custom GPT node that writes the blog post using a proper ## Role/## Task/## Context/## Rules prompt, and a Gmail integration node whose subject/body are linked to the writer node's outputs. The skill should ask a clarifying question about the recipient address and/or trigger before deploying, show a Mermaid diagram for approval, and report the agent as a draft.",
+      "expected_output": "Before creating anything, the skill shows a Mermaid diagram, names Gmail as the confirmed integration, states any recipient assumption, and asks whether that is the intended flow. After ordinary-language approval, it creates a draft (not published) with an entry node, a custom GPT writer using a ## Role/## Task/## Context/## Rules prompt, and a Gmail node whose subject/body are linked to the writer outputs. It does not require the word `build`.",
       "files": []
     },
     {
       "id": 1,
       "name": "condition-node-ticket-triage",
       "prompt": "I need a Beam agent that triages support tickets. It should read the ticket text, classify it as billing, technical, or general, and then draft a reply tailored to whichever category it falls into.",
-      "expected_output": "A deployed Beam agent (draft) with a classifier node, a conditionNode (llm_based) that branches to three handlers, each branch edge carrying an explicit non-empty condition (including a written catch-all for the general case). Downstream reply nodes link to the classifier's output. A Mermaid diagram with a diamond condition node is shown for approval first.",
+      "expected_output": "A deployed Beam agent (draft) with a classifier node, a conditionNode (llm_based) that branches to three handlers, each branch edge carrying an explicit non-empty condition (including a written catch-all for the general case). Downstream reply nodes link to the classifier's output. A Mermaid diagram with a diamond condition node is shown for approval first. The reply nodes are terminal: the brief asked only for a draft, so the skill must NOT invent a send/email step.",
       "files": []
     },
     {
@@ -20,6 +25,52 @@
       "name": "waiting-node-welcome-followup",
       "prompt": "Can you create a Beam agent that sends a new customer a welcome email, then waits 2 days and sends a follow-up check-in email? Both emails go over Gmail.",
       "expected_output": "A deployed Beam agent (draft) with two Gmail integration nodes and a waitingNode (time_based, 2 days) chained sequentially between them. The waiting node is not the entry node, has one outgoing edge, and the flow is entry -> write welcome -> send welcome -> wait -> write follow-up -> send follow-up.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "error-not-signed-in",
+      "prompt": "Build me a Beam agent that summarises my open support tickets each morning.",
+      "setup": "Run with BEAM_CONFIG_DIR pointing at an empty directory and BEAM_API_KEY unset, so `validate` exits 3 with code auth_error.",
+      "expected_output": "The skill runs `validate` first, sees the non-zero exit, and STOPS. It runs `beam login` so the user can approve in the browser, and does not proceed to intake or design. It must NOT ask the user for an API key, and must not retry the same command unchanged.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "error-no-workspace-selected",
+      "prompt": "List my Beam agents and then build one that files expense reports.",
+      "setup": "Credentials present but no BEAM_WORKSPACE_ID set, so `validate` exits 2 with code validation_error.",
+      "expected_output": "The skill stops on the non-zero exit. It uses explicit workspace context when present; otherwise it asks the user once and remembers the answer with `beam workspace <id>`. It does not guess or continue to design.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "error-duplicate-objective",
+      "prompt": "Here is my spec, deploy it.",
+      "setup": "Provide a spec whose nodes share one `objective` string; `deploy --dry-run` exits 2 with 'Duplicate node objective values'.",
+      "expected_output": "The skill explains that integrations are matched to nodes by objective text, so duplicates would attach the tool to the wrong node. It gives each node a distinct objective and re-runs the dry run. It does not deploy the broken spec and does not silently change anything else.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "update-existing-agent-smallest-patch",
+      "prompt": "Change the tone of the reply node on my ticket triage agent to be more formal.",
+      "setup": "An existing deployed agent with a reply node.",
+      "expected_output": "The skill identifies the agent, runs `get-nodes` then `get-node`, and applies the SMALLEST command that fits — `update-node-prompt` — rather than a full `deploy --agent-id` redeploy. A direct, unambiguous tone request does not reopen flow approval. It reports the result as a draft and asks before publishing.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "conversational-gmail-slack-flow-approval",
+      "turns": [
+        "Build an agent that watches new Gmail emails, writes a Gemini Flash summary to Beam, and alerts #customer-escalations in Slack for urgent customer issues. Keep it as a draft.",
+        "Yes. Make the Slack alert formal and include sender, subject, summary, and why it is urgent.",
+        "Don't test yet.",
+        "Billing questions should alert Slack only when they are overdue.",
+        "Yes, go ahead.",
+        "Publish it."
+      ],
+      "expected_output": "Turn 1 produces a Mermaid diagram showing Gmail -> extraction -> Beam task result plus an urgent condition to Slack, lists Gmail and Slack integrations, states that the agent remains a draft, and asks for natural-language approval before creating it. Turn 2 creates the formal-tone draft without requiring a command word. Turn 3 skips testing. Turn 4 shows a revised Mermaid diagram and the same integrations because routing changes materially; turn 5 updates the draft after natural approval; turn 6 publishes after naming the live Gmail and Slack consequence.",
       "files": []
     }
   ]

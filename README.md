@@ -46,7 +46,7 @@ deploys Beam assets, and the API embeds Beam in software.
 
 New here? Point your coding agent at **[`GETTING_STARTED.md`](./GETTING_STARTED.md)**
 and ask it to set Beam up for you. It walks through installing the plugin,
-putting `beam` on PATH, saving your API key, and verifying both the CLI and
+putting `beam` on PATH, saving an API key locally, and verifying both the CLI and
 the MCP server.
 
 **Copy this into your agent:**
@@ -72,4 +72,4 @@ Then follow the instructions in that document for your agent environment.
 - Beam product / Academy: https://docs.beam.ai
 - MCP connection reference: https://docs.beam.ai/08-reference/api/mcp-connection/mcp-connection
 - API base: `https://api.beamstudio.ai`
-- Auth: `x-api-key` header (create a key in Beam → Personal settings → API Keys)
+- Auth: API key from Beam → Personal settings → API Keys (`x-api-key` for CLI; Bearer for MCP)
