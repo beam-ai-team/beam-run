@@ -546,7 +546,8 @@ cmd_workspace() {
   if [ "${1:-}" = "list" ]; then
     query="${2:-}"
     set +e; resp="$(api_request /v2/user/me)"; rc=$?; set -e
-    if [ "$rc" -ne 0 ]; then die "auth_missing" "run beam login first" 3; fi
+    if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in or key rejected — run: beam login" 3; fi
+    if [ "$rc" -eq 5 ]; then die "network_error" "could not reach $API_BASE (network/timeout)" 5; fi
     all="$(printf '%s' "$resp" | workspaces_tsv)"
     total=0; [ -n "$all" ] && total=$(printf '%s\n' "$all" | grep -c .)
     if [ -n "$query" ]; then
