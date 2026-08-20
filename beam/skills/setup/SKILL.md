@@ -94,4 +94,4 @@ When fully connected and a tool call has succeeded, **celebrate** — 🎉 — a
 
 ## Notes
 - API keys are global and do not select or scope a workspace. A later user choice is remembered locally as the default. CLI auth uses `x-api-key`; MCP uses `Authorization: Bearer`. `beam` handles both.
-- A few Beam MCP tools are temporarily broken server-side (`getCurrentUser`, `getTaskDetails`, `getToolOutputSchema`, `getToolOptimizationStatus`) — see the `mcp` skill for CLI workarounds.
+- A few Beam MCP tools are temporarily broken server-side (`getCurrentUser`, `getTaskDetails`, `getToolOutputSchema`, `getToolOptimizationStatus`) — use the matching Beam Run CLI fallback after setup completes.

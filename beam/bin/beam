@@ -307,6 +307,48 @@ api_request() {
   fi
 }
 
+trace_read_transport() {
+  # Opt-in diagnostic record for a supervisor handoff. It is intentionally sent
+  # to stderr so every established JSON response remains byte-for-byte usable.
+  [ "${BEAM_TRACE_TRANSPORT:-0}" = "1" ] || return 0
+  printf '{"beamTransport":{"operation":"read","path":"%s","auth":"%s"}}\n' "$1" "$2" >&2
+}
+
+api_bearer_read() {
+  # $1 = path. Some workspace read endpoints reject x-api-key but accept the
+  # short-lived Bearer token minted from that same key. Keep this GET-only.
+  path="$1"
+  tok="$(mint_bearer)" || return 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$ws" ]; then
+    _http_get "$API_BASE$path" -H "Authorization: Bearer $tok" -H "current-workspace-id: $ws"
+  else
+    _http_get "$API_BASE$path" -H "Authorization: Bearer $tok"
+  fi
+}
+
+api_read() {
+  # $1 = path. Preserve the established API-key transport first. A second GET
+  # with a minted Bearer token is safe only after the first response is 401/403.
+  # Never use this helper for a write: writes must not be replayed.
+  path="$1"
+  if resp="$(api_request "$path")"; then
+    trace_read_transport "$path" "api-key"
+    printf '%s' "$resp"
+    return 0
+  else
+    rc=$?
+  fi
+  [ "$rc" -eq 3 ] || return "$rc"
+  if resp="$(api_bearer_read "$path")"; then
+    trace_read_transport "$path" "bearer-fallback"
+    printf '%s' "$resp"
+    return 0
+  else
+    return $?
+  fi
+}
+
 # --- write-capable HTTP (POST/PUT/PATCH/DELETE) --------------------------------
 # Like _http_get but sends a method (+ optional JSON body). SINGLE attempt: a write
 # is not blindly retried (a 5xx may already have applied). Returns 0 ok (body on
@@ -344,6 +386,27 @@ api_write() {
   else
     _http_send "$method" "$API_BASE$path" "$body" -H "x-api-key: $key"
   fi
+}
+
+api_upload() {
+  # $1 path, $2 multipart field name, $3 local file. Single attempt: uploads are writes.
+  warn_if_loopback_was_ignored
+  path="$1"; field="$2"; file="$3"
+  key="$(read_key)" || return 3
+  ws="$(read_workspace 2>/dev/null || true)"
+  tmp="$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")"
+  mime="$(file -b --mime-type "$file" 2>/dev/null || printf 'application/octet-stream')"
+  if [ -n "$ws" ]; then
+    if code="$(curl -sS --compressed --connect-timeout 5 --max-time 120 -X POST \
+      -H "x-api-key: $key" -H "current-workspace-id: $ws" \
+      -F "$field=@$file;type=$mime" -o "$tmp" -w '%{http_code}' "$API_BASE$path" 2>/dev/null)"; then cx=0; else cx=$?; fi
+  else
+    if code="$(curl -sS --compressed --connect-timeout 5 --max-time 120 -X POST \
+      -H "x-api-key: $key" -F "$field=@$file;type=$mime" \
+      -o "$tmp" -w '%{http_code}' "$API_BASE$path" 2>/dev/null)"; then cx=0; else cx=$?; fi
+  fi
+  if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
+  case "$code" in 2*) cat "$tmp"; rm -f "$tmp"; return 0 ;; 401|403) rm -f "$tmp"; return 3 ;; *) rm -f "$tmp"; return 5 ;; esac
 }
 
 extract_id_token() {
@@ -435,7 +498,7 @@ Usage:
   beam doctor                self-diagnose install/auth/connection (human checklist)
   beam login                 save an API key (masked terminal prompt)
   beam logout
-  beam whoami
+  beam whoami [--raw]          compact identity summary (use --raw only when needed)
   beam workspace [ID]        show/set current workspace
   beam workspace list [q]    list/search your workspaces (filter by name or id)
   beam agents list           list agents in the current workspace
@@ -445,10 +508,26 @@ Usage:
   beam agents delete <id> --confirm <id>
                               delete an agent (irreversible; requires exact confirmation)
   beam tasks test <id> <q>   run a task against the agent's draft graph
+  beam tasks list [flags]    list/search workspace tasks
+  beam tasks create <id> <q> [--draft]
+                             run a live task (or a draft test with --draft)
   beam tasks get <id>        inspect a task or draft test task
+  beam tasks retry <id> [--task-node-id ID --feedback text]
+  beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>
+  beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason text]
+  beam tasks abort <id> --confirm <id> [--reason text]
+  beam tasks delete <id> --confirm <id>
+  beam tasks rate <id> <up|down> [feedback]
   beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>
                              provide a requested value to a paused task
+  beam inbox <cmd>           list/read/delete notifications
+  beam integrations <cmd>    inspect and manage workspace connections
+  beam templates <cmd>       browse templates and create draft agents
+  beam analytics <cmd>       inspect or export agent analytics
+  beam views <cmd>           inspect records or export a saved view
+  beam learning <cmd>        inspect issues/jobs or dispatch optimization
   beam agent-builder <cmd>   bundled agent builder (design/build/patch graphs)
+  beam mcp check [--tool n]  verify MCP auth and optionally a tool's availability
   beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
   beam uninstall
   beam --version | --help
@@ -531,21 +610,47 @@ cmd_logout() {
 }
 
 cmd_whoami() {
-  set +e; resp="$(api_request /v2/user/me)"; rc=$?; set -e
+  raw=false
+  case "${1:-}" in
+    "") ;;
+    --raw) raw=true ;;
+    -h|--help)
+      printf 'Usage: beam whoami [--raw]\n'
+      printf 'Prints a compact identity and workspace summary by default. Use --raw only when the full profile is required.\n'
+      return 0 ;;
+    *) die "validation_error" "usage: beam whoami [--raw]" 2 ;;
+  esac
+  set +e; resp="$(api_read /v2/user/me)"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in or key rejected — run: beam login" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "could not reach $API_BASE (network/timeout)" 5; fi
   ws="$(read_workspace 2>/dev/null || true)"
-  if [ -n "$ws" ] && command -v jq >/dev/null 2>&1; then
-    printf '%s' "$resp" | jq --arg ws "$ws" --arg api "$API_BASE" '. + {_beam:{workspaceId:$ws,apiBase:$api}}' 2>/dev/null || printf '%s\n' "$resp"
-  else
+  if [ "$raw" = true ]; then
     printf '%s\n' "$resp"
+  elif command -v jq >/dev/null 2>&1; then
+    printf '%s' "$resp" | jq -c --arg ws "$ws" --arg api "$API_BASE" '
+      (.workspaces // (if .workspace then [.workspace] else [] end)) as $workspaces |
+      {
+        user: {
+          id: (.id // .user.id // null),
+          email: (.email // .user.email // null),
+          name: (.name // .user.name // .fullName // .user.fullName // null)
+        },
+        activeWorkspaceId: (if $ws == "" then null else $ws end),
+        workspaceCount: ($workspaces | length),
+        apiBase: $api
+      }
+    ' 2>/dev/null || printf '%s\n' "$resp"
+  elif [ -n "$ws" ]; then
+    printf '{"activeWorkspaceId":"%s","apiBase":"%s"}\n' "$ws" "$API_BASE"
+  else
+    printf '{"activeWorkspaceId":null,"apiBase":"%s"}\n' "$API_BASE"
   fi
 }
 
 cmd_workspace() {
   if [ "${1:-}" = "list" ]; then
     query="${2:-}"
-    set +e; resp="$(api_request /v2/user/me)"; rc=$?; set -e
+    set +e; resp="$(api_read /v2/user/me)"; rc=$?; set -e
     if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in or key rejected — run: beam login" 3; fi
     if [ "$rc" -eq 5 ]; then die "network_error" "could not reach $API_BASE (network/timeout)" 5; fi
     all="$(printf '%s' "$resp" | workspaces_tsv)"
@@ -588,7 +693,7 @@ cmd_workspace() {
 cmd_agents_list() {
   if ! read_workspace >/dev/null 2>&1; then die "workspace_required" "workspace context is ambiguous. Ask the user which Beam workspace they mean, then remember it with: beam workspace <id>" 2; fi
   # NOTE: capped at pageSize=50 (no pagination yet — deferred, see specs).
-  set +e; resp="$(api_request '/agent?pageNum=1&pageSize=50')"; rc=$?; set -e
+  set +e; resp="$(api_read '/agent?pageNum=1&pageSize=50')"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "agents list failed (network/timeout)" 5; fi
   printf '%s\n' "$resp"
@@ -601,7 +706,7 @@ cmd_agents_list() {
 cmd_agents_get() {
   id="${1:-}"
   [ -n "$id" ] || die "validation_error" "usage: beam agents get <agentId>" 2
-  set +e; resp="$(api_request "/agent/$id")"; rc=$?; set -e
+  set +e; resp="$(api_read "/agent/$id")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 4 ]; then
     ws="$(read_workspace 2>/dev/null || true)"
@@ -611,9 +716,84 @@ cmd_agents_get() {
   printf '%s\n' "$resp"
 }
 
+cmd_agents_related_get() {
+  label="$1"; path="$2"; require_workspace
+  set +e; resp="$(api_read "$path")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 4 ]; then die "not_found" "$label was not found in the current workspace" 2; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "$label lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_remove_tools() {
+  agent_id="${1:-}"; file="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents remove-tools <agentId> <payloadFile> --confirm <agentId>" 2
+  shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for tool removal: $1" 2 ;; esac; done
+  [ "$confirm" = "$agent_id" ] || die "confirmation_required" "inspect the enabled tools and obtain explicit approval, then repeat the agent id with --confirm $agent_id" 2
+  body="$(read_payload_file "$file")"; require_workspace
+  set +e; resp="$(api_write DELETE '/agent-chat-tools/bulk-delete' "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "tool removal result is ambiguous; re-read agent tools" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_external_files_add() {
+  agent_id="${1:-}"; file="${2:-}"; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents external-files-add <agentId> <payloadFile>" 2
+  body="$(read_payload_file "$file")"; require_workspace
+  set +e; resp="$(api_write POST "/agent/$agent_id/context/integrations/external-file-url" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "external file upload result is ambiguous; re-read context files" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_context_file_delete() {
+  agent_id="${1:-}"; file_key="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file_key" ] || die "validation_error" "usage: beam agents context-file-delete <agentId> <fileKey> --confirm <fileKey>" 2
+  shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for context file deletion: $1" 2 ;; esac; done
+  [ "$confirm" = "$file_key" ] || die "confirmation_required" "obtain explicit approval, then repeat the file key with --confirm $file_key" 2
+  require_workspace; set +e; resp="$(api_write DELETE "/context/agent/$agent_id/file/$file_key" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "file deletion result is ambiguous; re-read context files" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_external_files_delete() {
+  agent_id="${1:-}"; file="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents external-files-delete <agentId> <payloadFile> --confirm <agentId>" 2
+  shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for external file deletion: $1" 2 ;; esac; done
+  [ "$confirm" = "$agent_id" ] || die "confirmation_required" "obtain explicit approval, then repeat the agent id with --confirm $agent_id" 2
+  body="$(read_payload_file "$file")"; require_workspace
+  set +e; resp="$(api_write DELETE "/agent/$agent_id/context/integrations/external-file-url" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "external file deletion result is ambiguous; re-read context files" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_change_file_agent() {
+  agent_id="${1:-}"; file="${2:-}"; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents change-file-agent <agentId> <payloadFile>" 2
+  body="$(read_payload_file "$file")"; require_workspace
+  set +e; resp="$(api_write PATCH "/context/agent/$agent_id/file/change-agent" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "file reassignment result is ambiguous; inspect both agents" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_upload_file() {
+  agent_id="${1:-}"; file="${2:-}"; [ -n "$agent_id" ] && [ -f "$file" ] || die "validation_error" "usage: beam agents upload-file <agentId> <localFile>" 2
+  require_workspace; set +e; resp="$(api_upload "/context/agent/$agent_id/file" contextFile "$file")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "context upload result is ambiguous; re-read context files before retrying" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_agents_transcribe() {
+  file="${1:-}"; [ -f "$file" ] || die "validation_error" "usage: beam agents transcribe <localAudioFile>" 2
+  require_workspace; set +e; resp="$(api_upload '/agent/transcribe-audio' audioFile "$file")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "audio transcription failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
 cmd_agents_deploy() {
   # Build or update an agent from a spec via the bundled agent-builder graph builder.
-  # Draft by default; pass --publish to go live. See skills/agent-builder for the spec format.
+  # Draft by default; pass --publish to go live. See internal/agent-builder for the spec format.
   spec="${1:-}"
   [ -n "$spec" ] || die "validation_error" "usage: beam agents deploy <specFile> [--agent-id ID] [--publish] [--dry-run]" 2
   [ -f "$spec" ] || die "validation_error" "spec file not found: $spec" 2
@@ -622,7 +802,7 @@ cmd_agents_deploy() {
   key="$(read_key)" || die "auth_missing" "not signed in — run beam login first" 3
   ws="$(read_workspace 2>/dev/null || true)"
   [ -n "$ws" ] || die "validation_error" "no workspace — run: beam workspace list, then beam workspace <id>" 2
-  builder="$(script_dir)/../skills/agent-builder/scripts/beam.py"
+  builder="$(script_dir)/../internal/agent-builder/scripts/beam.py"
   [ -f "$builder" ] || die "internal_error" "bundled graph builder not found ($builder) — reinstall the plugin (beam setup)" 1
   BEAM_API_KEY="$key" BEAM_WORKSPACE_ID="$ws" BEAM_API_URL="$API_BASE" python3 "$builder" deploy "$spec" "$@"
 }
@@ -633,7 +813,7 @@ cmd_agent_builder() {
   # cwd'd into the skill directory — it never is, so every documented command
   # failed on a fresh install. Going through `beam` resolves the path here.
   command -v python3 >/dev/null 2>&1 || die "internal_error" "the agent builder needs python3 (3.8+). Install Python, then retry." 1
-  builder="$(script_dir)/../skills/agent-builder/scripts/beam.py"
+  builder="$(script_dir)/../internal/agent-builder/scripts/beam.py"
   [ -f "$builder" ] || die "internal_error" "bundled agent builder not found ($builder) — reinstall the plugin, then run: beam setup" 1
   if [ $# -eq 0 ]; then set -- --help; fi
   exec python3 "$builder" "$@"
@@ -688,6 +868,103 @@ json_quote() {
   die "internal_error" "beam tasks test needs jq or python3 to encode task input safely" 1
 }
 
+require_workspace() {
+  if ! read_workspace >/dev/null 2>&1; then
+    die "workspace_required" "workspace context is ambiguous. Ask the user which Beam workspace they mean, then remember it with: beam workspace <id>" 2
+  fi
+}
+
+safe_query_value() {
+  # Task ids, UUIDs, statuses, ISO dates, ordering and pagination values use this
+  # conservative alphabet. Free-text search is intentionally not accepted here;
+  # it would need a real URL encoder rather than shell interpolation.
+  value="$1"
+  case "$value" in
+    *[!A-Za-z0-9_.,:@+-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+cmd_tasks_list() {
+  require_workspace
+  page=1; page_size=20; agent_id=""; statuses=""; draft=""; ordering=""
+  start_date=""; end_date=""; grouping=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent-id) agent_id="${2:-}"; shift 2 ;;
+      --statuses|--status) statuses="${2:-}"; shift 2 ;;
+      --draft) draft=true; shift ;;
+      --live) draft=false; shift ;;
+      --ordering) ordering="${2:-}"; shift 2 ;;
+      --start-date) start_date="${2:-}"; shift 2 ;;
+      --end-date) end_date="${2:-}"; shift 2 ;;
+      --grouping) grouping="${2:-}"; shift 2 ;;
+      --page) page="${2:-}"; shift 2 ;;
+      --page-size) page_size="${2:-}"; shift 2 ;;
+      -h|--help)
+        printf 'Usage: beam tasks list [--agent-id ID] [--statuses A,B] [--draft|--live] [--ordering VALUE] [--start-date ISO] [--end-date ISO] [--grouping status|agent] [--page N] [--page-size N]\n'
+        return 0 ;;
+      *) die "validation_error" "unknown flag for beam tasks list: $1" 2 ;;
+    esac
+  done
+  for value in "$agent_id" "$statuses" "$ordering" "$start_date" "$end_date" "$grouping" "$page" "$page_size"; do
+    [ -z "$value" ] || safe_query_value "$value" || die "validation_error" "unsupported character in task list filter" 2
+  done
+  case "$page" in ''|*[!0-9]*) die "validation_error" "--page must be a positive integer" 2 ;; esac
+  case "$page_size" in ''|*[!0-9]*) die "validation_error" "--page-size must be an integer from 1 to 100" 2 ;; esac
+  [ "$page" -ge 1 ] || die "validation_error" "--page must be a positive integer" 2
+  [ "$page_size" -ge 1 ] && [ "$page_size" -le 100 ] || die "validation_error" "--page-size must be an integer from 1 to 100" 2
+  path="/agent-tasks?pageNum=$page&pageSize=$page_size"
+  [ -z "$agent_id" ] || path="$path&agentId=$agent_id"
+  [ -z "$statuses" ] || path="$path&statuses=$statuses"
+  [ -z "$draft" ] || path="$path&isDraftTask=$draft"
+  [ -z "$ordering" ] || path="$path&ordering=$ordering"
+  [ -z "$start_date" ] || path="$path&startDate=$start_date"
+  [ -z "$end_date" ] || path="$path&endDate=$end_date"
+  [ -z "$grouping" ] || path="$path&grouping=$grouping"
+  set +e; resp="$(api_read "$path")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task list failed (network/timeout)" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_statuses() {
+  agent_ids="${1:-}"; require_workspace; path='/agent-tasks/statuses'; [ -z "$agent_ids" ] || path="$path?agentIds=$agent_ids"
+  set +e; resp="$(api_read "$path")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task status lookup failed" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_tasks_agents() { cmd_agents_related_get "task agent list" '/agent-tasks/agents'; }
+
+cmd_tasks_latest() {
+  agent_id="${1:-}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam tasks latest <agentId> [pageSize]" 2; page_size="${2:-10}"
+  cmd_agents_related_get "latest task executions" "/agent-tasks/latest-executions?agentId=$agent_id&pageNum=1&pageSize=$page_size"
+}
+
+cmd_tasks_create() {
+  agent_id="${1:-}"; task_query="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$task_query" ]; then
+    die "validation_error" "usage: beam tasks create <agentId> <task input> [--draft]" 2
+  fi
+  shift 2
+  is_draft=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --draft) is_draft=true; shift ;;
+      *) die "validation_error" "unknown flag for beam tasks create: $1" 2 ;;
+    esac
+  done
+  require_workspace
+  aid_json="$(json_quote "$agent_id")"
+  query_json="$(json_quote "$task_query")"
+  body="{\"agentId\":$aid_json,\"taskQuery\":{\"query\":$query_json},\"isDraftTask\":$is_draft}"
+  set +e; resp="$(api_write POST "/agent-tasks" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task could not be created; reconcile with beam tasks list before retrying" 5; fi
+  printf '%s\n' "$resp"
+}
+
 cmd_tasks_test() {
   agent_id="${1:-}"; task_query="${2:-}"
   if [ -z "$agent_id" ] || [ -z "$task_query" ]; then
@@ -705,10 +982,150 @@ cmd_tasks_test() {
   printf '%s\n' "$resp"
 }
 
+cmd_tasks_retry() {
+  task_id="${1:-}"; feedback=""; task_node_id=""
+  [ -n "$task_id" ] || die "validation_error" "usage: beam tasks retry <taskId> [--task-node-id ID --feedback text]" 2
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --task-node-id) task_node_id="${2:-}"; shift 2 ;;
+      --feedback) feedback="${2:-}"; shift 2 ;;
+      *) die "validation_error" "unknown flag for beam tasks retry: $1" 2 ;;
+    esac
+  done
+  if [ -n "$feedback" ] && [ -z "$task_node_id" ]; then
+    die "validation_error" "--feedback requires --task-node-id because feedback applies to a specific retry point" 2
+  fi
+  require_workspace
+  tid_json="$(json_quote "$task_id")"
+  body="{\"taskId\":$tid_json}"
+  if [ -n "$task_node_id" ]; then
+    node_json="$(json_quote "$task_node_id")"
+    body="{\"taskId\":$tid_json,\"taskNodeId\":$node_json}"
+  fi
+  if [ -n "$feedback" ]; then
+    feedback_json="$(json_quote "$feedback")"
+    body="{\"taskId\":$tid_json,\"taskNodeId\":$node_json,\"taskNodeFeedbackAsText\":$feedback_json}"
+  fi
+  set +e; resp="$(api_write POST "/agent-tasks/retry" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task retry response was not confirmed; inspect the task before retrying again" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_approve() {
+  task_id="${1:-}"; task_node_id="${2:-}"; confirm=""
+  [ -n "$task_id" ] && [ -n "$task_node_id" ] || die "validation_error" "usage: beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>" 2
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --confirm) confirm="${2:-}"; shift 2 ;;
+      *) die "validation_error" "unknown flag for beam tasks approve: $1" 2 ;;
+    esac
+  done
+  [ "$confirm" = "$task_node_id" ] || die "confirmation_required" "approval can trigger an external action. Obtain explicit user approval, then repeat the task node id with --confirm $task_node_id" 2
+  require_workspace
+  tid_json="$(json_quote "$task_id")"; node_json="$(json_quote "$task_node_id")"
+  body="{\"taskNodeId\":$node_json,\"consent\":true,\"taskId\":$tid_json}"
+  set +e; resp="$(api_write POST "/agent-tasks/execution/$task_id/user-consent" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "consent result is ambiguous; inspect the task before acting again" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_reject() {
+  task_id="${1:-}"; task_node_id="${2:-}"; confirm=""; reason=""
+  [ -n "$task_id" ] && [ -n "$task_node_id" ] || die "validation_error" "usage: beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason text]" 2
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --confirm) confirm="${2:-}"; shift 2 ;;
+      --reason) reason="${2:-}"; shift 2 ;;
+      *) die "validation_error" "unknown flag for beam tasks reject: $1" 2 ;;
+    esac
+  done
+  [ "$confirm" = "$task_node_id" ] || die "confirmation_required" "rejection ends the task. Obtain explicit user approval, then repeat the task node id with --confirm $task_node_id" 2
+  require_workspace
+  tid_json="$(json_quote "$task_id")"; node_json="$(json_quote "$task_node_id")"
+  if [ -n "$reason" ]; then feedback_json="$(json_quote "$reason")"; feedback="[$feedback_json]"; else feedback="[]"; fi
+  body="{\"taskNodeId\":$node_json,\"taskId\":$tid_json,\"userFeedback\":$feedback}"
+  set +e; resp="$(api_write POST "/agent-tasks/execution/$task_id/rejection" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "rejection result is ambiguous; inspect the task before acting again" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_abort() {
+  task_id="${1:-}"; confirm=""; reason=""
+  [ -n "$task_id" ] || die "validation_error" "usage: beam tasks abort <taskId> --confirm <taskId> [--reason text]" 2
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --confirm) confirm="${2:-}"; shift 2 ;;
+      --reason) reason="${2:-}"; shift 2 ;;
+      *) die "validation_error" "unknown flag for beam tasks abort: $1" 2 ;;
+    esac
+  done
+  [ "$confirm" = "$task_id" ] || die "confirmation_required" "aborting ends the task. Obtain explicit user approval, then run with --confirm $task_id" 2
+  require_workspace
+  reason_json="$(json_quote "$reason")"; body="{\"reason\":$reason_json}"
+  set +e; resp="$(api_write POST "/agent-tasks/$task_id/abort" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "abort result is ambiguous; inspect the task before acting again" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_delete() {
+  task_id="${1:-}"; confirm=""
+  [ -n "$task_id" ] || die "validation_error" "usage: beam tasks delete <taskId> --confirm <taskId>" 2
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --confirm) confirm="${2:-}"; shift 2 ;;
+      *) die "validation_error" "unknown flag for beam tasks delete: $1" 2 ;;
+    esac
+  done
+  [ "$confirm" = "$task_id" ] || die "confirmation_required" "task deletion is irreversible. Obtain explicit user approval, then run with --confirm $task_id" 2
+  require_workspace
+  set +e; resp="$(api_write DELETE "/agent-tasks/$task_id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "delete result is ambiguous; inspect the task list before acting again" 5; fi
+  if [ -n "$resp" ]; then printf '%s\n' "$resp"; else printf '{"ok":true,"deleted":"%s"}\n' "$task_id"; fi
+}
+
+cmd_tasks_rate() {
+  task_id="${1:-}"; rating="${2:-}"; feedback="${3:-}"
+  [ -n "$task_id" ] && [ -n "$rating" ] || die "validation_error" "usage: beam tasks rate <taskId> <up|down|positive|negative> [feedback]" 2
+  case "$rating" in up|positive) rating=positive ;; down|negative) rating=negative ;; *) die "validation_error" "rating must be up, down, positive, or negative" 2 ;; esac
+  require_workspace
+  rating_json="$(json_quote "$rating")"; body="{\"rating\":$rating_json}"
+  if [ -n "$feedback" ]; then feedback_json="$(json_quote "$feedback")"; body="{\"rating\":$rating_json,\"userFeedback\":$feedback_json}"; fi
+  set +e; resp="$(api_write PATCH "/agent-tasks/execution/$task_id/output-rating" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task rating could not be confirmed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_tasks_cancel_wait() {
+  task_node_id="${1:-}"; agent_id="${2:-}"; confirm=""; [ -n "$task_node_id" ] && [ -n "$agent_id" ] || die "validation_error" "usage: beam tasks cancel-wait <taskNodeId> <agentId> --confirm <taskNodeId>" 2
+  shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for cancel-wait: $1" 2 ;; esac; done
+  [ "$confirm" = "$task_node_id" ] || die "confirmation_required" "obtain explicit approval, then repeat the waiting node id with --confirm $task_node_id" 2
+  require_workspace; set +e; resp="$(api_write POST "/agent-tasks/$task_node_id/cancel-wait?agentId=$agent_id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "cancel-wait result is ambiguous; inspect the task" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_tasks_update_tool() {
+  tool_name="${1:-}"; file="${2:-}"; [ -n "$tool_name" ] && [ -n "$file" ] || die "validation_error" "usage: beam tasks update-tool <toolFunctionName> <payloadFile>" 2
+  body="$(read_payload_file "$file")"; require_workspace; set +e; resp="$(api_write PATCH "/tool/$tool_name" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "tool update could not be confirmed" 5; fi; printf '%s\n' "$resp"
+}
+
 cmd_tasks_get() {
   task_id="${1:-}"
   [ -n "$task_id" ] || die "validation_error" "usage: beam tasks get <taskId>" 2
-  set +e; resp="$(api_request "/agent-tasks/$task_id")"; rc=$?; set -e
+  set +e; resp="$(api_read "/agent-tasks/$task_id")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 4 ]; then die "task_not_found" "task $task_id was not found in the current workspace" 2; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "task lookup failed" 5; fi
@@ -730,6 +1147,440 @@ cmd_tasks_submit_input() {
   if [ "$rc" -eq 4 ]; then die "task_not_found" "task $task_id was not found in the current workspace" 2; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "task input could not be submitted" 5; fi
   printf '%s\n' "$resp"
+}
+
+read_payload_file() {
+  file="${1:-}"
+  [ -n "$file" ] && [ -f "$file" ] || die "validation_error" "JSON payload file not found: $file" 2
+  payload="$(sed -n '1,$p' "$file")"
+  [ -n "$payload" ] || die "validation_error" "JSON payload file is empty: $file" 2
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$payload" | jq -e . >/dev/null 2>&1 || die "validation_error" "invalid JSON payload: $file" 2
+  elif command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$payload" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null || die "validation_error" "invalid JSON payload: $file" 2
+  fi
+  printf '%s' "$payload"
+}
+
+cmd_inbox_list() {
+  require_workspace
+  page=1; page_size=20; type=ALL; agent_id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent-id) agent_id="${2:-}"; shift 2 ;;
+      --type) type="${2:-}"; shift 2 ;;
+      --page) page="${2:-}"; shift 2 ;;
+      --page-size) page_size="${2:-}"; shift 2 ;;
+      *) die "validation_error" "unknown flag for beam inbox list: $1" 2 ;;
+    esac
+  done
+  case "$type" in ALL|UNREAD_ONLY|READ_ONLY) ;; *) die "validation_error" "--type must be ALL, UNREAD_ONLY, or READ_ONLY" 2 ;; esac
+  for value in "$agent_id" "$page" "$page_size"; do [ -z "$value" ] || safe_query_value "$value" || die "validation_error" "unsupported inbox filter" 2; done
+  path="/agent-task-notification?type=$type&sortBy=createdAt&sortOrder=desc&pageNum=$page&pageSize=$page_size"
+  [ -z "$agent_id" ] || path="$path&agentId=$agent_id"
+  set +e; resp="$(api_bearer GET "$path" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "inbox authentication failed — run beam login again" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "inbox list failed" 5; fi
+  trace_read_transport "$path" "bearer-direct"
+  printf '%s\n' "$resp"
+}
+
+cmd_inbox_unread_count() {
+  require_workspace
+  set +e; resp="$(api_bearer GET "/agent-task-notification/unread-counts" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "inbox authentication failed — run beam login again" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "inbox unread count failed" 5; fi
+  trace_read_transport "/agent-task-notification/unread-counts" "bearer-direct"
+  printf '%s\n' "$resp"
+}
+
+cmd_inbox_mark_read() {
+  id="${1:-}"; [ -n "$id" ] || die "validation_error" "usage: beam inbox mark-read <notificationId>" 2
+  safe_query_value "$id" || die "validation_error" "invalid notification id" 2
+  require_workspace
+  set +e; resp="$(api_bearer PATCH "/agent-task-notification/mark-as-read?id=$id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "inbox authentication failed — run beam login again" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "notification could not be marked read" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_inbox_delete() {
+  id="${1:-}"; confirm=""; [ -n "$id" ] || die "validation_error" "usage: beam inbox delete <notificationId> --confirm <notificationId>" 2
+  shift
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for beam inbox delete: $1" 2 ;; esac; done
+  [ "$confirm" = "$id" ] || die "confirmation_required" "obtain explicit approval, then repeat the notification id with --confirm $id" 2
+  safe_query_value "$id" || die "validation_error" "invalid notification id" 2
+  require_workspace
+  set +e; resp="$(api_bearer DELETE "/agent-task-notification/mark-as-delete?id=$id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "inbox authentication failed — run beam login again" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "notification delete result is ambiguous; inspect the inbox before retrying" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_list() {
+  require_workspace
+  set +e; resp="$(api_read '/integration?pageNum=1&pageSize=50')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "integration catalog lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_categories() {
+  require_workspace
+  set +e; resp="$(api_read '/integration/categories')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "integration category lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_connected() {
+  require_workspace
+  set +e; resp="$(api_read '/integration-provider/connected-integrations')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "connected integration lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_connections() {
+  id="${1:-}"; [ -n "$id" ] || die "validation_error" "usage: beam integrations connections <integrationId>" 2
+  safe_query_value "$id" || die "validation_error" "invalid integration id" 2
+  require_workspace
+  set +e; resp="$(api_read "/integration-provider/get-connections/$id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "integration connection lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_is_connected() {
+  tool_name="${1:-}"; [ -n "$tool_name" ] || die "validation_error" "usage: beam integrations is-connected <toolFunctionName>" 2
+  safe_query_value "$tool_name" || die "validation_error" "invalid tool function name" 2
+  cmd_agents_related_get "integration connection state" "/integration-provider/is-integration-connected/tool/$tool_name"
+}
+
+cmd_integrations_payload_write() {
+  method="$1"; path="$2"; file="$3"; body="$(read_payload_file "$file")"; require_workspace
+  set +e; resp="$(api_write "$method" "$path" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "integration write result is ambiguous; re-read connections before retrying" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_remove() {
+  id="${1:-}"; confirm=""; [ -n "$id" ] || die "validation_error" "usage: beam integrations remove <providerId> --confirm <providerId>" 2
+  shift; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for integration removal: $1" 2 ;; esac; done
+  [ "$confirm" = "$id" ] || die "confirmation_required" "obtain explicit approval, then repeat the provider id with --confirm $id" 2
+  id_json="$(json_quote "$id")"; body="{\"providerId\":$id_json}"; require_workspace
+  set +e; resp="$(api_write DELETE '/integration-provider/remove-connection' "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "connection removal result is ambiguous; re-read connections" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_set_default() {
+  provider_id="${1:-}"; integration_id="${2:-}"
+  [ -n "$provider_id" ] && [ -n "$integration_id" ] || die "validation_error" "usage: beam integrations set-default <providerId> <integrationId>" 2
+  p_json="$(json_quote "$provider_id")"; i_json="$(json_quote "$integration_id")"; body="{\"providerId\":$p_json,\"integrationId\":$i_json}"; require_workspace
+  set +e; resp="$(api_write PATCH '/integration-provider/set-default' "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "default connection update could not be confirmed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_integrations_custom_remove() {
+  id="${1:-}"; confirm=""; [ -n "$id" ] || die "validation_error" "usage: beam integrations custom-remove <id> --confirm <id>" 2
+  shift; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for custom integration removal: $1" 2 ;; esac; done
+  [ "$confirm" = "$id" ] || die "confirmation_required" "obtain explicit approval, then repeat the custom integration id with --confirm $id" 2
+  require_workspace; set +e; resp="$(api_write DELETE "/custom-integrations/$id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "custom integration delete result is ambiguous" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_templates_list() {
+  require_workspace; category=""; page=1; page_size=10
+  while [ $# -gt 0 ]; do case "$1" in --category-id) category="${2:-}"; shift 2 ;; --page) page="${2:-}"; shift 2 ;; --page-size) page_size="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for beam templates list: $1" 2 ;; esac; done
+  path="/agent/templates?pageNum=$page&pageSize=$page_size"; [ -z "$category" ] || path="$path&agentCategoryId=$category"
+  set +e; resp="$(api_read "$path")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "template list failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_templates_categories() {
+  require_workspace
+  set +e; resp="$(api_read '/agent/categories')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "template category lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_templates_get() {
+  id="${1:-}"; [ -n "$id" ] || die "validation_error" "usage: beam templates get <templateId>" 2; require_workspace
+  set +e; resp="$(api_read "/agent/templates/$id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "template lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_templates_recommend() {
+  category="${1:-}"; require_workspace; path='/agent/recommendations'; [ -z "$category" ] || path="$path?agentCategoryId=$category"
+  set +e; resp="$(api_read "$path")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "template recommendation lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+template_agent_payload() {
+  requested_name="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq --arg n "$requested_name" '(.template // .) as $t | {name:(if $n != "" then $n else ($t.title // $t.name) end),agentCategoryId:$t.agentCategoryId,themeIconUrl:$t.themeIconUrl,description:($t.longDescription // $t.shortDescription // $t.description // ""),defaultTaskId:$t.defaultTaskId,graph:$t.graph} | with_entries(select(.value != null))'
+  elif command -v python3 >/dev/null 2>&1; then
+    TEMPLATE_AGENT_NAME="$requested_name" python3 -c 'import json,os,sys; d=json.load(sys.stdin); t=d.get("template",d); out={"name":os.environ.get("TEMPLATE_AGENT_NAME") or t.get("title") or t.get("name"),"agentCategoryId":t.get("agentCategoryId"),"themeIconUrl":t.get("themeIconUrl"),"description":t.get("longDescription") or t.get("shortDescription") or t.get("description") or "","defaultTaskId":t.get("defaultTaskId"),"graph":t.get("graph")}; print(json.dumps({k:v for k,v in out.items() if v is not None}))'
+  else
+    die "internal_error" "creating from a template needs jq or python3 to preserve the graph safely" 1
+  fi
+}
+
+cmd_templates_create_agent() {
+  id="${1:-}"; name=""; [ -n "$id" ] || die "validation_error" "usage: beam templates create-agent <templateId> [--name name]" 2; shift
+  while [ $# -gt 0 ]; do case "$1" in --name) name="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for template agent creation: $1" 2 ;; esac; done
+  require_workspace; set +e; template="$(api_read "/agent/templates/$id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -ne 0 ]; then die "network_error" "template lookup failed; no agent was created" 5; fi
+  body="$(printf '%s' "$template" | template_agent_payload "$name")"
+  set +e; resp="$(api_write POST '/agent/character' "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "agent creation result is ambiguous; list agents before retrying" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_analytics_get() {
+  agent_id="${1:-}"; start="${2:-}"; end="${3:-}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam analytics get <agentId> [startDate endDate]" 2
+  if { [ -n "$start" ] && [ -z "$end" ]; } || { [ -z "$start" ] && [ -n "$end" ]; }; then die "validation_error" "provide both startDate and endDate" 2; fi
+  require_workspace
+  # Match the Copilot's default: whole agent history, not a usually-empty month.
+  # The public analytics route requires both dates, so resolve createdAt first.
+  if [ -z "$start" ]; then
+    set +e; agent="$(api_read "/agent/$agent_id")"; agent_rc=$?; set -e
+    if [ "$agent_rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+    if [ "$agent_rc" -ne 0 ]; then die "network_error" "could not resolve agent creation date for analytics" 5; fi
+    if command -v jq >/dev/null 2>&1; then
+      start="$(printf '%s' "$agent" | jq -r '(.createdAt // .agent.createdAt // "") | split("T")[0]' 2>/dev/null || true)"
+    elif command -v python3 >/dev/null 2>&1; then
+      start="$(printf '%s' "$agent" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("createdAt") or (d.get("agent") or {}).get("createdAt") or "").split("T")[0])' 2>/dev/null || true)"
+    fi
+    [ -n "$start" ] || die "internal_error" "agent response did not include createdAt; provide an explicit analytics date range" 1
+    end="$(date -u +%Y-%m-%d)"
+  fi
+  path="/agent-tasks/analytics?agentId=$agent_id&startDate=$start&endDate=$end"
+  set +e; resp="$(api_read "$path")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "analytics lookup failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_analytics_export() {
+  agent_id="${1:-}"; start="${2:-}"; end="${3:-}"; [ -n "$agent_id" ] && [ -n "$start" ] && [ -n "$end" ] || die "validation_error" "usage: beam analytics export <agentId> <startDate> <endDate>" 2
+  a="$(json_quote "$agent_id")"; s="$(json_quote "$start")"; e="$(json_quote "$end")"; body="{\"agentId\":$a,\"startDate\":$s,\"endDate\":$e}"; require_workspace
+  set +e; resp="$(api_write POST '/agent-tasks/analytics/export' "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "analytics export failed" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_views_list() {
+  require_workspace; set +e; resp="$(api_read '/agent-views?pageNum=1&pageSize=50')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "view list failed" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_views_get() {
+  id="${1:-}"; [ -n "$id" ] || die "validation_error" "usage: beam views get <viewId>" 2; require_workspace
+  set +e; view="$(api_read "/agent-views/$id")"; r1=$?; columns="$(api_read "/agent-views/$id/columns")"; r2=$?; set -e
+  if [ "$r1" -eq 3 ] || [ "$r2" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$r1" -ne 0 ] || [ "$r2" -ne 0 ]; then die "network_error" "view or column lookup failed" 5; fi
+  printf '{"view":%s,"columns":%s}\n' "$view" "$columns"
+}
+
+cmd_views_records() {
+  id="${1:-}"; [ -n "$id" ] || die "validation_error" "usage: beam views records <viewId> [--page N] [--page-size N]" 2; shift; page=1; page_size=50
+  while [ $# -gt 0 ]; do case "$1" in --page) page="${2:-}"; shift 2 ;; --page-size) page_size="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for view records: $1" 2 ;; esac; done
+  require_workspace; set +e; resp="$(api_read "/agent-views/$id/records?pageNum=$page&pageSize=$page_size")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "view record lookup failed" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_views_export() {
+  id="${1:-}"; [ -n "$id" ] || die "validation_error" "usage: beam views export <viewId>" 2; require_workspace
+  set +e; resp="$(api_write POST "/agent-views/$id/export/csv" '{"filters":null}')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "view export failed" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_views_payload_write() {
+  method="$1"; path="$2"; file="$3"; body="$(read_payload_file "$file")"; require_workspace
+  set +e; resp="$(api_write "$method" "$path" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "view write result is ambiguous; re-read the view before retrying" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_views_delete() {
+  id="${1:-}"; confirm=""; [ -n "$id" ] || die "validation_error" "usage: beam views delete <viewId> --confirm <viewId>" 2; shift
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for view deletion: $1" 2 ;; esac; done
+  [ "$confirm" = "$id" ] || die "confirmation_required" "obtain explicit approval, then repeat the view id with --confirm $id" 2
+  require_workspace; set +e; resp="$(api_write DELETE "/agent-views/$id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "view delete result is ambiguous; re-read the view list" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_views_delete_column() {
+  view_id="${1:-}"; column_id="${2:-}"; confirm=""; [ -n "$view_id" ] && [ -n "$column_id" ] || die "validation_error" "usage: beam views delete-column <viewId> <columnId> --confirm <columnId>" 2; shift 2
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for column deletion: $1" 2 ;; esac; done
+  [ "$confirm" = "$column_id" ] || die "confirmation_required" "obtain explicit approval, then repeat the column id with --confirm $column_id" 2
+  require_workspace; set +e; resp="$(api_write DELETE "/agent-views/$view_id/columns/$column_id" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "column delete result is ambiguous; re-read the view" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_views_linked_records() {
+  view_id="${1:-}"; column_id="${2:-}"; record_id="${3:-}"; [ -n "$view_id" ] && [ -n "$column_id" ] && [ -n "$record_id" ] || die "validation_error" "usage: beam views linked-records <viewId> <columnId> <numericRecordId>" 2
+  cmd_agents_related_get "linked records" "/agent-views/$view_id/columns/$column_id/links/$record_id?pageNum=1&pageSize=50"
+}
+
+cmd_learning_issues() {
+  agent_id="${1:-}"; tab="${2:-issues}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam learning issues <agentId> [issues|review|archived]" 2; require_workspace
+  set +e; resp="$(api_read "/tool/optimize/issues/rows?agentId=$agent_id&tab=$tab")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "permission_denied" "Learning Hub access was denied for this workspace; verify its plan or permissions" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "Learning Hub issue list failed" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_learning_issue() {
+  agent_id="${1:-}"; issue_id="${2:-}"; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning issue <agentId> <issueId>" 2; require_workspace
+  set +e; resp="$(api_read "/tool/optimize/issues/$issue_id?agentId=$agent_id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "permission_denied" "Learning Hub access was denied for this workspace; verify its plan or permissions" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "Learning Hub issue lookup failed" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_learning_job() {
+  id="${1:-}"; [ -n "$id" ] || die "validation_error" "usage: beam learning job <threadId>" 2; require_workspace
+  set +e; resp="$(api_read "/tool/optimize/jobs/$id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "permission_denied" "Learning Hub access was denied for this workspace; verify its plan or permissions" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "Learning Hub job lookup failed" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_learning_feedbacks() {
+  agent_id="${1:-}"; issue_id="${2:-}"; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning feedbacks <agentId> <issueId>" 2
+  cmd_agents_related_get "Learning Hub feedbacks" "/tool/optimize/issues/$issue_id/pending?agentId=$agent_id&page=1&pageSize=50"
+}
+
+cmd_learning_issue_jobs() {
+  agent_id="${1:-}"; issue_id="${2:-}"; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning issue-jobs <agentId> <issueId>" 2
+  cmd_agents_related_get "Learning Hub issue jobs" "/tool/optimize/issues/$issue_id/jobs?agentId=$agent_id"
+}
+
+cmd_learning_trend() {
+  agent_id="${1:-}"; start="${2:-}"; end="${3:-}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam learning trend <agentId> [startDate endDate]" 2
+  if { [ -n "$start" ] && [ -z "$end" ]; } || { [ -z "$start" ] && [ -n "$end" ]; }; then die "validation_error" "provide both startDate and endDate" 2; fi
+  path="/tool/optimize/agents/$agent_id/accuracy-trend"; [ -z "$start" ] || path="$path?startDate=$start&endDate=$end"
+  cmd_agents_related_get "Learning Hub accuracy trend" "$path"
+}
+
+cmd_learning_tools() {
+  agent_id="${1:-}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam learning tools <agentId>" 2
+  cmd_agents_related_get "Learning Hub tools" "/tool/optimize/agents/$agent_id/learning-tools"
+}
+
+cmd_learning_tool() {
+  agent_id="${1:-}"; tool_name="${2:-}"; [ -n "$agent_id" ] && [ -n "$tool_name" ] || die "validation_error" "usage: beam learning tool <agentId> <toolFunctionName>" 2
+  safe_query_value "$tool_name" || die "validation_error" "invalid tool function name" 2
+  cmd_agents_related_get "Learning Hub tool detail" "/tool/optimize/agents/$agent_id/tools/$tool_name/detail"
+}
+
+cmd_learning_config() {
+  agent_id="${1:-}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam learning config <agentId>" 2
+  cmd_agents_related_get "Learning Hub tuner config" "/tool/optimize/agents/$agent_id/config"
+}
+
+cmd_learning_payload_write() {
+  method="$1"; path="$2"; file="$3"; body="$(read_payload_file "$file")"; require_workspace
+  set +e; resp="$(api_write "$method" "$path" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "Learning Hub write result is ambiguous; re-read the target before retrying" 5; fi
+  printf '%s\n' "$resp"
+}
+
+cmd_learning_confirmed_payload_write() {
+  path="$1"; token="$2"; file="$3"; shift 3; confirm=""
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown confirmation flag: $1" 2 ;; esac; done
+  [ "$confirm" = "$token" ] || die "confirmation_required" "obtain explicit approval, then repeat '$token' with --confirm $token" 2
+  cmd_learning_payload_write POST "$path" "$file"
+}
+
+cmd_learning_set_config() {
+  agent_id="${1:-}"; file="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam learning set-config <agentId> <payloadFile> --confirm <agentId>" 2; shift 2
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for tuner config: $1" 2 ;; esac; done
+  [ "$confirm" = "$agent_id" ] || die "confirmation_required" "show the proposed tuner configuration, obtain approval, then repeat the agent id with --confirm $agent_id" 2
+  cmd_learning_payload_write POST "/tool/optimize/agents/$agent_id/config" "$file"
+}
+
+learning_identity_body() {
+  require_workspace; ws="$(read_workspace)"; set +e; profile="$(api_read /v2/user/me)"; prc=$?; set -e
+  [ "$prc" -eq 0 ] || die "auth_missing" "could not resolve the current Beam user" 3
+  user_id="$(printf '%s' "$profile" | extract_user_id)"; [ -n "$user_id" ] || die "internal_error" "current user response did not include an id" 1
+  w="$(json_quote "$ws")"; u="$(json_quote "$user_id")"; printf '{"workspaceId":%s,"userId":%s}' "$w" "$u"
+}
+
+cmd_learning_discard() {
+  agent_id="${1:-}"; issue_id="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning discard <agentId> <issueId> --confirm <issueId>" 2; shift 2
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for issue discard: $1" 2 ;; esac; done
+  [ "$confirm" = "$issue_id" ] || die "confirmation_required" "discarding archives the issue. Obtain approval, then repeat the issue id with --confirm $issue_id" 2
+  body="$(learning_identity_body)"; set +e; resp="$(api_write POST "/tool/optimize/issues/$issue_id/discard?agentId=$agent_id" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "issue discard result is ambiguous; re-read the issue" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_learning_job_action() {
+  action="$1"; thread_id="$2"; shift 2; confirm=""; body=""
+  [ -n "$thread_id" ] || die "validation_error" "a Learning Hub thread id is required" 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --confirm) confirm="${2:-}"; shift 2 ;;
+      --keep-feedbacks) keep="${2:-}"; case "$keep" in true|false) ;; *) die "validation_error" "--keep-feedbacks must be true or false" 2 ;; esac; shift 2; body="{\"keepFeedbacks\":$keep}" ;;
+      --feedback) fb="$(json_quote "${2:-}")"; shift 2; body="{\"optimizationFeedback\":$fb}" ;;
+      *) die "validation_error" "unknown flag for Learning Hub job action: $1" 2 ;;
+    esac
+  done
+  [ "$confirm" = "$thread_id" ] || die "confirmation_required" "show the job effect, obtain explicit approval, then repeat the thread id with --confirm $thread_id" 2
+  if [ "$action" = "reject" ] && [ -z "$body" ]; then die "validation_error" "reject requires --keep-feedbacks true|false" 2; fi
+  if [ "$action" = "re-optimize" ] && [ -z "$body" ]; then die "validation_error" "re-optimize requires --feedback text" 2; fi
+  require_workspace; set +e; resp="$(api_write POST "/tool/optimize/jobs/$thread_id/$action" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "job action result is ambiguous; re-read the job" 5; fi; printf '%s\n' "$resp"
+}
+
+cmd_learning_resume() {
+  agent_id="${1:-}"; confirm=""; [ -n "$agent_id" ] || die "validation_error" "usage: beam learning resume <agentId> --confirm <agentId>" 2; shift
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for resume: $1" 2 ;; esac; done
+  [ "$confirm" = "$agent_id" ] || die "confirmation_required" "resuming can consume credits. Obtain approval, then repeat the agent id with --confirm $agent_id" 2
+  require_workspace; set +e; resp="$(api_write POST "/tool/optimize/agents/$agent_id/resume-on-hold-jobs" '')"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "resume result is ambiguous; re-read agent issues" 5; fi; printf '%s\n' "$resp"
+}
+
+extract_user_id() {
+  if command -v jq >/dev/null 2>&1; then jq -r '.id // .user.id // ""';
+  elif command -v python3 >/dev/null 2>&1; then python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("id") or (d.get("user") or {}).get("id") or "")';
+  else grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/'; fi
+}
+
+cmd_learning_optimize() {
+  agent_id="${1:-}"; issue_id="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning optimize <agentId> <issueId> --confirm <issueId>" 2; shift 2
+  while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for Learning Hub optimization: $1" 2 ;; esac; done
+  [ "$confirm" = "$issue_id" ] || die "confirmation_required" "this consumes tuner credits. Obtain explicit approval, then repeat the issue id with --confirm $issue_id" 2
+  body="$(learning_identity_body)"
+  set +e; resp="$(api_write POST "/tool/optimize/issues/$issue_id/optimize?agentId=$agent_id" "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "optimization dispatch is ambiguous; inspect the issue before retrying" 5; fi; printf '%s\n' "$resp"
 }
 
 cmd_mcp() {
@@ -805,6 +1656,51 @@ mcp_handshake() {
     *'"jsonrpc"'*|*'"result"'*) return 0 ;;
     *) return 5 ;;
   esac
+}
+
+mcp_tools_list() {
+  # $1 = key. Print the raw JSON/SSE response from tools/list.
+  body='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+  if out="$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 20 \
+    -X POST -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -H "Authorization: Bearer $1" --data-binary @- "$MCP_URL" 2>/dev/null)"; then rc=0; else rc=$?; fi
+  [ "$rc" -eq 0 ] || return 5
+  case "$out" in
+    *"Invalid API key"*|*"Authentication required"*|*Unauthorized*) return 3 ;;
+    *'"tools"'*|*'"result"'*) printf '%s\n' "$out"; return 0 ;;
+    *) return 5 ;;
+  esac
+}
+
+cmd_mcp_check() {
+  requested_tool=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --tool) requested_tool="${2:-}"; shift 2 ;;
+      -h|--help) printf 'Usage: beam mcp check [--tool toolName]\n'; return 0 ;;
+      *) die "validation_error" "unknown flag for beam mcp check: $1" 2 ;;
+    esac
+  done
+  key="$(read_key 2>/dev/null || true)"
+  [ -n "$key" ] || die "auth_missing" "not signed in — run beam login first" 3
+  set +e; mcp_handshake "$key"; auth_rc=$?; set -e
+  if [ "$auth_rc" -eq 3 ]; then die "auth_invalid" "MCP rejected the saved key — run beam login, then beam register" 3; fi
+  if [ "$auth_rc" -ne 0 ]; then die "network_error" "could not reach the MCP endpoint ($MCP_URL)" 5; fi
+  set +e; tools_json="$(mcp_tools_list "$key")"; list_rc=$?; set -e
+  if [ "$list_rc" -eq 3 ]; then die "auth_invalid" "MCP rejected the saved key — run beam login, then beam register" 3; fi
+  if [ "$list_rc" -ne 0 ]; then die "network_error" "MCP tools/list did not return a usable response" 5; fi
+  if [ -n "$requested_tool" ]; then
+    tool_json="$(json_quote "$requested_tool")"
+    # Works for JSON and for Streamable HTTP's `data: {...}` framing.
+    if printf '%s' "$tools_json" | grep -E '"name"[[:space:]]*:[[:space:]]*'"$tool_json" >/dev/null 2>&1; then
+      printf '{"ok":true,"endpoint":"%s","authenticated":true,"tool":"%s","available":true}\n' "$MCP_URL" "$requested_tool"
+      return 0
+    fi
+    die "mcp_tool_missing" "MCP is healthy but tool '$requested_tool' is unavailable; use the specialist's CLI fallback" 2
+  fi
+  count="$(printf '%s' "$tools_json" | grep -Eo '"name"[[:space:]]*:[[:space:]]*"[^"]+"' 2>/dev/null | wc -l | tr -d ' ')"
+  printf '{"ok":true,"endpoint":"%s","authenticated":true,"toolCount":%s}\n' "$MCP_URL" "${count:-0}"
 }
 
 cmd_doctor() {
@@ -1106,28 +2002,140 @@ main() {
     doctor) cmd_doctor "$@" ;;
     login) cmd_login "$@" ;;
     logout) cmd_logout ;;
-    whoami) cmd_whoami ;;
+    whoami) cmd_whoami "$@" ;;
     workspace) cmd_workspace "$@" ;;
     agents)
       sub="${1:-}"; shift || true
       case "$sub" in
         list) cmd_agents_list ;;
         get) cmd_agents_get "$@" ;;
+        tools) [ -n "${1:-}" ] || die "validation_error" "usage: beam agents tools <agentId>" 2; cmd_agents_related_get "agent tools" "/agent/$1/tools" ;;
+        sub-agents) [ -n "${1:-}" ] || die "validation_error" "usage: beam agents sub-agents <agentId>" 2; cmd_agents_related_get "agent sub-agents" "/agent/$1/mcp-integration" ;;
+        files) [ -n "${1:-}" ] || die "validation_error" "usage: beam agents files <agentId>" 2; cmd_agents_related_get "agent context files" "/context/files?agentId=$1" ;;
+        history) [ -n "${1:-}" ] || die "validation_error" "usage: beam agents history <agentId>" 2; cmd_agents_related_get "agent graph history" "/agent-graphs/history/$1" ;;
+        remove-tools) cmd_agents_remove_tools "$@" ;;
+        external-files-add) cmd_agents_external_files_add "$@" ;;
+        context-file-delete) cmd_agents_context_file_delete "$@" ;;
+        external-files-delete) cmd_agents_external_files_delete "$@" ;;
+        change-file-agent) cmd_agents_change_file_agent "$@" ;;
+        upload-file) cmd_agents_upload_file "$@" ;;
+        transcribe) cmd_agents_transcribe "$@" ;;
         deploy) cmd_agents_deploy "$@" ;;
         publish) cmd_agents_publish "$@" ;;
         delete) cmd_agents_delete "$@" ;;
-        *) die "validation_error" "usage: beam agents <list|get|deploy|publish|delete>" 2 ;;
+        *) die "validation_error" "usage: beam agents <list|get|tools|sub-agents|files|history|remove-tools|upload-file|external-files-add|context-file-delete|external-files-delete|change-file-agent|transcribe|deploy|publish|delete>" 2 ;;
       esac ;;
     tasks)
       sub="${1:-}"; shift || true
       case "$sub" in
+        list) cmd_tasks_list "$@" ;;
+        statuses) cmd_tasks_statuses "$@" ;;
+        agents) cmd_tasks_agents ;;
+        latest) cmd_tasks_latest "$@" ;;
+        create) cmd_tasks_create "$@" ;;
         test) cmd_tasks_test "$@" ;;
         get) cmd_tasks_get "$@" ;;
+        retry) cmd_tasks_retry "$@" ;;
+        approve) cmd_tasks_approve "$@" ;;
+        reject) cmd_tasks_reject "$@" ;;
+        abort) cmd_tasks_abort "$@" ;;
+        delete) cmd_tasks_delete "$@" ;;
+        rate) cmd_tasks_rate "$@" ;;
+        cancel-wait) cmd_tasks_cancel_wait "$@" ;;
+        update-tool) cmd_tasks_update_tool "$@" ;;
         submit-input) cmd_tasks_submit_input "$@" ;;
-        *) die "validation_error" "usage: beam tasks <test|get|submit-input>" 2 ;;
+        *) die "validation_error" "usage: beam tasks <list|statuses|agents|latest|create|test|get|retry|approve|reject|abort|delete|rate|cancel-wait|update-tool|submit-input>" 2 ;;
+      esac ;;
+    inbox)
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        list) cmd_inbox_list "$@" ;;
+        unread-count) cmd_inbox_unread_count ;;
+        mark-read) cmd_inbox_mark_read "$@" ;;
+        delete) cmd_inbox_delete "$@" ;;
+        *) die "validation_error" "usage: beam inbox <list|unread-count|mark-read|delete>" 2 ;;
+      esac ;;
+    integrations)
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        list) cmd_integrations_list ;;
+        categories) cmd_integrations_categories ;;
+        connected) cmd_integrations_connected ;;
+        connections) cmd_integrations_connections "$@" ;;
+        is-connected) cmd_integrations_is_connected "$@" ;;
+        connect) cmd_integrations_payload_write PUT '/integration-provider/add-token-credential' "${1:-}" ;;
+        update) cmd_integrations_payload_write PATCH '/integration-provider/update-connection' "${1:-}" ;;
+        remove) cmd_integrations_remove "$@" ;;
+        set-default) cmd_integrations_set_default "$@" ;;
+        custom-create) cmd_integrations_payload_write POST '/custom-integrations' "${1:-}" ;;
+        custom-update)
+          id="${1:-}"; file="${2:-}"; [ -n "$id" ] || die "validation_error" "usage: beam integrations custom-update <id> <payloadFile>" 2
+          cmd_integrations_payload_write PUT "/custom-integrations/$id" "$file" ;;
+        custom-remove) cmd_integrations_custom_remove "$@" ;;
+        *) die "validation_error" "usage: beam integrations <list|categories|connected|connections|is-connected|connect|update|remove|set-default|custom-create|custom-update|custom-remove>" 2 ;;
+      esac ;;
+    templates)
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        list) cmd_templates_list "$@" ;;
+        categories) cmd_templates_categories ;;
+        get) cmd_templates_get "$@" ;;
+        recommend) cmd_templates_recommend "$@" ;;
+        create-agent) cmd_templates_create_agent "$@" ;;
+        *) die "validation_error" "usage: beam templates <list|categories|get|recommend|create-agent>" 2 ;;
+      esac ;;
+    analytics)
+      sub="${1:-}"; shift || true
+      case "$sub" in get) cmd_analytics_get "$@" ;; export) cmd_analytics_export "$@" ;; *) die "validation_error" "usage: beam analytics <get|export>" 2 ;; esac ;;
+    views)
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        list) cmd_views_list ;;
+        get) cmd_views_get "$@" ;;
+        records) cmd_views_records "$@" ;;
+        linked-records) cmd_views_linked_records "$@" ;;
+        create) cmd_views_payload_write POST '/agent-views' "${1:-}" ;;
+        delete) cmd_views_delete "$@" ;;
+        add-column)
+          view_id="${1:-}"; file="${2:-}"; [ -n "$view_id" ] || die "validation_error" "usage: beam views add-column <viewId> <payloadFile>" 2
+          cmd_views_payload_write POST "/agent-views/$view_id/columns" "$file" ;;
+        update-column)
+          view_id="${1:-}"; column_id="${2:-}"; file="${3:-}"; [ -n "$view_id" ] && [ -n "$column_id" ] || die "validation_error" "usage: beam views update-column <viewId> <columnId> <fullPayloadFile>" 2
+          cmd_views_payload_write PATCH "/agent-views/$view_id/columns/$column_id" "$file" ;;
+        delete-column) cmd_views_delete_column "$@" ;;
+        export) cmd_views_export "$@" ;;
+        *) die "validation_error" "usage: beam views <list|get|records|linked-records|create|delete|add-column|update-column|delete-column|export>" 2 ;;
+      esac ;;
+    learning)
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        issues) cmd_learning_issues "$@" ;;
+        issue) cmd_learning_issue "$@" ;;
+        feedbacks) cmd_learning_feedbacks "$@" ;;
+        issue-jobs) cmd_learning_issue_jobs "$@" ;;
+        job) cmd_learning_job "$@" ;;
+        trend) cmd_learning_trend "$@" ;;
+        tools) cmd_learning_tools "$@" ;;
+        tool) cmd_learning_tool "$@" ;;
+        config) cmd_learning_config "$@" ;;
+        set-config) cmd_learning_set_config "$@" ;;
+        submit-feedback) cmd_learning_payload_write POST '/tool/optimize/feedbacks/submit' "${1:-}" ;;
+        submit-task-feedback) cmd_learning_payload_write POST '/tool/optimize/feedbacks/task-feedback' "${1:-}" ;;
+        merge)
+          file="${1:-}"; shift || true; cmd_learning_confirmed_payload_write '/tool/optimize/issues/merge' merge "$file" "$@" ;;
+        optimize) cmd_learning_optimize "$@" ;;
+        discard) cmd_learning_discard "$@" ;;
+        approve-job) thread="${1:-}"; shift || true; cmd_learning_job_action approve "$thread" "$@" ;;
+        reject-job) thread="${1:-}"; shift || true; cmd_learning_job_action reject "$thread" "$@" ;;
+        reoptimize-job) thread="${1:-}"; shift || true; cmd_learning_job_action re-optimize "$thread" "$@" ;;
+        cancel-job) thread="${1:-}"; shift || true; cmd_learning_job_action cancel "$thread" "$@" ;;
+        run-job) thread="${1:-}"; shift || true; cmd_learning_job_action run "$thread" "$@" ;;
+        resume) cmd_learning_resume "$@" ;;
+        *) die "validation_error" "usage: beam learning <issues|issue|feedbacks|issue-jobs|job|trend|tools|tool|config|set-config|submit-feedback|submit-task-feedback|merge|optimize|discard|approve-job|reject-job|reoptimize-job|cancel-job|run-job|resume>" 2 ;;
       esac ;;
     agent-builder) cmd_agent_builder "$@" ;;
-    mcp) cmd_mcp ;;
+    mcp)
+      if [ "${1:-}" = "check" ]; then shift; cmd_mcp_check "$@"; else cmd_mcp; fi ;;
     register) cmd_register ;;
     uninstall) cmd_uninstall ;;
     *) die "validation_error" "unknown command: $cmd (try beam --help)" 2 ;;

@@ -16,7 +16,7 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BEAM="${BEAM_BIN:-$ROOT/beam/bin/beam}"
-SPECS="$ROOT/beam/skills/agent-builder/assets/example-specs"
+SPECS="$ROOT/beam/internal/agent-builder/assets/example-specs"
 WORK="${TMPDIR:-/tmp}/beam-ab-e2e-$$"
 KEY="${BEAM_API_KEY:-}"
 
@@ -41,19 +41,19 @@ group "commands resolve from any directory"
 # cwd is the skill dir — it never is.
 OUT="$(cd / && "$BEAM" agent-builder --help 2>/dev/null)"
 printf '%s' "$OUT" | grep -q "usage:" && ok "'beam agent-builder --help' works from /" || bad "help failed from /"
-grep -rq "python3 scripts/beam.py" "$ROOT/beam/skills/agent-builder" \
+grep -rq "python3 scripts/beam.py" "$ROOT/beam/internal/agent-builder" \
   && bad "docs still use the unresolvable relative path" || ok "no relative-path invocations left in docs"
 
 group "conversational flow approval"
-SKILL="$ROOT/beam/skills/agent-builder/SKILL.md"
-FLOW="$ROOT/beam/skills/agent-builder/references/conversation-flow.md"
+SKILL="$ROOT/beam/internal/agent-builder/SKILL.md"
+FLOW="$ROOT/beam/internal/agent-builder/references/conversation-flow.md"
 grep -q "A Mermaid diagram" "$SKILL" && ok "new flows require a Mermaid proposal" || bad "no Mermaid proposal rule"
 grep -q "list of the integrations" "$SKILL" && ok "new flows name integrations" || bad "no integration-list rule"
 grep -q "Natural acceptance" "$SKILL" && ok "natural approval is accepted" || bad "approval is still command-gated"
 grep -q "material edit" "$FLOW" && ok "material changes re-open approval" || bad "material changes do not re-open approval"
-grep -q 'customer-escalations' "$ROOT/beam/skills/agent-builder/evals/evals.json" \
+grep -q 'customer-escalations' "$ROOT/beam/internal/agent-builder/evals/evals.json" \
   && ok "mock Gmail/Slack conversation is an eval" || bad "missing conversational mock eval"
-python3 - "$ROOT/beam/skills/agent-builder/evals/evals.json" <<'PY' \
+python3 - "$ROOT/beam/internal/agent-builder/evals/evals.json" <<'PY' \
   && ok "mock eval covers approval, draft update, and publish" \
   || bad "mock eval lost a conversational acceptance step"
 import json, sys
@@ -70,7 +70,7 @@ grep -q "Phases 1" "$SKILL" && bad "skill still routes through phases" || ok "sk
 grep -q "only build trigger" "$SKILL" && bad "skill still requires build keyword" || ok "skill has no build keyword gate"
 
 group "credentials never come from chat"
-grep -rq "BEAM_API_KEY='" "$ROOT/beam/skills/agent-builder" \
+grep -rq "BEAM_API_KEY='" "$ROOT/beam/internal/agent-builder" \
   && bad "docs still prefix credentials" || ok "docs no longer prefix credentials"
 # No key anywhere -> auth_error naming `beam login`, not a request to paste one.
 OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
@@ -153,7 +153,7 @@ for f in "$SPECS"/*.json; do
 done
 
 group "variable loops use linked iteration inputs and canonical edges"
-python3 - "$ROOT/beam/skills/agent-builder/scripts/beam.py" "$SPECS/loop-article-digest.json" <<'PY' \
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$SPECS/loop-article-digest.json" <<'PY' \
   && ok "loop payload has linked item input and no semantic alias" \
   || bad "loop payload uses a semantic alias or non-canonical edges"
 import importlib.util, json, sys
@@ -179,7 +179,7 @@ assert body["childEdges"] == []
 PY
 
 group "condition updates keep the intended objective"
-python3 - "$ROOT/beam/skills/agent-builder/scripts/beam.py" "$SPECS/condition-ticket-router.json" <<'PY' \
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$SPECS/condition-ticket-router.json" <<'PY' \
   && ok "condition objective refreshes on update" \
   || bad "condition update keeps a stale objective"
 import copy, importlib.util, json, sys

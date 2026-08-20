@@ -1,0 +1,41 @@
+version: 1
+primarySurface: mcp
+fallbackSurface: cli
+failureClasses:
+  tool-absent:
+    cliFallback: true
+    retryMcp: false
+  protocol-or-shape-error:
+    cliFallback: true
+    retryMcp: false
+  mcp-transport-error:
+    cliFallback: true
+    retryMcp: false
+  known-mcp-defect:
+    cliFallback: true
+    retryMcp: false
+  api-unavailable:
+    cliFallback: false
+    result: blocked
+  auth-rejected:
+    cliFallback: false
+    result: run-setup-or-login
+  permission-denied:
+    cliFallback: false
+    result: report-required-permission
+  validation-error:
+    cliFallback: false
+    result: correct-input-or-ask-user
+  ambiguous-write-outcome:
+    cliFallback: reconcile-first
+    retryMcp: false
+writeRules:
+  - Never repeat a write after a timeout until current state proves it was not applied.
+  - Use the operation's post-read to reconcile ambiguous outcomes.
+  - CLI fallback must use the same workspace and resolved entity ids as the failed MCP call.
+  - Destructive actions and consent approvals retain their confirmation requirement across fallback.
+  - Do not treat a missing MCP tool as missing authentication when CLI authentication is valid.
+completionRule: >-
+  Once selected, a specialist owns the assigned Beam operation through MCP,
+  CLI fallback, verification, or a precise terminal blocker. It may not abandon
+  the skill and improvise an unrelated action.

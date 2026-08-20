@@ -1,0 +1,694 @@
+version: 1
+description: >-
+  Supervisor-owned operation catalog. MCP names track the Beam server; CLI
+  commands are the required fallback surface. A command marked planned must be
+  implemented before that operation is considered complete in Beam Run.
+defaults:
+  surfaceOrder: [mcp, cli]
+  workspaceRequired: true
+  confirmation: none
+  retry: reconcile-before-retry
+
+operations:
+  user.current:
+    specialist: general-workspace
+    safety: read
+    mcp: getCurrentUser
+    cli: beam whoami
+    status: ready
+  agent.list:
+    specialist: general-workspace
+    safety: read
+    mcp: listAgents
+    cli: beam agents list
+    status: ready
+  agent.get:
+    specialist: agent-config
+    safety: read
+    mcp: getAgentGraph
+    cli: beam agents get <agentId>
+    status: ready
+  agent.delete:
+    specialist: agent-config
+    safety: destructive-write
+    confirmation: explicit-agent-name-and-id
+    mcp: null
+    cli: beam agents delete <agentId> --confirm <agentId>
+    preRead: agent.get
+    postRead: agent.list
+    status: ready
+  agent.tools:
+    specialist: agent-config
+    safety: read
+    mcp: beam_get_agent_tools
+    cli: beam agents tools <agentId>
+    status: ready
+  agent.sub-agents:
+    specialist: agent-config
+    safety: read
+    mcp: beam_list_sub_agents
+    cli: beam agents sub-agents <agentId>
+    status: ready
+  agent.files:
+    specialist: agent-config
+    safety: read
+    mcp: beam_list_context_files
+    cli: beam agents files <agentId>
+    status: ready
+  agent.history:
+    specialist: agent-config
+    safety: read
+    mcp: beam_get_graph_history
+    cli: beam agents history <agentId>
+    status: ready
+  agent.update-metadata:
+    specialist: agent-config
+    safety: reversible-write
+    mcp: agent_update_metadata
+    cli: beam agent-builder update-metadata <agentId> ...
+    postRead: agent.get
+    status: ready
+  agent.remove-tools:
+    specialist: agent-config
+    safety: destructive-write
+    confirmation: explicit
+    mcp: agent_remove_tools
+    cli: beam agents remove-tools <agentId> <payloadFile> --confirm <agentId>
+    postRead: agent.tools
+    status: ready
+  agent.external-files-add:
+    specialist: agent-config
+    safety: reversible-write
+    mcp: agent_upload_external_file
+    cli: beam agents external-files-add <agentId> <payloadFile>
+    postRead: agent.files
+    status: ready
+  agent.upload-file:
+    specialist: agent-config
+    safety: reversible-write
+    mcp: agent_upload_context_file
+    cli: beam agents upload-file <agentId> <localFile>
+    postRead: agent.files
+    status: ready
+  agent.context-file-delete:
+    specialist: agent-config
+    safety: destructive-write
+    confirmation: always
+    mcp: agent_delete_context_file
+    cli: beam agents context-file-delete <agentId> <fileKey> --confirm <fileKey>
+    postRead: agent.files
+    status: ready
+  agent.external-files-delete:
+    specialist: agent-config
+    safety: destructive-write
+    confirmation: always
+    mcp: agent_delete_external_file
+    cli: beam agents external-files-delete <agentId> <payloadFile> --confirm <agentId>
+    postRead: agent.files
+    status: ready
+  agent.change-file-agent:
+    specialist: agent-config
+    safety: reversible-write
+    mcp: agent_change_file_agent
+    cli: beam agents change-file-agent <agentId> <payloadFile>
+    status: ready
+  agent.transcribe:
+    specialist: agent-config
+    safety: read
+    mcp: agent_transcribe_audio
+    cli: beam agents transcribe <localAudioFile>
+    status: ready
+
+  graph.get:
+    specialist: agent-flow
+    safety: read
+    mcp: getAgentGraph
+    cli: beam agent-builder get-graph <agentId>
+    status: ready
+  graph.nodes:
+    specialist: agent-flow
+    safety: read
+    mcp: getAgentGraph
+    cli: beam agent-builder get-nodes <agentId>
+    status: ready
+  graph.node:
+    specialist: agent-flow
+    safety: read
+    mcp: getAgentGraph
+    cli: beam agent-builder get-node <agentId> <nodeId>
+    status: ready
+  graph.verify-links:
+    specialist: agent-flow
+    safety: read
+    mcp: getAgentGraph
+    cli: beam agent-builder verify-links <agentId>
+    status: ready
+  graph.deploy:
+    specialist: agent-builder
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder deploy <specFile>
+    postRead: graph.verify-links
+    status: ready
+  graph.publish:
+    specialist: agent-builder
+    safety: external-effect
+    confirmation: explicit-publish-intent
+    mcp: null
+    cli: beam agent-builder publish <graphId>
+    postRead: graph.get
+    status: ready
+  graph.update-prompt:
+    specialist: agent-builder
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder update-node-prompt <agentId> <nodeId> <promptFile>
+    postRead: graph.node
+    status: ready
+  graph.update-params:
+    specialist: agent-builder
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder update-node-params <agentId> <nodeId> ...
+    postRead: graph.node
+    status: ready
+  graph.update-consent:
+    specialist: agent-builder
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder update-node-consent <agentId> <nodeId> <true|false>
+    postRead: graph.node
+    status: ready
+  graph.add-node:
+    specialist: agent-builder
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder add-node <agentId> <nodeFile> ...
+    postRead: graph.verify-links
+    status: ready
+  graph.remove-node:
+    specialist: agent-builder
+    safety: destructive-write
+    confirmation: explicit
+    mcp: null
+    cli: beam agent-builder remove-node <agentId> <nodeId>
+    postRead: graph.verify-links
+    status: ready
+  graph.test-node:
+    specialist: agent-builder
+    safety: reversible-write
+    mcp: testGraphNode
+    cli: beam agent-builder test-node <agentId> <graphId> <nodeId> <paramsJson>
+    status: ready
+  graph.triggers:
+    specialist: agent-flow
+    safety: read
+    mcp: getAgentGraph
+    cli: beam agent-builder get-triggers <entryNodeId>
+    status: ready
+  graph.webhook:
+    specialist: agent-flow
+    safety: read
+    mcp: getAgentGraph
+    cli: beam agent-builder get-webhook <agentId>
+    status: ready
+
+  task.list:
+    specialist: global-tasks
+    safety: read
+    mcp: listAgentTasks
+    cli: beam tasks list
+    status: ready
+  task.statuses:
+    specialist: global-tasks
+    safety: read
+    mcp: beam_get_task_statuses
+    cli: beam tasks statuses [agentIds]
+    status: ready
+  task.agents:
+    specialist: global-tasks
+    safety: read
+    mcp: beam_list_task_agents
+    cli: beam tasks agents
+    status: ready
+  task.latest:
+    specialist: agent-tasks
+    safety: read
+    mcp: beam_get_latest_task_executions
+    cli: beam tasks latest <agentId> [pageSize]
+    status: ready
+  task.get:
+    specialist: agent-tasks
+    safety: read
+    mcp: getTaskDetails
+    cli: beam tasks get <taskId>
+    status: ready
+  task.create-live:
+    specialist: agent-tasks
+    safety: external-effect
+    confirmation: required-if-production-side-effect
+    mcp: createAgentTask
+    cli: beam tasks create <agentId> <input>
+    postRead: task.get
+    status: ready
+  task.create-draft:
+    specialist: agent-tasks
+    safety: reversible-write
+    mcp: null
+    cli: beam tasks test <agentId> <input>
+    postRead: task.get
+    status: ready
+  task.submit-input:
+    specialist: inbox
+    safety: reversible-write
+    confirmation: confirm-proposed-values
+    mcp: submitUserInput
+    cli: beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>
+    postRead: task.get
+    status: ready
+  task.retry:
+    specialist: agent-tasks
+    safety: external-effect
+    confirmation: required-if-production-side-effect
+    mcp: retryTaskExecution
+    cli: beam tasks retry <taskId> [--task-node-id <taskNodeId> --feedback <text>]
+    postRead: task.get
+    status: ready
+  task.approve:
+    specialist: inbox
+    safety: external-effect
+    confirmation: always
+    mcp: approveTaskExecution
+    cli: beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>
+    postRead: task.get
+    status: ready
+  task.reject:
+    specialist: inbox
+    safety: destructive-write
+    confirmation: always
+    mcp: rejectTaskExecution
+    cli: beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason <text>]
+    postRead: task.get
+    status: ready
+  task.abort:
+    specialist: agent-tasks
+    safety: destructive-write
+    confirmation: always
+    mcp: null
+    cli: beam tasks abort <taskId> --confirm <taskId> [--reason <text>]
+    postRead: task.get
+    status: ready
+  task.delete:
+    specialist: agent-tasks
+    safety: destructive-write
+    confirmation: always
+    mcp: null
+    cli: beam tasks delete <taskId> --confirm <taskId>
+    postRead: task.list
+    status: ready
+  task.rate:
+    specialist: agent-tasks
+    safety: reversible-write
+    mcp: rateTaskOutput
+    cli: beam tasks rate <taskId> <up|down> [feedback]
+    status: ready
+  task.cancel-wait:
+    specialist: agent-tasks
+    safety: destructive-write
+    confirmation: always
+    mcp: task_cancel_wait_node
+    cli: beam tasks cancel-wait <taskNodeId> <agentId> --confirm <taskNodeId>
+    postRead: task.get
+    status: ready
+  task.update-tool:
+    specialist: agent-config
+    safety: reversible-write
+    mcp: task_update_agent_tool
+    cli: beam tasks update-tool <toolFunctionName> <payloadFile>
+    postRead: agent.tools
+    status: ready
+
+  inbox.list:
+    specialist: inbox
+    safety: read
+    mcp: null
+    cli: beam inbox list
+    status: ready
+  inbox.unread-count:
+    specialist: inbox
+    safety: read
+    mcp: null
+    cli: beam inbox unread-count
+    status: ready
+  inbox.mark-read:
+    specialist: inbox
+    safety: reversible-write
+    mcp: null
+    cli: beam inbox mark-read <notificationId>
+    status: ready
+  inbox.delete:
+    specialist: inbox
+    safety: destructive-write
+    confirmation: always
+    mcp: null
+    cli: beam inbox delete <notificationId> --confirm <notificationId>
+    status: ready
+
+  integration.list:
+    specialist: integrations
+    safety: read
+    mcp: null
+    cli: beam integrations list
+    status: ready
+  integration.categories:
+    specialist: integrations
+    safety: read
+    mcp: beam_list_integration_categories
+    cli: beam integrations categories
+    status: ready
+  integration.connected:
+    specialist: integrations
+    safety: read
+    mcp: null
+    cli: beam integrations connected
+    status: ready
+  integration.connections:
+    specialist: integrations
+    safety: read
+    mcp: null
+    cli: beam integrations connections <integrationId>
+    status: ready
+  integration.is-connected:
+    specialist: integrations
+    safety: read
+    mcp: beam_is_integration_connected
+    cli: beam integrations is-connected <toolFunctionName>
+    status: ready
+  integration.connect:
+    specialist: integrations
+    safety: external-effect
+    confirmation: required-if-credentials-or-external-effect
+    mcp: null
+    cli: beam integrations connect <payloadFile>
+    status: ready
+  integration.update:
+    specialist: integrations
+    safety: reversible-write
+    mcp: integration_update_connection
+    cli: beam integrations update <payloadFile>
+    postRead: integration.connections
+    status: ready
+  integration.remove:
+    specialist: integrations
+    safety: destructive-write
+    confirmation: always
+    mcp: null
+    cli: beam integrations remove <providerId> --confirm <providerId>
+    status: ready
+  integration.set-default:
+    specialist: integrations
+    safety: reversible-write
+    mcp: null
+    cli: beam integrations set-default <providerId> <integrationId>
+    status: ready
+  integration.custom-create:
+    specialist: integrations
+    safety: reversible-write
+    mcp: null
+    cli: beam integrations custom-create <payloadFile>
+    status: ready
+  integration.custom-update:
+    specialist: integrations
+    safety: reversible-write
+    mcp: null
+    cli: beam integrations custom-update <id> <payloadFile>
+    status: ready
+  integration.custom-remove:
+    specialist: integrations
+    safety: destructive-write
+    confirmation: always
+    mcp: null
+    cli: beam integrations custom-remove <id> --confirm <id>
+    status: ready
+
+  template.list:
+    specialist: templates
+    safety: read
+    mcp: null
+    cli: beam templates list
+    status: ready
+  template.categories:
+    specialist: templates
+    safety: read
+    mcp: beam_list_template_categories
+    cli: beam templates categories
+    status: ready
+  template.get:
+    specialist: templates
+    safety: read
+    mcp: null
+    cli: beam templates get <templateId>
+    status: ready
+  template.prerequisites:
+    specialist: templates
+    safety: read
+    mcp: beam_get_template_with_prerequisites
+    cli: beam templates get <templateId> + beam integrations connected
+    status: ready
+  template.recommend:
+    specialist: templates
+    safety: read
+    mcp: null
+    cli: beam templates recommend [categoryId]
+    status: ready
+  template.create-agent:
+    specialist: templates
+    safety: reversible-write
+    mcp: null
+    cli: beam templates create-agent <templateId>
+    postRead: agent.get
+    status: ready
+
+  analytics.get:
+    specialist: agent-analytics
+    safety: read
+    mcp: getAgentAnalytics
+    cli: beam analytics get <agentId> [startDate] [endDate]
+    status: ready
+  analytics.export:
+    specialist: agent-analytics
+    safety: reversible-write
+    mcp: null
+    cli: beam analytics export <agentId> <startDate> <endDate>
+    status: ready
+
+  view.list:
+    specialist: views
+    safety: read
+    mcp: null
+    cli: beam views list
+    status: ready
+  view.get:
+    specialist: views
+    safety: read
+    mcp: null
+    cli: beam views get <viewId>
+    status: ready
+  view.records:
+    specialist: views
+    safety: read
+    mcp: null
+    cli: beam views records <viewId>
+    status: ready
+  view.export:
+    specialist: views
+    safety: reversible-write
+    mcp: null
+    cli: beam views export <viewId>
+    status: ready
+  view.linked-records:
+    specialist: views
+    safety: read
+    mcp: beam_list_linked_records
+    cli: beam views linked-records <viewId> <columnId> <numericRecordId>
+    status: ready
+  view.create:
+    specialist: views
+    safety: reversible-write
+    mcp: view_create
+    cli: beam views create <payloadFile>
+    status: ready
+  view.delete:
+    specialist: views
+    safety: destructive-write
+    confirmation: always
+    mcp: view_delete
+    cli: beam views delete <viewId> --confirm <viewId>
+    postRead: view.list
+    status: ready
+  view.add-column:
+    specialist: views
+    safety: reversible-write
+    mcp: view_create_column
+    cli: beam views add-column <viewId> <payloadFile>
+    postRead: view.get
+    status: ready
+  view.update-column:
+    specialist: views
+    safety: reversible-write
+    mcp: view_update_column
+    cli: beam views update-column <viewId> <columnId> <fullPayloadFile>
+    postRead: view.get
+    status: ready
+  view.delete-column:
+    specialist: views
+    safety: destructive-write
+    confirmation: always
+    mcp: view_delete_column
+    cli: beam views delete-column <viewId> <columnId> --confirm <columnId>
+    postRead: view.get
+    status: ready
+
+  learning.issues:
+    specialist: learning-hub
+    safety: read
+    mcp: optimizeTool
+    cli: beam learning issues <agentId>
+    status: ready
+  learning.issue:
+    specialist: learning-hub
+    safety: read
+    mcp: getToolOptimizationStatus
+    cli: beam learning issue <agentId> <issueId>
+    status: ready
+  learning.feedbacks:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_issue_feedbacks
+    cli: beam learning feedbacks <agentId> <issueId>
+    status: ready
+  learning.issue-jobs:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_issue_jobs
+    cli: beam learning issue-jobs <agentId> <issueId>
+    status: ready
+  learning.trend:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_accuracy_trend
+    cli: beam learning trend <agentId> [startDate endDate]
+    status: ready
+  learning.tools:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_learning_tools
+    cli: beam learning tools <agentId>
+    status: ready
+  learning.tool:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_tool_detail
+    cli: beam learning tool <agentId> <toolFunctionName>
+    status: ready
+  learning.config:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_tuner_config
+    cli: beam learning config <agentId>
+    status: ready
+  learning.set-config:
+    specialist: learning-hub
+    safety: reversible-write
+    confirmation: always-two-turn
+    mcp: lh_set_tuner_config
+    cli: beam learning set-config <agentId> <payloadFile> --confirm <agentId>
+    postRead: learning.config
+    status: ready
+  learning.submit-feedback:
+    specialist: learning-hub
+    safety: additive-write
+    mcp: lh_submit_feedback
+    cli: beam learning submit-feedback <payloadFile>
+    status: ready
+  learning.submit-task-feedback:
+    specialist: learning-hub
+    safety: additive-write
+    mcp: lh_submit_task_feedback
+    cli: beam learning submit-task-feedback <payloadFile>
+    status: ready
+  learning.merge:
+    specialist: learning-hub
+    safety: destructive-write
+    confirmation: always-two-turn
+    mcp: lh_merge_issues
+    cli: beam learning merge <payloadFile> --confirm merge
+    status: ready
+  learning.optimize:
+    specialist: learning-hub
+    safety: external-effect
+    confirmation: always
+    mcp: optimizeTool
+    cli: beam learning optimize <agentId> <issueId> --confirm <issueId>
+    status: ready
+  learning.discard:
+    specialist: learning-hub
+    safety: destructive-write
+    confirmation: always-two-turn
+    mcp: lh_discard_issue
+    cli: beam learning discard <agentId> <issueId> --confirm <issueId>
+    status: ready
+  learning.job:
+    specialist: learning-hub
+    safety: read
+    mcp: getToolOptimizationStatus
+    cli: beam learning job <threadId>
+    status: ready
+  learning.approve-job:
+    specialist: learning-hub
+    safety: external-effect
+    confirmation: always-two-turn
+    mcp: lh_approve_job
+    cli: beam learning approve-job <threadId> --confirm <threadId>
+    postRead: learning.job
+    status: ready
+  learning.reject-job:
+    specialist: learning-hub
+    safety: destructive-write
+    confirmation: always-two-turn
+    mcp: lh_reject_job
+    cli: beam learning reject-job <threadId> --keep-feedbacks <true|false> --confirm <threadId>
+    postRead: learning.job
+    status: ready
+  learning.reoptimize-job:
+    specialist: learning-hub
+    safety: external-effect
+    confirmation: always-two-turn
+    mcp: lh_reoptimize_job
+    cli: beam learning reoptimize-job <threadId> --feedback <text> --confirm <threadId>
+    postRead: learning.job
+    status: ready
+  learning.cancel-job:
+    specialist: learning-hub
+    safety: destructive-write
+    confirmation: always-two-turn
+    mcp: lh_cancel_job
+    cli: beam learning cancel-job <threadId> --confirm <threadId>
+    postRead: learning.job
+    status: ready
+  learning.run-job:
+    specialist: learning-hub
+    safety: external-effect
+    confirmation: always-two-turn
+    mcp: lh_run_job
+    cli: beam learning run-job <threadId> --confirm <threadId>
+    postRead: learning.job
+    status: ready
+  learning.resume:
+    specialist: learning-hub
+    safety: external-effect
+    confirmation: always-two-turn
+    mcp: lh_resume_on_hold_jobs
+    cli: beam learning resume <agentId> --confirm <agentId>
+    postRead: learning.issues
+    status: ready

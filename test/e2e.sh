@@ -135,7 +135,7 @@ printf '%s' "$DEV_LOGIN" | grep -q 'Ignoring inherited Beam localhost' && bad "l
 # same endpoint rule rather than depending on the shell CLI to normalize env.
 env HOME="$FAKE" BEAM_API_URL="http://localhost:4000" BEAM_MCP_URL="http://localhost:4000/mcp" \
   BEAM_CONFIG_DIR="$FAKE/.config/beam-local" BEAM_LOCAL_DEV= \
-  BEAM_BUILDER="$ROOT/beam/skills/agent-builder/scripts/beam.py" BEAM_PROXY="$PROXY" \
+  BEAM_BUILDER="$ROOT/beam/internal/agent-builder/scripts/beam.py" BEAM_PROXY="$PROXY" \
   python3 - <<'PY' && ok "direct builder and proxy ignore inherited loopback settings" || bad "direct builder or proxy leaked loopback settings"
 import importlib.util
 import os
@@ -155,7 +155,7 @@ PY
 
 env HOME="$FAKE" BEAM_API_URL="http://localhost:4000" BEAM_MCP_URL="http://localhost:4000/mcp" \
   BEAM_CONFIG_DIR="$FAKE/.config/beam-local" BEAM_LOCAL_DEV=1 \
-  BEAM_BUILDER="$ROOT/beam/skills/agent-builder/scripts/beam.py" BEAM_PROXY="$PROXY" \
+  BEAM_BUILDER="$ROOT/beam/internal/agent-builder/scripts/beam.py" BEAM_PROXY="$PROXY" \
   python3 - <<'PY' && ok "direct builder and proxy preserve explicit local development" || bad "direct builder or proxy lost explicit local development"
 import importlib.util
 import os
