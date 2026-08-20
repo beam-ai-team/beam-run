@@ -1,6 +1,6 @@
 {
   "name": "beam",
-  "version": "0.6.0+codex.20260820133022",
+  "version": "0.6.0+codex.20260820164500",
   "description": "Universally operate Beam from Codex",
   "author": {
     "name": "Beam AI"
@@ -14,9 +14,9 @@
     "developerName": "Beam AI",
     "category": "Developer Tools",
     "brandColor": "#3F76F6",
-    "composerIcon": "./assets/beam-logo.jpg",
-    "logo": "./assets/beam-logo.jpg",
-    "logoDark": "./assets/beam-logo.jpg",
+    "composerIcon": "./assets/beam-logo.png",
+    "logo": "./assets/beam-logo.png",
+    "logoDark": "./assets/beam-logo.png",
     "defaultPrompt": "Help me operate my Beam workspace or agent.",
     "capabilities": [
       "Read",
