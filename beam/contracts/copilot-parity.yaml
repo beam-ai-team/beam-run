@@ -1,0 +1,62 @@
+version: 1
+source:
+  repository: beam-agent-os
+  commit: 40fdd5687a7a4e9122c27d8b175235107c096a58
+  root: src/mastra/agents/copilot
+hostAdapters:
+  - id: delegation
+    change: Replace Mastra agent delegation tool calls with host-native skill loading.
+  - id: page-context
+    change: Replace BeamNext page metadata with the normalized Beam Run context contract.
+  - id: navigation
+    change: Preserve Beam deep links when useful; do not require in-product page navigation to finish work.
+  - id: ask-user
+    change: Use the host's user-question/confirmation interaction rather than Copilot's ask_user event.
+  - id: transport
+    change: Add MCP-first and typed CLI fallback behavior without changing product-domain instructions.
+  - id: general-host-capabilities
+    change: Leave generic web, file, code, and project work to the coding-agent host; retain Beam-specific workspace behavior.
+  - id: compiled-runtime
+    change: Compile pinned Copilot prompt excerpts and the operation registry into host-neutral runtime cards; runtime hosts never load raw source snapshots during normal user work.
+  - id: universal-public-surface
+    change: Expose one public Beam Run skill plus the existing setup skill on every host; preserve former specialist skills under internal/ for migration and audit only.
+specialists:
+  supervisor:
+    source: supervisor/prompt.ts
+    target: skills/beam/SKILL.md + runtime/routes.md
+  general-workspace:
+    source: general-agent/prompt.ts
+    target: runtime/domains/general-workspace.md
+  agent-builder:
+    source: builder/prompt.ts
+    target: runtime/domains/agent-builder.md + internal/agent-builder/
+  agent-tasks:
+    source: pages/prompts.ts#AGENT_TASKS_CAPABILITY
+    target: runtime/domains/agent-tasks.md
+  global-tasks:
+    source: pages/prompts.ts#TASKS_GLOBAL_CAPABILITY
+    target: runtime/domains/global-tasks.md
+  agent-flow:
+    source: pages/prompts.ts#AGENT_FLOW_CAPABILITY
+    target: runtime/domains/agent-flow.md
+  integrations:
+    source: pages/prompts.ts#INTEGRATIONS_CAPABILITY
+    target: runtime/domains/integrations.md
+  agent-config:
+    source: pages/prompts.ts#AGENT_CONFIG_CAPABILITY
+    target: runtime/domains/agent-config.md
+  agent-analytics:
+    source: pages/prompts.ts#AGENT_ANALYTICS_CAPABILITY
+    target: runtime/domains/agent-analytics.md
+  inbox:
+    source: pages/prompts.ts#INBOX_CAPABILITY
+    target: runtime/domains/inbox.md
+  templates:
+    source: pages/prompts.ts#TEMPLATES_CAPABILITY
+    target: runtime/domains/templates.md
+  views:
+    source: pages/prompts.ts#VIEWS_CAPABILITY
+    target: runtime/domains/views.md
+  learning-hub:
+    source: pages/prompts.ts#LEARNING_HUB_CAPABILITY
+    target: runtime/domains/learning-hub.md

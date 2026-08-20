@@ -1,89 +1,104 @@
 ---
 name: beam
-description: Beam — start here. Table of contents for working with Beam Core — agents, tasks, graphs, MCP tools, the CLI, and the Public API. Read this first to answer "what can I do with Beam?"
+description: Beam Run — universally operate Beam workspaces, agents, tasks, flows, integrations, and analytics from any coding agent. Use for any connected Beam request except first-time setup or connection repair.
 ---
 
-# Working with Beam
+# Beam Run
 
-Beam is an AI agent platform: build and run agents, execute tasks, inspect workflow
-graphs, and operate workspaces. This skill is a table of contents — find what you
-want and open that skill.
+Beam Run is the single public skill for operating Beam from Codex, Claude Code,
+Cursor, or another Agent Skills-compatible host. It is a host-neutral supervisor:
+route the request internally, complete the selected operation through MCP or its
+mapped CLI fallback, and verify the result.
 
-## How to work
+This file is the only public runtime entry point. Do **not** load the raw Copilot
+TypeScript snapshots or the legacy specialist skills during an ordinary request.
+They are source/audit material, not runtime context.
 
-- **Narrate as you go.** Say what you're about to do and why, then what happened —
-  in plain language, using agent/task names the user recognizes.
-- **Summarize, don't dump.** Turn raw JSON into a short takeaway or table. Reserve
-  raw output for when the user asks.
-- **Resolve workspace from context.** Prefer an explicit workspace name/ID or Beam URL
-  in the request, then a valid result from `beam workspace`, then the only membership.
-  If multiple workspaces remain possible, ask once and remember the answer with
-  `beam workspace <id>`. Do not make workspace selection part of login. If auth fails,
-  run the `setup` skill.
-- **Missing may mean wrong workspace.** On an empty list or not-found result, name
-  the current workspace and offer `beam workspace list <search>` followed by
-  `beam workspace <id>`. Never scan or switch workspaces silently.
+## One small policy card, not a skill chain
 
-## Flow-mutation gate (mandatory)
+1. Resolve the workspace from an explicit request or URL, then remembered default,
+   then sole membership. Never silently scan or switch all workspaces.
+2. Classify the requested outcome with `../../runtime/routes.md`.
+3. Read only the matching `../../runtime/domains/<domain>.md` and
+   `../../runtime/operations/<domain>.md`. Reuse a card already loaded for the
+   current conversation unless the request changes domain or the context was compacted.
+4. Prefer the listed MCP tool. If it is absent, malformed, has a known defect, or
+   has a transport error, use the mapped CLI fallback with the same workspace and
+   entity IDs.
+5. Verify the result required by the operations card. After an ambiguous write,
+   re-read current state before considering any retry.
 
-For **any** change inside a Beam flow — nodes, edges, prompts, parameters,
-tool configuration, consent, integrations, triggers, webhooks, graph metadata,
-or deployment/publish state — the coding agent **must load and follow the
-`agent-builder` skill before taking action**. This applies even when the request
-looks like a one-line setting change. Do not modify a flow directly through a
-generic MCP graph tool, the `agents` skill, raw API calls, or an ad-hoc CLI
-payload; `agent-builder` owns the dependency and sub-dependency rules, the
-smallest-patch choice, verification, and draft/publish safety.
+Static policy cards may be reused; live workspace data may not. Refresh graph,
+task, integration, and consent state before a write, test, publish, approval, or
+other external effect.
 
-Inspection-only requests may use `agents` or MCP directly. Task execution and
-runtime consent approval use `tasks`; they are not flow mutations.
+## Route once
 
-## Answering "what can I do with Beam?"
-
-Describe **Beam's product**, not your own abilities:
-
-- Say "Beam lets you…" / "you can…", not "skills I have."
-- Lead with concrete outcomes, then offer to run one:
-  - "List the agents in my workspace and show which ones ran today."
-  - "Create a task on the Customer Support agent with this brief…"
-  - "Show the workflow graph for Invoice Matcher and highlight the consent nodes."
-  - "Monitor a running task and approve it when it asks for consent."
-  - "Pull analytics for an agent over the last 7 days."
-
-## Choose the right Beam action first
-
-Before choosing a technical surface, choose the smallest Beam action that fits:
-
-| Need | Start with |
+| Domain | Use when |
 | --- | --- |
-| An existing agent can do the work | Create and monitor a task on that agent |
-| No existing agent fits, or its process must change | Build or update its Flow with `agent-builder` |
-| Your own app, backend, or webhook must call Beam | Use the Public API |
+| `general-workspace` | Workspace-wide discovery, broad Beam questions, or unscoped work |
+| `agent-builder` | Create/change a graph, node, trigger, webhook, or publish state |
+| `agent-tasks` | One agent's task history, tests, retries, ratings, or task actions |
+| `global-tasks` | Tasks spanning more than one agent |
+| `agent-flow` | Read or explain a graph without changing it |
+| `integrations` | Connections and custom integrations |
+| `agent-config` | Settings, tools, sub-agents, and context files |
+| `agent-analytics` | Agent performance and exports |
+| `inbox` | Notifications, task consent, and requested task input |
+| `templates` | Template discovery, prerequisites, and creation |
+| `views` | Saved Views, columns, records, and exports |
+| `learning-hub` | Learning Hub issues, feedback, jobs, and tuning |
 
-Do not create a new agent when an existing agent can complete the requested task.
+## Shared operating rules
 
-## Choose the right technical surface
+- Use one short, user-facing activity message for each logical platform
+  operation. Name the user outcome and scope, not the mechanism. Group related
+  MCP or CLI calls beneath that message; never narrate each command, fallback,
+  policy-card read, route selection, prompt, or file.
+- For a read-only operation, say that no changes will be made. For a write,
+  test, publish, consent request, or other external effect, name the target and
+  intended effect before starting. After it finishes, state the result; for a
+  change, name the exact entity and resulting state, plus what was verified.
+  Example: “Checking the draft flow, Gmail connection, and previous runs — no
+  changes.” Then: “Checked: the flow is draft, Gmail is connected, and two runs
+  await input or consent.”
+- Do not send activity messages for internal planning or static policy reads.
+  A status message is not a substitute for the confirmations required below.
+- Ground every workspace claim in current tool or CLI output. Preserve exact
+  names, IDs, statuses, models, dates, and counts; do not invent unavailable data.
+- Lead with the result and summarize raw output. Use a table only when it makes
+  comparison clearer.
+- A missing resource can mean the wrong workspace. Name the current workspace and
+  offer a focused workspace selection; do not scan all workspaces silently.
+- Keep live tasks and draft tests separate. Resolve active versus draft graph
+  before creation; a relevant draft test uses `beam tasks test`, while a normal
+  live run uses the live task path.
+- Never approve task consent, send input, publish, delete, abort, connect an
+  integration, or repeat an external-effecting task without the confirmation
+  required by the selected operations card and the user’s clear intent.
+- A graph mutation always uses the `agent-builder` card. It stays a draft unless
+  the user explicitly requests publication; inspect current nodes first, make the
+  smallest safe change, and verify links afterwards.
 
-| Surface | What it's for |
-| --- | --- |
-| **MCP tools** | Default in-editor surface: run, monitor, approve, and inspect existing agent work |
-| **CLI (`cli` skill)** | Authentication, workspace administration, scripts, and Flow deployment/publishing |
-| **Public API (`public-api` skill)** | Building services, apps, and webhooks on `https://api.beamstudio.ai` |
+## Connection repair and product boundaries
 
-Escalation order:
+Use the separate `setup` skill only for first-time installation, sign-in, or a
+genuinely broken Beam connection. A single missing MCP tool is not setup failure:
+run `beam mcp check --tool <name>` and continue through its CLI fallback.
 
-1. **MCP** — prefer for interactive agent/task work inside the coding agent.
-2. **CLI** — prefer for auth checks, workspace switching, and simple scripts.
-3. **Public API** — when building an integration, backend, or non-agent client.
+Beam tasks and agent flows are platform work. Generic coding, web research, and
+local file work belong to the host unless they are directly required to complete a
+selected Beam operation.
 
-If auth fails or tools are missing, run **`setup`** before anything else.
+## Runtime provenance
 
-## Related skills
+`../../runtime/` is generated from the pinned Beam Copilot baseline plus the
+operation contract. Refresh it only when changing the plugin, using:
 
-- `setup` — install plugin, PATH, API-key sign-in, MCP verify, restart
-- `agents` — list/inspect agents and graphs; routes every flow change to `agent-builder`
-- `agent-builder` — **required** for every flow/graph configuration or mutation
-- `tasks` — create, monitor, approve/reject tasks
-- `mcp` — what MCP tools exist and when to use them
-- `cli` — `beam` command reference
-- `public-api` — HTTP API patterns and auth
+```bash
+python3 beam/scripts/compile_runtime_policy.py
+python3 beam/scripts/verify_runtime_policy.py
+```
+
+The raw baseline remains in `references/copilot-baseline/` for source-drift
+review; it must not be re-read on every user request.

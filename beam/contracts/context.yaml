@@ -1,0 +1,49 @@
+version: 1
+description: Normalized context resolved once by the Beam Run supervisor and reused by specialists.
+fields:
+  workspaceId:
+    type: string
+    requiredFor: workspace-scoped operations
+    sources: [explicit-request, beam-url, remembered-default, sole-membership]
+  agentId:
+    type: string
+    requiredFor: agent-scoped operations
+    sources: [explicit-request, beam-url, resolved-agent]
+  taskId:
+    type: string
+    requiredFor: task-specific operations
+    sources: [explicit-request, beam-url, resolved-task]
+  activeGraphId:
+    type: string
+    requiredFor: live graph operations
+  draftGraphId:
+    type: string
+    requiredFor: draft graph operations
+  graphMode:
+    type: enum
+    values: [live, draft, unresolved]
+    default: unresolved
+  sideEffectClass:
+    type: enum
+    values: [read, additive-write, reversible-write, destructive-write, external-effect]
+  authorizationState:
+    type: enum
+    values: [not-required, requested, confirmed]
+  contextSource:
+    type: enum
+    values: [explicit-request, beam-url, remembered-default, sole-membership, resolved-lookup]
+  transportTrace:
+    type: array
+    requiredFor: routed operations
+    item:
+      operation: string
+      mcp: enum [not-attempted, completed, tool-absent, protocol-or-shape-error, transport-error, known-defect]
+      cli: enum [not-needed, completed-api-key, completed-bearer-direct, completed-bearer-fallback, blocked-auth, blocked-permission, blocked-platform]
+      verification: enum [not-required, passed, failed]
+rules:
+  - Never infer a resource id from a display name when more than one result matches.
+  - Never silently scan or switch every workspace.
+  - Resolve live versus draft before creating or testing a task.
+  - Carry resolved context into every specialist handoff in the same request.
+  - Append one transport trace entry for every routed operation; preserve it through the final response.
+  - A specialist may enrich context with a read but may not replace an explicit user selection.

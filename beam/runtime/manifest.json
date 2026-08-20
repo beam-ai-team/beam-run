@@ -1,0 +1,40 @@
+{
+  "baselineCommit": "40fdd5687a7a4e9122c27d8b175235107c096a58",
+  "generated": {
+    "runtime/common.md": "35a9276aaf278765ba12b4d22528695a4f946881f54a9642b9fa9395164249d6",
+    "runtime/domains/agent-analytics.md": "28b66e70f29420c80846c92a07f027c2a5707a56ca371f589baec96cde4aa938",
+    "runtime/domains/agent-builder.md": "51def9e04e60edf43b4f6a146084c89b9a77fc48ab166b13a7e9390a55b7a9b5",
+    "runtime/domains/agent-config.md": "6df5e8001b5d5cf3108477c160250845a4ae7f04df7ad308cf6ca86525ba48fa",
+    "runtime/domains/agent-flow.md": "2154f9d71d0abec898432ec68cfa81e07b431f7557341945e3421b8ed27b4004",
+    "runtime/domains/agent-tasks.md": "4d0ff455c877f1fe46a73db2222d0e8a8c0f7d4f89d011a08f603f7d868d542d",
+    "runtime/domains/general-workspace.md": "a71c5f46b8e72dcaacc4bf58ab6c434df570529774b9b44cc35c7ad4c5d5e803",
+    "runtime/domains/global-tasks.md": "293d0c71e6849717a067c6b833972fa2624346b1607bf57ee16ef405b9175744",
+    "runtime/domains/inbox.md": "56a6c6539525d022e5954dd6d048d5f00ce28400e6efdd4980af7a2765243be1",
+    "runtime/domains/integrations.md": "52ee0c7bc102d032ced3378d2e216da77ad858deb6071aa76a759e2563642100",
+    "runtime/domains/learning-hub.md": "6b2769527b5fd09533dc2de460c8cedc56b3113269f46140c6f0049ac943b01b",
+    "runtime/domains/templates.md": "1400d519ab2b99bd1260ab4f05e0eb91819e67e7f75cdea381bd4820587d0324",
+    "runtime/domains/views.md": "7660c974681b9dab78f6abc969d0bf2149443b55e53c9601ac8e00f06248eda9",
+    "runtime/operations/agent-analytics.md": "cc886d4e20aa820825e9db334c882a19da046660e9018bbd597734bb92501eba",
+    "runtime/operations/agent-builder.md": "45b621a7bb376078742a8f89dcf50079cdd6e09880d8490c00fb1410f383e415",
+    "runtime/operations/agent-config.md": "b9b47f4c029c3ab4781ffeda0a58a344223d5113d7a423c0c37ddc3538cbd6aa",
+    "runtime/operations/agent-flow.md": "8356a718d19e67e7b81ac8ef6b90ffb54312be18054927f7e31226815e49586e",
+    "runtime/operations/agent-tasks.md": "d087722dadaae5863ba040e01988d508dc141c1c3318dcc1833a301dd6305607",
+    "runtime/operations/general-workspace.md": "982f60d86bd6f73952791011160abbba4a837d3c53ec91742b5f2dd1e16d10c7",
+    "runtime/operations/global-tasks.md": "881361e1635cd20369c14364c4dbd2e7095bbd71d0efc7295495ba87e2ccbddd",
+    "runtime/operations/inbox.md": "7d2ebe62f8e29f6c62e85db7fcd5b01c425bfdff7834c908e0bb90d9836298a5",
+    "runtime/operations/integrations.md": "83a14b0e6eb52cb2f7c8f4d88b468d01d52647a8e53ec14e7e0dc7d1bf1384c6",
+    "runtime/operations/learning-hub.md": "9b3c21db067ceed476475ee73afc6fb9ed83fab32af3fb3f4cf459d33b2f3c4f",
+    "runtime/operations/templates.md": "c4f61931a176cb8111f9e69d799511d332ac6e1c95f110fdcc735eaef4a7efbb",
+    "runtime/operations/views.md": "5f2cc2d087677b7deb57b731ebe4f5129398370817246aa04582c6fe20dc815c",
+    "runtime/routes.md": "54d6c09898ce822446312fffaea151126634614985e2d6a9e6913b0dfb777f37"
+  },
+  "sources": {
+    "contracts/operations.yaml": "40648ea6ee31aaa85772fb019a85c562e44f82472e9c2b16c9e4fbf07cfb2ebb",
+    "references/copilot-baseline/builder/prompt.ts": "935f8b929a5b17e9a592c186062abf1004662fdffb2e3747d89195e7c68c771a",
+    "references/copilot-baseline/domain/routing-table.ts": "d959d13bddea23077208586b7a4efe581569492d9d9dd16462e73fa02c572f62",
+    "references/copilot-baseline/general-agent/prompt.ts": "6d24de39e1a4d641a34aab60a10e76c0e6a1ded7bf1f2cf3f4b0fa73c86ead44",
+    "references/copilot-baseline/pages/prompts.ts": "29bb3a13651de184880205aeb61a29968e2845d84a3b1e1c9ec68f863ecc5e98",
+    "references/copilot-baseline/supervisor/prompt.ts": "e9f9cef66f43c8bf52e9cb1f8af8eacaf1e6075a4c76acac0b7e9a54f772da77"
+  },
+  "version": 1
+}

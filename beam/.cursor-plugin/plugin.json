@@ -1,7 +1,7 @@
 {
   "name": "beam",
-  "version": "0.5.0",
-  "description": "Build with Beam in Cursor",
+  "version": "0.6.0",
+  "description": "Universally operate Beam from Cursor",
   "author": { "name": "Beam AI" },
   "logo": "assets/beam-logo.jpg",
   "skills": ["./skills"],
