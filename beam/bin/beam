@@ -726,7 +726,8 @@ cmd_agents_related_get() {
 }
 
 cmd_agents_remove_tools() {
-  agent_id="${1:-}"; file="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents remove-tools <agentId> <payloadFile> --confirm <agentId>" 2
+  agent_id="${1:-}"; file="${2:-}"; confirm=""
+  if [ -z "$agent_id" ] || [ -z "$file" ]; then die "validation_error" "usage: beam agents remove-tools <agentId> <payloadFile> --confirm <agentId>" 2; fi
   shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for tool removal: $1" 2 ;; esac; done
   [ "$confirm" = "$agent_id" ] || die "confirmation_required" "inspect the enabled tools and obtain explicit approval, then repeat the agent id with --confirm $agent_id" 2
   body="$(read_payload_file "$file")"; require_workspace
@@ -737,7 +738,8 @@ cmd_agents_remove_tools() {
 }
 
 cmd_agents_external_files_add() {
-  agent_id="${1:-}"; file="${2:-}"; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents external-files-add <agentId> <payloadFile>" 2
+  agent_id="${1:-}"; file="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$file" ]; then die "validation_error" "usage: beam agents external-files-add <agentId> <payloadFile>" 2; fi
   body="$(read_payload_file "$file")"; require_workspace
   set +e; resp="$(api_write POST "/agent/$agent_id/context/integrations/external-file-url" "$body")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
@@ -746,7 +748,8 @@ cmd_agents_external_files_add() {
 }
 
 cmd_agents_context_file_delete() {
-  agent_id="${1:-}"; file_key="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file_key" ] || die "validation_error" "usage: beam agents context-file-delete <agentId> <fileKey> --confirm <fileKey>" 2
+  agent_id="${1:-}"; file_key="${2:-}"; confirm=""
+  if [ -z "$agent_id" ] || [ -z "$file_key" ]; then die "validation_error" "usage: beam agents context-file-delete <agentId> <fileKey> --confirm <fileKey>" 2; fi
   shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for context file deletion: $1" 2 ;; esac; done
   [ "$confirm" = "$file_key" ] || die "confirmation_required" "obtain explicit approval, then repeat the file key with --confirm $file_key" 2
   require_workspace; set +e; resp="$(api_write DELETE "/context/agent/$agent_id/file/$file_key" '')"; rc=$?; set -e
@@ -756,7 +759,8 @@ cmd_agents_context_file_delete() {
 }
 
 cmd_agents_external_files_delete() {
-  agent_id="${1:-}"; file="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents external-files-delete <agentId> <payloadFile> --confirm <agentId>" 2
+  agent_id="${1:-}"; file="${2:-}"; confirm=""
+  if [ -z "$agent_id" ] || [ -z "$file" ]; then die "validation_error" "usage: beam agents external-files-delete <agentId> <payloadFile> --confirm <agentId>" 2; fi
   shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for external file deletion: $1" 2 ;; esac; done
   [ "$confirm" = "$agent_id" ] || die "confirmation_required" "obtain explicit approval, then repeat the agent id with --confirm $agent_id" 2
   body="$(read_payload_file "$file")"; require_workspace
@@ -767,7 +771,8 @@ cmd_agents_external_files_delete() {
 }
 
 cmd_agents_change_file_agent() {
-  agent_id="${1:-}"; file="${2:-}"; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam agents change-file-agent <agentId> <payloadFile>" 2
+  agent_id="${1:-}"; file="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$file" ]; then die "validation_error" "usage: beam agents change-file-agent <agentId> <payloadFile>" 2; fi
   body="$(read_payload_file "$file")"; require_workspace
   set +e; resp="$(api_write PATCH "/context/agent/$agent_id/file/change-agent" "$body")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
@@ -776,7 +781,8 @@ cmd_agents_change_file_agent() {
 }
 
 cmd_agents_upload_file() {
-  agent_id="${1:-}"; file="${2:-}"; [ -n "$agent_id" ] && [ -f "$file" ] || die "validation_error" "usage: beam agents upload-file <agentId> <localFile>" 2
+  agent_id="${1:-}"; file="${2:-}"
+  if [ -z "$agent_id" ] || [ ! -f "$file" ]; then die "validation_error" "usage: beam agents upload-file <agentId> <localFile>" 2; fi
   require_workspace; set +e; resp="$(api_upload "/context/agent/$agent_id/file" contextFile "$file")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "context upload result is ambiguous; re-read context files before retrying" 5; fi
@@ -913,7 +919,7 @@ cmd_tasks_list() {
   case "$page" in ''|*[!0-9]*) die "validation_error" "--page must be a positive integer" 2 ;; esac
   case "$page_size" in ''|*[!0-9]*) die "validation_error" "--page-size must be an integer from 1 to 100" 2 ;; esac
   [ "$page" -ge 1 ] || die "validation_error" "--page must be a positive integer" 2
-  [ "$page_size" -ge 1 ] && [ "$page_size" -le 100 ] || die "validation_error" "--page-size must be an integer from 1 to 100" 2
+  if [ "$page_size" -lt 1 ] || [ "$page_size" -gt 100 ]; then die "validation_error" "--page-size must be an integer from 1 to 100" 2; fi
   path="/agent-tasks?pageNum=$page&pageSize=$page_size"
   [ -z "$agent_id" ] || path="$path&agentId=$agent_id"
   [ -z "$statuses" ] || path="$path&statuses=$statuses"
@@ -1015,7 +1021,7 @@ cmd_tasks_retry() {
 
 cmd_tasks_approve() {
   task_id="${1:-}"; task_node_id="${2:-}"; confirm=""
-  [ -n "$task_id" ] && [ -n "$task_node_id" ] || die "validation_error" "usage: beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>" 2
+  if [ -z "$task_id" ] || [ -z "$task_node_id" ]; then die "validation_error" "usage: beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>" 2; fi
   shift 2
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1035,7 +1041,7 @@ cmd_tasks_approve() {
 
 cmd_tasks_reject() {
   task_id="${1:-}"; task_node_id="${2:-}"; confirm=""; reason=""
-  [ -n "$task_id" ] && [ -n "$task_node_id" ] || die "validation_error" "usage: beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason text]" 2
+  if [ -z "$task_id" ] || [ -z "$task_node_id" ]; then die "validation_error" "usage: beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason text]" 2; fi
   shift 2
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1095,7 +1101,7 @@ cmd_tasks_delete() {
 
 cmd_tasks_rate() {
   task_id="${1:-}"; rating="${2:-}"; feedback="${3:-}"
-  [ -n "$task_id" ] && [ -n "$rating" ] || die "validation_error" "usage: beam tasks rate <taskId> <up|down|positive|negative> [feedback]" 2
+  if [ -z "$task_id" ] || [ -z "$rating" ]; then die "validation_error" "usage: beam tasks rate <taskId> <up|down|positive|negative> [feedback]" 2; fi
   case "$rating" in up|positive) rating=positive ;; down|negative) rating=negative ;; *) die "validation_error" "rating must be up, down, positive, or negative" 2 ;; esac
   require_workspace
   rating_json="$(json_quote "$rating")"; body="{\"rating\":$rating_json}"
@@ -1107,7 +1113,8 @@ cmd_tasks_rate() {
 }
 
 cmd_tasks_cancel_wait() {
-  task_node_id="${1:-}"; agent_id="${2:-}"; confirm=""; [ -n "$task_node_id" ] && [ -n "$agent_id" ] || die "validation_error" "usage: beam tasks cancel-wait <taskNodeId> <agentId> --confirm <taskNodeId>" 2
+  task_node_id="${1:-}"; agent_id="${2:-}"; confirm=""
+  if [ -z "$task_node_id" ] || [ -z "$agent_id" ]; then die "validation_error" "usage: beam tasks cancel-wait <taskNodeId> <agentId> --confirm <taskNodeId>" 2; fi
   shift 2; while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for cancel-wait: $1" 2 ;; esac; done
   [ "$confirm" = "$task_node_id" ] || die "confirmation_required" "obtain explicit approval, then repeat the waiting node id with --confirm $task_node_id" 2
   require_workspace; set +e; resp="$(api_write POST "/agent-tasks/$task_node_id/cancel-wait?agentId=$agent_id" '')"; rc=$?; set -e
@@ -1116,7 +1123,8 @@ cmd_tasks_cancel_wait() {
 }
 
 cmd_tasks_update_tool() {
-  tool_name="${1:-}"; file="${2:-}"; [ -n "$tool_name" ] && [ -n "$file" ] || die "validation_error" "usage: beam tasks update-tool <toolFunctionName> <payloadFile>" 2
+  tool_name="${1:-}"; file="${2:-}"
+  if [ -z "$tool_name" ] || [ -z "$file" ]; then die "validation_error" "usage: beam tasks update-tool <toolFunctionName> <payloadFile>" 2; fi
   body="$(read_payload_file "$file")"; require_workspace; set +e; resp="$(api_write PATCH "/tool/$tool_name" "$body")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "tool update could not be confirmed" 5; fi; printf '%s\n' "$resp"
@@ -1151,7 +1159,7 @@ cmd_tasks_submit_input() {
 
 read_payload_file() {
   file="${1:-}"
-  [ -n "$file" ] && [ -f "$file" ] || die "validation_error" "JSON payload file not found: $file" 2
+  if [ -z "$file" ] || [ ! -f "$file" ]; then die "validation_error" "JSON payload file not found: $file" 2; fi
   payload="$(sed -n '1,$p' "$file")"
   [ -n "$payload" ] || die "validation_error" "JSON payload file is empty: $file" 2
   if command -v jq >/dev/null 2>&1; then
@@ -1278,7 +1286,7 @@ cmd_integrations_remove() {
 
 cmd_integrations_set_default() {
   provider_id="${1:-}"; integration_id="${2:-}"
-  [ -n "$provider_id" ] && [ -n "$integration_id" ] || die "validation_error" "usage: beam integrations set-default <providerId> <integrationId>" 2
+  if [ -z "$provider_id" ] || [ -z "$integration_id" ]; then die "validation_error" "usage: beam integrations set-default <providerId> <integrationId>" 2; fi
   p_json="$(json_quote "$provider_id")"; i_json="$(json_quote "$integration_id")"; body="{\"providerId\":$p_json,\"integrationId\":$i_json}"; require_workspace
   set +e; resp="$(api_write PATCH '/integration-provider/set-default' "$body")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
@@ -1380,7 +1388,8 @@ cmd_analytics_get() {
 }
 
 cmd_analytics_export() {
-  agent_id="${1:-}"; start="${2:-}"; end="${3:-}"; [ -n "$agent_id" ] && [ -n "$start" ] && [ -n "$end" ] || die "validation_error" "usage: beam analytics export <agentId> <startDate> <endDate>" 2
+  agent_id="${1:-}"; start="${2:-}"; end="${3:-}"
+  if [ -z "$agent_id" ] || [ -z "$start" ] || [ -z "$end" ]; then die "validation_error" "usage: beam analytics export <agentId> <startDate> <endDate>" 2; fi
   a="$(json_quote "$agent_id")"; s="$(json_quote "$start")"; e="$(json_quote "$end")"; body="{\"agentId\":$a,\"startDate\":$s,\"endDate\":$e}"; require_workspace
   set +e; resp="$(api_write POST '/agent-tasks/analytics/export' "$body")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
@@ -1434,7 +1443,9 @@ cmd_views_delete() {
 }
 
 cmd_views_delete_column() {
-  view_id="${1:-}"; column_id="${2:-}"; confirm=""; [ -n "$view_id" ] && [ -n "$column_id" ] || die "validation_error" "usage: beam views delete-column <viewId> <columnId> --confirm <columnId>" 2; shift 2
+  view_id="${1:-}"; column_id="${2:-}"; confirm=""
+  if [ -z "$view_id" ] || [ -z "$column_id" ]; then die "validation_error" "usage: beam views delete-column <viewId> <columnId> --confirm <columnId>" 2; fi
+  shift 2
   while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for column deletion: $1" 2 ;; esac; done
   [ "$confirm" = "$column_id" ] || die "confirmation_required" "obtain explicit approval, then repeat the column id with --confirm $column_id" 2
   require_workspace; set +e; resp="$(api_write DELETE "/agent-views/$view_id/columns/$column_id" '')"; rc=$?; set -e
@@ -1443,7 +1454,8 @@ cmd_views_delete_column() {
 }
 
 cmd_views_linked_records() {
-  view_id="${1:-}"; column_id="${2:-}"; record_id="${3:-}"; [ -n "$view_id" ] && [ -n "$column_id" ] && [ -n "$record_id" ] || die "validation_error" "usage: beam views linked-records <viewId> <columnId> <numericRecordId>" 2
+  view_id="${1:-}"; column_id="${2:-}"; record_id="${3:-}"
+  if [ -z "$view_id" ] || [ -z "$column_id" ] || [ -z "$record_id" ]; then die "validation_error" "usage: beam views linked-records <viewId> <columnId> <numericRecordId>" 2; fi
   cmd_agents_related_get "linked records" "/agent-views/$view_id/columns/$column_id/links/$record_id?pageNum=1&pageSize=50"
 }
 
@@ -1455,7 +1467,9 @@ cmd_learning_issues() {
 }
 
 cmd_learning_issue() {
-  agent_id="${1:-}"; issue_id="${2:-}"; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning issue <agentId> <issueId>" 2; require_workspace
+  agent_id="${1:-}"; issue_id="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$issue_id" ]; then die "validation_error" "usage: beam learning issue <agentId> <issueId>" 2; fi
+  require_workspace
   set +e; resp="$(api_read "/tool/optimize/issues/$issue_id?agentId=$agent_id")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "permission_denied" "Learning Hub access was denied for this workspace; verify its plan or permissions" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "Learning Hub issue lookup failed" 5; fi; printf '%s\n' "$resp"
@@ -1469,12 +1483,14 @@ cmd_learning_job() {
 }
 
 cmd_learning_feedbacks() {
-  agent_id="${1:-}"; issue_id="${2:-}"; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning feedbacks <agentId> <issueId>" 2
+  agent_id="${1:-}"; issue_id="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$issue_id" ]; then die "validation_error" "usage: beam learning feedbacks <agentId> <issueId>" 2; fi
   cmd_agents_related_get "Learning Hub feedbacks" "/tool/optimize/issues/$issue_id/pending?agentId=$agent_id&page=1&pageSize=50"
 }
 
 cmd_learning_issue_jobs() {
-  agent_id="${1:-}"; issue_id="${2:-}"; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning issue-jobs <agentId> <issueId>" 2
+  agent_id="${1:-}"; issue_id="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$issue_id" ]; then die "validation_error" "usage: beam learning issue-jobs <agentId> <issueId>" 2; fi
   cmd_agents_related_get "Learning Hub issue jobs" "/tool/optimize/issues/$issue_id/jobs?agentId=$agent_id"
 }
 
@@ -1491,7 +1507,8 @@ cmd_learning_tools() {
 }
 
 cmd_learning_tool() {
-  agent_id="${1:-}"; tool_name="${2:-}"; [ -n "$agent_id" ] && [ -n "$tool_name" ] || die "validation_error" "usage: beam learning tool <agentId> <toolFunctionName>" 2
+  agent_id="${1:-}"; tool_name="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$tool_name" ]; then die "validation_error" "usage: beam learning tool <agentId> <toolFunctionName>" 2; fi
   safe_query_value "$tool_name" || die "validation_error" "invalid tool function name" 2
   cmd_agents_related_get "Learning Hub tool detail" "/tool/optimize/agents/$agent_id/tools/$tool_name/detail"
 }
@@ -1517,7 +1534,9 @@ cmd_learning_confirmed_payload_write() {
 }
 
 cmd_learning_set_config() {
-  agent_id="${1:-}"; file="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$file" ] || die "validation_error" "usage: beam learning set-config <agentId> <payloadFile> --confirm <agentId>" 2; shift 2
+  agent_id="${1:-}"; file="${2:-}"; confirm=""
+  if [ -z "$agent_id" ] || [ -z "$file" ]; then die "validation_error" "usage: beam learning set-config <agentId> <payloadFile> --confirm <agentId>" 2; fi
+  shift 2
   while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for tuner config: $1" 2 ;; esac; done
   [ "$confirm" = "$agent_id" ] || die "confirmation_required" "show the proposed tuner configuration, obtain approval, then repeat the agent id with --confirm $agent_id" 2
   cmd_learning_payload_write POST "/tool/optimize/agents/$agent_id/config" "$file"
@@ -1531,7 +1550,9 @@ learning_identity_body() {
 }
 
 cmd_learning_discard() {
-  agent_id="${1:-}"; issue_id="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning discard <agentId> <issueId> --confirm <issueId>" 2; shift 2
+  agent_id="${1:-}"; issue_id="${2:-}"; confirm=""
+  if [ -z "$agent_id" ] || [ -z "$issue_id" ]; then die "validation_error" "usage: beam learning discard <agentId> <issueId> --confirm <issueId>" 2; fi
+  shift 2
   while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for issue discard: $1" 2 ;; esac; done
   [ "$confirm" = "$issue_id" ] || die "confirmation_required" "discarding archives the issue. Obtain approval, then repeat the issue id with --confirm $issue_id" 2
   body="$(learning_identity_body)"; set +e; resp="$(api_write POST "/tool/optimize/issues/$issue_id/discard?agentId=$agent_id" "$body")"; rc=$?; set -e
@@ -1574,7 +1595,9 @@ extract_user_id() {
 }
 
 cmd_learning_optimize() {
-  agent_id="${1:-}"; issue_id="${2:-}"; confirm=""; [ -n "$agent_id" ] && [ -n "$issue_id" ] || die "validation_error" "usage: beam learning optimize <agentId> <issueId> --confirm <issueId>" 2; shift 2
+  agent_id="${1:-}"; issue_id="${2:-}"; confirm=""
+  if [ -z "$agent_id" ] || [ -z "$issue_id" ]; then die "validation_error" "usage: beam learning optimize <agentId> <issueId> --confirm <issueId>" 2; fi
+  shift 2
   while [ $# -gt 0 ]; do case "$1" in --confirm) confirm="${2:-}"; shift 2 ;; *) die "validation_error" "unknown flag for Learning Hub optimization: $1" 2 ;; esac; done
   [ "$confirm" = "$issue_id" ] || die "confirmation_required" "this consumes tuner credits. Obtain explicit approval, then repeat the issue id with --confirm $issue_id" 2
   body="$(learning_identity_body)"
@@ -2100,7 +2123,8 @@ main() {
           view_id="${1:-}"; file="${2:-}"; [ -n "$view_id" ] || die "validation_error" "usage: beam views add-column <viewId> <payloadFile>" 2
           cmd_views_payload_write POST "/agent-views/$view_id/columns" "$file" ;;
         update-column)
-          view_id="${1:-}"; column_id="${2:-}"; file="${3:-}"; [ -n "$view_id" ] && [ -n "$column_id" ] || die "validation_error" "usage: beam views update-column <viewId> <columnId> <fullPayloadFile>" 2
+          view_id="${1:-}"; column_id="${2:-}"; file="${3:-}"
+          if [ -z "$view_id" ] || [ -z "$column_id" ]; then die "validation_error" "usage: beam views update-column <viewId> <columnId> <fullPayloadFile>" 2; fi
           cmd_views_payload_write PATCH "/agent-views/$view_id/columns/$column_id" "$file" ;;
         delete-column) cmd_views_delete_column "$@" ;;
         export) cmd_views_export "$@" ;;
