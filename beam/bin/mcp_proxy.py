@@ -53,8 +53,7 @@ SETUP_HINT = (
     "Beam is not signed in yet, so no Beam tools are available.\n\n"
     "To finish setup:\n"
     "  1. Create an API key: app.beam.ai -> Personal settings -> API Keys\n"
-    "  2. Run in a terminal:  beam login\n"
-    "  3. Fully quit and reopen this agent (MCP reads the key only at startup)\n\n"
+    "  2. Run in a terminal:  beam login\n\n"
     "Then ask 'list my Beam agents'."
 )
 

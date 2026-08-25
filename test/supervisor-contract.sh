@@ -43,7 +43,7 @@ ok "every registered operation has a ready fallback"
 printf '\n=== CLI safety and discovery ===\n'
 sh -n "$BEAM" || fail "CLI shell syntax"
 help="$(sh "$BEAM" --help)"
-for command in 'beam mcp check' 'beam tasks create' 'beam inbox' 'beam integrations' 'beam templates' 'beam analytics' 'beam views' 'beam learning'; do
+for command in 'beam mcp check' 'beam workspace create' 'beam tasks create' 'beam inbox' 'beam integrations' 'beam templates' 'beam analytics' 'beam views' 'beam learning'; do
   printf '%s' "$help" | grep -q "$command" || fail "help missing $command"
 done
 ok "supervisor fallback surfaces are discoverable"
@@ -93,6 +93,11 @@ elif [ "${BEAM_TEST_AUTH_MODE:-}" = "bearer-only" ] && [ "$api_key" = true ]; th
 elif printf '%s' "$url" | grep -q '/v2/user/me'; then
   printf '%s' '{"id":"user-1","email":"user@example.test","name":"Test User","workspaces":[{"id":"workspace-1","name":"Test Workspace"}],"memberships":[{"permissions":["large","raw","payload"]}]}' > "$out"
   printf '200'
+elif printf '%s' "$url" | grep -q '/v2/workspace'; then
+  [ -z "${BEAM_TEST_CAPTURE:-}" ] || printf '%s' "$body" > "$BEAM_TEST_CAPTURE"
+  [ -z "${BEAM_TEST_CAPTURE_URL:-}" ] || printf '%s' "$url" > "$BEAM_TEST_CAPTURE_URL"
+  printf '%s' '{"id":"workspace-new","name":"New Workspace","domain":"example.test","role":"owner","createdAt":"2026-08-25T00:00:00.000Z"}' > "$out"
+  printf '201'
 elif printf '%s' "$url" | grep -q '/agent/agent-1'; then
   printf '%s' '{"id":"agent-1","createdAt":"2026-01-02T03:04:05.000Z"}' > "$out"
   printf '200'
@@ -118,6 +123,16 @@ grep -q '"isDraftTask":false' "$tmp/body" || fail "live task fallback selected w
 env $fallback_env sh "$BEAM" tasks create agent-1 'test the work' --draft >/dev/null || fail "draft task fallback failed"
 grep -q '"isDraftTask":true' "$tmp/body" || fail "draft task fallback selected wrong graph mode"
 ok "task fallback preserves live versus draft mode"
+
+workspace_create="$(env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" workspace create 'New Workspace' --domain example.test --icon-src https://example.test/icon.png)" || fail "workspace create fallback failed"
+printf '%s' "$workspace_create" | grep -q '"id":"workspace-new"' || fail "workspace creation response was not returned"
+grep -q '/v2/workspace' "$tmp/url" || fail "workspace creation did not use the public route"
+grep -q '"name":"New Workspace"' "$tmp/body" || fail "workspace creation omitted the name"
+grep -q '"domain":"example.test"' "$tmp/body" || fail "workspace creation omitted the domain"
+grep -q '"iconSrc":"https://example.test/icon.png"' "$tmp/body" || fail "workspace creation omitted the icon URL"
+if env $fallback_env sh "$BEAM" workspace create '1234567890123456789012345678901' >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -eq 2 ] || fail "overlong workspace names should exit 2"
+ok "workspace creation uses the published account-scoped API contract"
 
 printf '{"name":"Support Runs","agentId":"agent-1"}\n' > "$tmp/view.json"
 env $fallback_env sh "$BEAM" views create "$tmp/view.json" >/dev/null || fail "view create fallback failed"

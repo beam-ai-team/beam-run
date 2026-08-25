@@ -388,6 +388,15 @@ api_write() {
   fi
 }
 
+api_unscoped_write() {
+  # $1 = method ; $2 = path ; $3 = body ('' for none). Workspace creation is
+  # account-scoped, so it must not inherit the caller's current-workspace-id.
+  warn_if_loopback_was_ignored
+  method="$1"; path="$2"; body="${3:-}"
+  key="$(read_key)" || return 3
+  _http_send "$method" "$API_BASE$path" "$body" -H "x-api-key: $key"
+}
+
 api_upload() {
   # $1 path, $2 multipart field name, $3 local file. Single attempt: uploads are writes.
   warn_if_loopback_was_ignored
@@ -501,6 +510,8 @@ Usage:
   beam whoami [--raw]          compact identity summary (use --raw only when needed)
   beam workspace [ID]        show/set current workspace
   beam workspace list [q]    list/search your workspaces (filter by name or id)
+  beam workspace create <name> [--domain domain] [--icon-src url]
+                              create a workspace; it does not change the current workspace
   beam agents list           list agents in the current workspace
   beam agents get <id>       inspect one agent
   beam agents deploy <spec>  build/update an agent from a spec (draft; --publish to go live)
@@ -601,7 +612,7 @@ cmd_login() {
   printf 'Signed in ✅\n' >&2
   if [ "$reg" -eq 0 ]; then printf 'Beam connection registered ✅\n' >&2; fi
   print_workspace_resolution
-  printf '\nNext: fully restart your agent, then ask "list my Beam agents".\n' >&2
+  printf '\nNext: ask "list my Beam agents".\n' >&2
 }
 
 cmd_logout() {
@@ -648,6 +659,11 @@ cmd_whoami() {
 }
 
 cmd_workspace() {
+  if [ "${1:-}" = "create" ]; then
+    shift
+    cmd_workspace_create "$@"
+    return
+  fi
   if [ "${1:-}" = "list" ]; then
     query="${2:-}"
     set +e; resp="$(api_read /v2/user/me)"; rc=$?; set -e
@@ -688,6 +704,48 @@ cmd_workspace() {
   fi
   write_creds "$key" "$1"
   printf '{"ok":true,"workspaceId":"%s"}\n' "$1"
+}
+
+cmd_workspace_create() {
+  case "${1:-}" in
+    -h|--help)
+      printf 'Usage: beam workspace create <name> [--domain domain] [--icon-src url]\n'
+      printf 'Creates a new workspace without changing the current workspace.\n'
+      return 0 ;;
+  esac
+  name="${1:-}"
+  [ -n "$name" ] || die "validation_error" "usage: beam workspace create <name> [--domain domain] [--icon-src url]" 2
+  shift
+  domain=""; icon_src=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --domain)
+        [ -n "${2:-}" ] || die "validation_error" "--domain requires a value" 2
+        domain="$2"; shift 2 ;;
+      --icon-src)
+        [ -n "${2:-}" ] || die "validation_error" "--icon-src requires a value" 2
+        icon_src="$2"; shift 2 ;;
+      -h|--help)
+        printf 'Usage: beam workspace create <name> [--domain domain] [--icon-src url]\n'
+        printf 'Creates a new workspace without changing the current workspace.\n'
+        return 0 ;;
+      *) die "validation_error" "unknown flag for beam workspace create: $1" 2 ;;
+    esac
+  done
+  if [ "${#name}" -gt 30 ]; then
+    die "validation_error" "workspace name must be 30 characters or fewer" 2
+  fi
+
+  name_json="$(json_quote "$name")"
+  body="{\"name\":$name_json"
+  if [ -n "$domain" ]; then domain_json="$(json_quote "$domain")"; body="$body,\"domain\":$domain_json"; fi
+  if [ -n "$icon_src" ]; then icon_src_json="$(json_quote "$icon_src")"; body="$body,\"iconSrc\":$icon_src_json"; fi
+  body="$body}"
+
+  set +e; resp="$(api_unscoped_write POST /v2/workspace "$body")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in or key rejected — run beam login first" 3; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "workspace creation result is unknown; do not retry automatically. Check with: beam workspace list <name>" 5; fi
+  printf '%s\n' "$resp"
 }
 
 cmd_agents_list() {
@@ -1973,32 +2031,28 @@ cmd_setup() {
       cmd_login
       return 0
     fi
-    printf '🚀 Beam is installed — 2 quick steps to finish.\n\n'
+    printf '🚀 Beam is installed — one quick step to finish.\n\n'
     printf '  ✅ Plugin installed\n'
     path_line
     printf '  ⬜ Sign in\n'
-    printf '  ⬜ Restart your agent\n\n'
-    printf 'Next — 2 steps:\n'
-    printf '  1. 🔑 Create a key at app.beam.ai → Personal settings → API Keys, then run: beam login\n'
-    printf '  2. 🔄 Restart your agent, then ask "list my Beam agents"\n'
+    printf '\nNext:\n'
+    printf '  🔑 Create a key at app.beam.ai → Personal settings → API Keys, then run: beam login\n'
     return 3
   fi
 
-  if [ "$registered" = "1" ]; then printf '🎉 Beam is connected — 1 step left!\n\n'
-  else printf '🚀 Almost there — 2 steps left.\n\n'; fi
+  if [ "$registered" = "1" ]; then printf '🎉 Beam is connected!\n\n'
+  else printf '🚀 Almost there — one step left.\n\n'; fi
   printf '  ✅ Plugin installed\n'
   path_line
   if [ -n "$ws" ]; then printf '  ✅ Signed in (workspace %s)\n' "$ws"; else printf '  ✅ Signed in\n'; fi
   if [ "$registered" = "1" ]; then
     printf '  ✅ Beam connection registered\n'
-    printf '  ⬜ Restart your agent\n\n'
-    printf 'Last step: fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
+    printf '\nReady: ask "list my Beam agents" 🚀\n'
   else
     printf '  ⬜ Register the Beam connection\n'
-    printf '  ⬜ Restart your agent\n\n'
-    printf 'Last steps:\n'
-    printf '  1. Add a remote MCP server in your agent:  name=beam  type=http  url=%s  header="Authorization: Bearer <your key>"\n' "$MCP_URL"
-    printf '  2. Fully quit and reopen your agent, then ask "list my Beam agents" 🚀\n'
+    printf '\nLast step:\n'
+    printf '  Add a remote MCP server in your agent:  name=beam  type=http  url=%s  header="Authorization: Bearer <your key>"\n' "$MCP_URL"
+    printf '  Then ask "list my Beam agents" 🚀\n'
   fi
 }
 

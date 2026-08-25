@@ -1,20 +1,19 @@
 ---
 name: setup
-description: Beam setup — a guided, near-zero-prompt install. Run when the user wants to set up or connect Beam, when `beam` is not found, when `beam whoami`/`beam doctor` fails, or when Beam MCP tools error on auth or don't appear. You drive install + PATH + MCP registration; the user only approves, signs in once, and restarts once.
+description: Beam setup — a guided, near-zero-prompt install. Run when the user wants to set up or connect Beam, when `beam` is not found, when `beam whoami`/`beam doctor` fails, or when Beam MCP tools error on auth or don't appear. You drive install + PATH + MCP registration; the user only approves and signs in once.
 ---
 
 # Beam setup (guided)
 
-Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user does only three things: (1) gives clear approval to start, (2) enters their API key in their own terminal, (3) restarts once. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
+Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user does only two things: (1) gives clear approval to start and (2) enters their API key in their own terminal. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
 
 **Two rules that must hold:**
 - **Never** ask the user to paste an API key into chat or pass it as `--api-key <key>`. They enter it in `beam login`'s masked terminal prompt.
-- MCP reads the key only at **startup**, so a full restart is required. Don't skip it or claim success without it.
 
 ## Flow
 
 ### 1 · Offer (one approval)
-> "I'll connect Beam to your agent — about a minute. I'll handle install, PATH, and wiring; you just sign in and restart once. Ready?"
+> "I'll connect Beam to your agent — about a minute. I'll handle install, PATH, and wiring; you just sign in once. Ready?"
 
 Wait for clear natural-language approval.
 
@@ -56,13 +55,8 @@ beam workspace list <search>   # e.g. beam workspace list acme
 beam workspace <id>
 ```
 
-### 4 · Restart (the user's one action)
-> "Last step — fully quit and reopen your agent so Beam loads."
-
-A reload/soft-restart isn't enough.
-
-### 5 · Confirm
-After restart, call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
+### 4 · Confirm
+Call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
 
 ## Presenting it — make it feel like onboarding
 **Rule: `beam setup` already prints the onboarding message — a success line, an emoji checklist, and next steps. Show *that* to the user. Never rewrite it into a "what I did" table, a build/status report, or a summary of the steps you performed.** Report the user's remaining steps, not your own actions.
@@ -73,14 +67,13 @@ Render it as a warm chat message with **emoji** — never a raw diagnostic dump.
 ✅ Plugin installed
 ✅ beam on PATH
 ⬜ Sign in
-⬜ Restart your agent
 
 **Next steps:**
 🔑 1. Create a key at [app.beam.ai → Personal settings → API Keys](https://app.beam.ai), then run:
 ```bash
 beam login
 ```
-🔄 2. Restart your agent, then ask "list my Beam agents"
+🚀 2. Ask "list my Beam agents"
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
 
