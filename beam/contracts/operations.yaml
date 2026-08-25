@@ -16,6 +16,15 @@ operations:
     mcp: getCurrentUser
     cli: beam whoami
     status: ready
+  workspace.create:
+    specialist: general-workspace
+    safety: external-effect
+    workspaceRequired: false
+    confirmation: explicit-workspace-create-intent
+    mcp: null
+    cli: beam workspace create <name> [--domain domain] [--icon-src url]
+    postRead: user.current
+    status: ready
   agent.list:
     specialist: general-workspace
     safety: read

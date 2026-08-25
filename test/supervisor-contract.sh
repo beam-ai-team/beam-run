@@ -43,7 +43,7 @@ ok "every registered operation has a ready fallback"
 printf '\n=== CLI safety and discovery ===\n'
 sh -n "$BEAM" || fail "CLI shell syntax"
 help="$(sh "$BEAM" --help)"
-for command in 'beam mcp check' 'beam tasks create' 'beam inbox' 'beam integrations' 'beam templates' 'beam analytics' 'beam views' 'beam learning'; do
+for command in 'beam mcp check' 'beam workspace create' 'beam tasks create' 'beam inbox' 'beam integrations' 'beam templates' 'beam analytics' 'beam views' 'beam learning'; do
   printf '%s' "$help" | grep -q "$command" || fail "help missing $command"
 done
 ok "supervisor fallback surfaces are discoverable"
@@ -91,8 +91,17 @@ elif [ "${BEAM_TEST_AUTH_MODE:-}" = "bearer-only" ] && [ "$api_key" = true ]; th
   printf '%s' '{"error":"api key rejected for this read"}' > "$out"
   printf '401'
 elif printf '%s' "$url" | grep -q '/v2/user/me'; then
-  printf '%s' '{"id":"user-1","email":"user@example.test","name":"Test User","workspaces":[{"id":"workspace-1","name":"Test Workspace"}],"memberships":[{"permissions":["large","raw","payload"]}]}' > "$out"
+  if [ "${BEAM_TEST_WORKSPACE_MODE:-}" = "multiple" ]; then
+    printf '%s' '{"id":"user-1","email":"user@example.test","name":"Test User","workspaces":[{"id":"workspace-1","name":"Test Workspace"},{"id":"workspace-2","name":"Second Workspace"}],"memberships":[{"permissions":["large","raw","payload"]}]}' > "$out"
+  else
+    printf '%s' '{"id":"user-1","email":"user@example.test","name":"Test User","workspaces":[{"id":"workspace-1","name":"Test Workspace"}],"memberships":[{"permissions":["large","raw","payload"]}]}' > "$out"
+  fi
   printf '200'
+elif printf '%s' "$url" | grep -q '/v2/workspace'; then
+  [ -z "${BEAM_TEST_CAPTURE:-}" ] || printf '%s' "$body" > "$BEAM_TEST_CAPTURE"
+  [ -z "${BEAM_TEST_CAPTURE_URL:-}" ] || printf '%s' "$url" > "$BEAM_TEST_CAPTURE_URL"
+  printf '%s' '{"id":"workspace-new","name":"New Workspace","domain":"example.test","role":"owner","createdAt":"2026-08-25T00:00:00.000Z"}' > "$out"
+  printf '201'
 elif printf '%s' "$url" | grep -q '/agent/agent-1'; then
   printf '%s' '{"id":"agent-1","createdAt":"2026-01-02T03:04:05.000Z"}' > "$out"
   printf '200'
@@ -113,11 +122,30 @@ if env $fallback_env sh "$BEAM" mcp check --tool absent_tool >/dev/null 2>&1; th
 [ "$rc" -eq 2 ] || fail "missing MCP tool should select fallback with exit 2"
 ok "MCP health distinguishes healthy, available, and missing-tool states"
 
+if single_workspace_login="$(env $fallback_env BEAM_API_KEY=sk-test sh "$BEAM" login </dev/null 2>&1)"; then :; else fail "single-workspace login failed"; fi
+printf '%s' "$single_workspace_login" | grep -q '"workspaceId":"workspace-1"' || fail "sole workspace was not selected"
+printf '%s' "$single_workspace_login" | grep -q 'Workspace selected: Test Workspace' || fail "sole workspace selection was not named"
+multiple_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/multiple-config" BEAM_API_KEY=sk-test BEAM_TEST_WORKSPACE_MODE=multiple sh "$BEAM" login </dev/null 2>&1)" || fail "multiple-workspace login failed"
+printf '%s' "$multiple_workspace_login" | grep -q '"workspaceId":null,"workspaceCount":2' || fail "multiple workspaces should remain unselected"
+printf '%s' "$multiple_workspace_login" | grep -q 'You have 2 available workspaces' || fail "multiple-workspace prompt omitted the workspace count"
+printf '%s' "$multiple_workspace_login" | grep -q 'short, searchable list' || fail "multiple-workspace prompt omitted list guidance"
+ok "onboarding selects a sole workspace and prompts before choosing among many"
+
 env $fallback_env sh "$BEAM" tasks create agent-1 'do the work' >/dev/null || fail "live task fallback failed"
 grep -q '"isDraftTask":false' "$tmp/body" || fail "live task fallback selected wrong graph mode"
 env $fallback_env sh "$BEAM" tasks create agent-1 'test the work' --draft >/dev/null || fail "draft task fallback failed"
 grep -q '"isDraftTask":true' "$tmp/body" || fail "draft task fallback selected wrong graph mode"
 ok "task fallback preserves live versus draft mode"
+
+workspace_create="$(env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" workspace create 'New Workspace' --domain example.test --icon-src https://example.test/icon.png)" || fail "workspace create fallback failed"
+printf '%s' "$workspace_create" | grep -q '"id":"workspace-new"' || fail "workspace creation response was not returned"
+grep -q '/v2/workspace' "$tmp/url" || fail "workspace creation did not use the public route"
+grep -q '"name":"New Workspace"' "$tmp/body" || fail "workspace creation omitted the name"
+grep -q '"domain":"example.test"' "$tmp/body" || fail "workspace creation omitted the domain"
+grep -q '"iconSrc":"https://example.test/icon.png"' "$tmp/body" || fail "workspace creation omitted the icon URL"
+if env $fallback_env sh "$BEAM" workspace create '1234567890123456789012345678901' >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -eq 2 ] || fail "overlong workspace names should exit 2"
+ok "workspace creation uses the published account-scoped API contract"
 
 printf '{"name":"Support Runs","agentId":"agent-1"}\n' > "$tmp/view.json"
 env $fallback_env sh "$BEAM" views create "$tmp/view.json" >/dev/null || fail "view create fallback failed"
