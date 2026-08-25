@@ -91,7 +91,11 @@ elif [ "${BEAM_TEST_AUTH_MODE:-}" = "bearer-only" ] && [ "$api_key" = true ]; th
   printf '%s' '{"error":"api key rejected for this read"}' > "$out"
   printf '401'
 elif printf '%s' "$url" | grep -q '/v2/user/me'; then
-  printf '%s' '{"id":"user-1","email":"user@example.test","name":"Test User","workspaces":[{"id":"workspace-1","name":"Test Workspace"}],"memberships":[{"permissions":["large","raw","payload"]}]}' > "$out"
+  if [ "${BEAM_TEST_WORKSPACE_MODE:-}" = "multiple" ]; then
+    printf '%s' '{"id":"user-1","email":"user@example.test","name":"Test User","workspaces":[{"id":"workspace-1","name":"Test Workspace"},{"id":"workspace-2","name":"Second Workspace"}],"memberships":[{"permissions":["large","raw","payload"]}]}' > "$out"
+  else
+    printf '%s' '{"id":"user-1","email":"user@example.test","name":"Test User","workspaces":[{"id":"workspace-1","name":"Test Workspace"}],"memberships":[{"permissions":["large","raw","payload"]}]}' > "$out"
+  fi
   printf '200'
 elif printf '%s' "$url" | grep -q '/v2/workspace'; then
   [ -z "${BEAM_TEST_CAPTURE:-}" ] || printf '%s' "$body" > "$BEAM_TEST_CAPTURE"
@@ -117,6 +121,15 @@ printf '%s' "$mcp" | grep -q '"available":true' || fail "MCP tool availability m
 if env $fallback_env sh "$BEAM" mcp check --tool absent_tool >/dev/null 2>&1; then rc=0; else rc=$?; fi
 [ "$rc" -eq 2 ] || fail "missing MCP tool should select fallback with exit 2"
 ok "MCP health distinguishes healthy, available, and missing-tool states"
+
+if single_workspace_login="$(env $fallback_env BEAM_API_KEY=sk-test sh "$BEAM" login </dev/null 2>&1)"; then :; else fail "single-workspace login failed"; fi
+printf '%s' "$single_workspace_login" | grep -q '"workspaceId":"workspace-1"' || fail "sole workspace was not selected"
+printf '%s' "$single_workspace_login" | grep -q 'Workspace selected: Test Workspace' || fail "sole workspace selection was not named"
+multiple_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/multiple-config" BEAM_API_KEY=sk-test BEAM_TEST_WORKSPACE_MODE=multiple sh "$BEAM" login </dev/null 2>&1)" || fail "multiple-workspace login failed"
+printf '%s' "$multiple_workspace_login" | grep -q '"workspaceId":null,"workspaceCount":2' || fail "multiple workspaces should remain unselected"
+printf '%s' "$multiple_workspace_login" | grep -q 'You have 2 available workspaces' || fail "multiple-workspace prompt omitted the workspace count"
+printf '%s' "$multiple_workspace_login" | grep -q 'short, searchable list' || fail "multiple-workspace prompt omitted list guidance"
+ok "onboarding selects a sole workspace and prompts before choosing among many"
 
 env $fallback_env sh "$BEAM" tasks create agent-1 'do the work' >/dev/null || fail "live task fallback failed"
 grep -q '"isDraftTask":false' "$tmp/body" || fail "live task fallback selected wrong graph mode"

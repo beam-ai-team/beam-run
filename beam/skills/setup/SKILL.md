@@ -5,7 +5,7 @@ description: Beam setup — a guided, near-zero-prompt install. Run when the use
 
 # Beam setup (guided)
 
-Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user does only two things: (1) gives clear approval to start and (2) enters their API key in their own terminal. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
+Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, enters their API key in their own terminal, and chooses a workspace only when their account has more than one. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
 
 **Two rules that must hold:**
 - **Never** ask the user to paste an API key into chat or pass it as `--api-key <key>`. They enter it in `beam login`'s masked terminal prompt.
@@ -46,7 +46,9 @@ Workspace choice happens in the coding-agent conversation, not the browser. Reso
 1. Use an explicit workspace ID/name or Beam URL in the user's request.
 2. Otherwise use a still-accessible default returned by `beam workspace`.
 3. If the account has exactly one workspace, `beam login` remembers it automatically.
-4. If multiple workspaces remain possible, ask the user once, then remember the answer with `beam workspace <id>`.
+4. If multiple workspaces remain possible, say: "You have **N** available workspaces. Which one would you like to use? I can show a short, searchable list." Wait for their answer, then remember the chosen workspace with `beam workspace <id>`.
+
+Do not list every workspace automatically: accounts can have thousands. If the user asks to see them, use `beam workspace list <search>` to narrow by name or ID; the CLI shows a bounded set of matches.
 
 If an agent or resource is missing, do not search or switch silently. Name the current workspace and ask whether they want to switch:
 
@@ -56,7 +58,7 @@ beam workspace <id>
 ```
 
 ### 4 · Confirm
-Call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
+Once a workspace is selected, call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
 
 ## Presenting it — make it feel like onboarding
 **Rule: `beam setup` already prints the onboarding message — a success line, an emoji checklist, and next steps. Show *that* to the user. Never rewrite it into a "what I did" table, a build/status report, or a summary of the steps you performed.** Report the user's remaining steps, not your own actions.
@@ -73,7 +75,7 @@ Render it as a warm chat message with **emoji** — never a raw diagnostic dump.
 ```bash
 beam login
 ```
-🚀 2. Ask "list my Beam agents"
+🚀 2. If Beam selected a workspace automatically, ask "list my Beam agents." If you have multiple workspaces, choose one first — Beam can show a short, searchable list.
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
 

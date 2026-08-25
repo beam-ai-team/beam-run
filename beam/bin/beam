@@ -197,14 +197,13 @@ print_workspace_resolution() {
   fi
   if [ -n "$resolved_workspace" ]; then
     if [ -n "$resolved_workspace_name" ]; then
-      printf 'Default workspace: %s ✅\n' "$resolved_workspace_name" >&2
+      printf 'Workspace selected: %s ✅\n' "$resolved_workspace_name" >&2
     else
-      printf 'Default workspace: %s ✅\n' "$resolved_workspace" >&2
+      printf 'Workspace selected: %s ✅\n' "$resolved_workspace" >&2
     fi
   elif [ "$workspace_count" -gt 1 ]; then
-    printf '\nWorkspace will be chosen when it is needed.\n' >&2
-    printf 'Your coding agent should ask only if your request does not make the workspace clear, then remember the answer.\n' >&2
-    printf 'Manual override: beam workspace list <search>  then  beam workspace <id>\n' >&2
+    printf '\nYou have %s available workspaces. Which one would you like to use?\n' "$workspace_count" >&2
+    printf 'I can show a short, searchable list if that helps.\n' >&2
   elif [ "$workspace_count" -eq 0 ]; then
     printf '\nNo workspace is available yet. Create or join one in Beam, then run: beam workspace list\n' >&2
   fi
@@ -607,7 +606,7 @@ cmd_login() {
     "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)" "$workspace_count"
 
   # Wire the MCP connection now that the key is stored (all supported hosts).
-  set +e; cmd_register >/dev/null 2>&1; reg=$?; set -e
+  if cmd_register >/dev/null 2>&1; then reg=0; else reg=$?; fi
 
   printf 'Signed in ✅\n' >&2
   if [ "$reg" -eq 0 ]; then printf 'Beam connection registered ✅\n' >&2; fi
@@ -2008,10 +2007,21 @@ cmd_setup() {
   if add_to_path_rc >/dev/null 2>&1; then path_added=1; else path_added=0; fi
   emit_event path_ok
 
-  # Signed in? (verify the stored key actually works)
+  # Signed in? Verify the key, then resolve the workspace every time onboarding
+  # runs. A sole workspace is selected automatically; multiple workspaces are
+  # deliberately left unset so the user can choose.
   key="$(read_key 2>/dev/null || true)"
-  signed=0; ws=""
-  if [ -n "$key" ] && verify_key "$key" >/dev/null 2>&1; then signed=1; ws="$(read_workspace 2>/dev/null || true)"; fi
+  signed=0; ws=""; ws_name=""; workspace_count=0
+  if [ -n "$key" ] && profile="$(verify_key "$key")"; then
+    signed=1
+    previous_workspace="$(read_workspace 2>/dev/null || true)"
+    resolve_workspace_from_profile "$profile" "$previous_workspace" 0
+    if [ "$previous_workspace" != "$resolved_workspace" ]; then
+      write_creds "$key" "$resolved_workspace"
+    fi
+    ws="$resolved_workspace"
+    ws_name="$resolved_workspace_name"
+  fi
 
   # Register the MCP server where we safely can (needs signed-in + claude CLI).
   registered=0
@@ -2044,10 +2054,21 @@ cmd_setup() {
   else printf '🚀 Almost there — one step left.\n\n'; fi
   printf '  ✅ Plugin installed\n'
   path_line
-  if [ -n "$ws" ]; then printf '  ✅ Signed in (workspace %s)\n' "$ws"; else printf '  ✅ Signed in\n'; fi
+  printf '  ✅ Signed in\n'
+  if [ -n "$ws" ]; then
+    if [ -n "$ws_name" ]; then printf '  ✅ Workspace selected: %s\n' "$ws_name"; else printf '  ✅ Workspace selected: %s\n' "$ws"; fi
+  elif [ "$workspace_count" -gt 1 ]; then
+    printf '  ⬜ Choose a workspace (%s available)\n' "$workspace_count"
+  fi
   if [ "$registered" = "1" ]; then
     printf '  ✅ Beam connection registered\n'
-    printf '\nReady: ask "list my Beam agents" 🚀\n'
+    if [ -n "$ws" ]; then
+      printf '\nReady:\n'
+      printf '  • List my existing agents\n'
+      printf '  • Tell me what you would like to automate\n'
+    else
+      printf '\nWhich workspace would you like to use? I can show a short, searchable list.\n'
+    fi
   else
     printf '  ⬜ Register the Beam connection\n'
     printf '\nLast step:\n'
