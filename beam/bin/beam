@@ -1843,7 +1843,6 @@ cmd_doctor() {
     printf '  [--] no bundled bridge and no uvx/npx — only matters for stdio hosts; direct HTTP needs neither\n'
   fi
 
-  printf '\n  Reminder: if you signed in AFTER starting your agent, fully restart it so MCP picks up the key.\n'
   if [ "$fail" -eq 0 ]; then printf '\nAll good. Try: beam whoami\n'; return 0; fi
   printf '\nSome checks need attention (see [XX] above).\n'; return 3
 }
@@ -1980,7 +1979,7 @@ cmd_register() {
 Could not auto-register (no supported host config found, or python3 is missing).
 Add a remote HTTP MCP server in your agent:
   name=beam  type=http  url=$MCP_URL  header="Authorization: Bearer <your key>"
-Then fully restart your agent.
+Then ask your agent to list your Beam agents.
 EOF
   return 2
 }
