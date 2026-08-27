@@ -196,6 +196,27 @@ condition = next(node for node in payload["nodes"] if node.get("nodeType") == "c
 assert condition["objective"] == "Route the ticket through the revised condition"
 PY
 
+group "publish-readiness catches missing prompt inputs before publish"
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$SPECS/condition-ticket-router.json" <<'PY' \
+  && ok "readiness accepts a complete graph and rejects a missing prompt input" \
+  || bad "readiness did not catch a missing prompt input"
+import copy, importlib.util, json, sys
+script, fixture = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("beam_builder", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+nodes = module.build_payload(json.load(open(fixture)))["nodes"]
+assert module._readiness_report(nodes)["ready"]
+
+broken = copy.deepcopy(nodes)
+prompt_node = next(n for n in broken
+                   if (n.get("toolConfiguration") or {}).get("toolFunctionName", "").startswith("GPTAction_"))
+prompt_node["toolConfiguration"]["inputParams"] = []
+report = module._readiness_report(broken)
+assert not report["ready"]
+assert any(f["name"] == "gpt_has_input_variable" for f in report["failures"])
+PY
+
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY for the authenticated checks.\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] || exit 1

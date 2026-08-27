@@ -58,7 +58,7 @@ and makes it unparseable.
 | Only one of several actions runs | Multiple unconditional edges fan out from one node. Beam runs sequentially — chain the nodes (A → B → C) instead. |
 | A condition node always takes the same branch | Edges are evaluated in order, first match wins. Re-order them, or tighten the earlier conditions. A too-broad first condition swallows the rest. |
 | A `condition_based` wait never resumes | The linked tool's `allowWaiting` is `false`, the wait node is not directly downstream of the linked tool, or another node sits between them. Use `time_based`, or restructure so the wait node immediately follows the linked tool. |
-| Changes are not live | The graph is still a draft. Publishing is a separate, explicit step — run `publish <graphId>` only when the user asks. |
+| Changes are not live | The graph is still a draft. Publishing is a separate, explicit step — run `publish <graphId> --agent-id <agentId>` only when the user asks and `readiness` passes. |
 
 ## Inspecting state
 
@@ -67,4 +67,5 @@ and makes it unparseable.
   UUIDs, edge IDs.
 - `get-graph <agentId> --full` — the entire raw graph.
 - `verify-links <agentId>` — every linked param and whether it resolved.
+- `readiness <agentId>` — every publish-required field and graph contract.
 - `deploy <spec> --dry-run` — the exact payload, with no API call.

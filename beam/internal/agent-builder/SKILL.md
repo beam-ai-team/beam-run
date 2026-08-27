@@ -113,10 +113,13 @@ These checks are mandatory but should not become visible ceremony:
    `toolFunctionName`.
 3. Prefer managed integrations: `nango_cloud`, then `pipedream`. Ask before
    choosing a custom fallback.
-4. Run lint and a dry-run before every full deploy. Verify links after deploy.
-5. Beam executes nodes sequentially. Each non-condition node has one outgoing
-   edge; model alternatives with condition or looping nodes.
-6. Publish only on clear natural-language intent. Deletion and any immediate
+4. Run lint and a dry-run before every full deploy. Every graph mutation returns
+   a readiness report; resolve every failure before testing or publishing.
+5. Beam executes nodes sequentially. The entry node has one outgoing edge;
+   other non-condition nodes have at most one (a terminal action can have zero).
+   Model alternatives with condition or looping nodes.
+6. Publish only on clear natural-language intent and only after readiness passes.
+   Deletion and any immediate
    external write require targeted confirmation.
 7. Use the smallest patch for an existing graph: prompt, params, edge, metadata,
    add/remove node, or integration attachment. Use a full redeploy only for a

@@ -152,19 +152,25 @@ operations:
     mcp: getAgentGraph
     cli: beam agent-builder verify-links <agentId>
     status: ready
+  graph.readiness:
+    specialist: agent-builder
+    safety: read
+    mcp: null
+    cli: beam agent-builder readiness <agentId>
+    status: ready
   graph.deploy:
     specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder deploy <specFile>
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
   graph.publish:
     specialist: agent-builder
     safety: external-effect
     confirmation: explicit-publish-intent
     mcp: null
-    cli: beam agent-builder publish <graphId>
+    cli: beam agent-builder publish <graphId> --agent-id <agentId>
     postRead: graph.get
     status: ready
   graph.update-prompt:
@@ -172,28 +178,28 @@ operations:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-prompt <agentId> <nodeId> <promptFile>
-    postRead: graph.node
+    postRead: graph.readiness
     status: ready
   graph.update-params:
     specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-params <agentId> <nodeId> ...
-    postRead: graph.node
+    postRead: graph.readiness
     status: ready
   graph.update-consent:
     specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-consent <agentId> <nodeId> <true|false>
-    postRead: graph.node
+    postRead: graph.readiness
     status: ready
   graph.add-node:
     specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder add-node <agentId> <nodeFile> ...
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
   graph.remove-node:
     specialist: agent-builder
@@ -201,7 +207,7 @@ operations:
     confirmation: explicit
     mcp: null
     cli: beam agent-builder remove-node <agentId> <nodeId>
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
   graph.test-node:
     specialist: agent-builder
