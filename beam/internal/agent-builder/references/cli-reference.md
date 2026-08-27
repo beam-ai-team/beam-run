@@ -152,6 +152,19 @@ loudly rather than reporting a false success. Returns `verified: true`.
 beam agent-builder update-node-prompt AGENT_ID NODE_ID new-prompt.md
 ```
 
+### `attach-mcp-tools <agentId> <nodeId> <attachmentsFile>`
+Attach one or more MCP tools to an existing tool node. This command fetches and
+preserves the full node configuration before updating its MCP attachments, so it
+does not drop the prompt, input/output parameters, or links.
+```bash
+beam agent-builder attach-mcp-tools AGENT_ID NODE_ID mcp-tools.json
+```
+
+`mcp-tools.json` is a JSON array:
+```json
+[{"integrationId":"…","integrationProviderId":"…","tools":[{"toolId":"…","isActive":true}]}]
+```
+
 ### `update-node-consent <agentId> <nodeId> <true|false>`
 Set `toolConfiguration.requiresConsent` on an existing integration node. This is
 a node setting, not a separate graph approval node or branch. The command fetches
@@ -234,7 +247,16 @@ beam agent-builder create-trigger trigger.json
 List an agent's triggers.
 
 ### `update-trigger <triggerId> <triggerFile>`
-Update a trigger from a JSON file (only the fields present are changed).
+Update a trigger from a JSON file (only the fields present are changed). The
+saved payload is automatically re-read and returned as `triggerReadiness`.
+
+### `validate-trigger <agentId> <entryNodeId> [--trigger-id ID]`
+Validate the saved trigger against Beam's type-specific runtime contract. This
+is read-only and returns `ready`, every criterion, failures, and warnings.
+`create-trigger` and `update-trigger` run this validation automatically.
+```bash
+beam agent-builder validate-trigger AGENT_ID ENTRY_NODE_ID
+```
 
 ### `delete-trigger <triggerId>`
 Delete a trigger.
@@ -248,6 +270,13 @@ JSON to (`<BEAM_API_URL>/<agentId>/webhook`).
 
 ### `get-webhook <agentId>`
 Get an agent's existing webhook (returns `webhookUrl`).
+
+### `validate-webhook <agentId> [--entry-node-id ID]`
+Validate that the webhook is persisted, enabled, HTTPS-scoped to the agent, and
+(when provided) attached to the actual graph entry node.
+```bash
+beam agent-builder validate-webhook AGENT_ID --entry-node-id ENTRY_NODE_ID
+```
 
 ### `delete-webhook <agentId>`
 Remove an agent's webhook.

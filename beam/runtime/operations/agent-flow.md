@@ -8,5 +8,5 @@ Generated from `beam/contracts/operations.yaml`. Prefer MCP; on an unavailable o
 | graph.nodes | read | getAgentGraph | `beam agent-builder get-nodes <agentId>` | none | not-required |
 | graph.node | read | getAgentGraph | `beam agent-builder get-node <agentId> <nodeId>` | none | not-required |
 | graph.verify-links | read | getAgentGraph | `beam agent-builder verify-links <agentId>` | none | not-required |
-| graph.triggers | read | getAgentGraph | `beam agent-builder get-triggers <entryNodeId>` | none | not-required |
+| graph.triggers | read | getAgentGraph | `beam agent-builder get-triggers <agentId> <entryNodeId>` | none | not-required |
 | graph.webhook | read | getAgentGraph | `beam agent-builder get-webhook <agentId>` | none | not-required |
