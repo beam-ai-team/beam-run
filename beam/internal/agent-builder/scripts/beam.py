@@ -691,6 +691,259 @@ def _payload_summary(payload):
     return out
 
 
+_PROMPT_HEADERS = ("## Role:", "## Task:", "## Context:", "## Rules:")
+_PROMPT_PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
+_PARAM_FILL_TYPES = {"static", "linked", "ai_fill", "user_fill"}
+
+
+def _readiness_report(nodes, graph_id=None):
+    """Return deterministic publish-readiness criteria for live graph nodes.
+
+    Beam's ``evaluationCriteria`` field grades model output. It is not a schema
+    validator, so publishing must use a separate deterministic readiness gate.
+    This deliberately reports every failure in one pass so a draft can be fixed
+    without a retry-by-retry loop.
+    """
+    nodes = nodes or []
+    criteria = []
+
+    def check(name, ok, detail, node_id=None, node_name=None):
+        criteria.append({
+            "name": name,
+            "status": "passed" if ok else "failed",
+            "detail": detail,
+            **({"nodeId": node_id} if node_id else {}),
+            **({"nodeName": node_name} if node_name else {}),
+        })
+
+    node_ids = {n.get("id") for n in nodes if n.get("id")}
+    output_ids = {
+        op.get("id")
+        for n in nodes
+        for op in ((n.get("toolConfiguration") or {}).get("outputParams") or [])
+        if op.get("id")
+    }
+    entries = [n for n in nodes if n.get("isEntryNode")]
+    check("one_entry_node", len(entries) == 1,
+          "Exactly one entry node is required." if len(entries) != 1
+          else "Exactly one entry node is configured.")
+
+    for node in nodes:
+        node_id = node.get("id")
+        name = node.get("objective") or node_id or "unnamed node"
+        node_type = node.get("nodeType") or "executionNode"
+        is_entry = bool(node.get("isEntryNode"))
+        is_exit = bool(node.get("isExitNode")) or node_type == "exitNode"
+        children = node.get("childEdges") or []
+        tc = node.get("toolConfiguration") or {}
+
+        check("node_objective", bool(node.get("objective")),
+              "Node has an objective." if node.get("objective") else "Node is missing an objective.",
+              node_id, name)
+
+        bad_targets = [e.get("targetAgentGraphNodeId") for e in children
+                       if e.get("targetAgentGraphNodeId") not in node_ids]
+        check("edge_targets_exist", not bad_targets,
+              "All outgoing edges target existing nodes." if not bad_targets
+              else "Outgoing edge targets are missing from the graph: " + ", ".join(str(x) for x in bad_targets),
+              node_id, name)
+
+        if is_exit:
+            check("exit_has_no_outgoing_edges", not children,
+                  "Exit node has no outgoing edges." if not children
+                  else "Exit node must not have outgoing edges.", node_id, name)
+        elif node_type == "conditionNode":
+            check("condition_has_branches", len(children) >= 2,
+                  "Condition node has explicit branches." if len(children) >= 2
+                  else "Condition node needs at least two outgoing branches.", node_id, name)
+            blank = [e for e in children if not str(e.get("condition") or "").strip()]
+            check("condition_branches_are_explicit", not blank,
+                  "Every condition branch has an explicit condition." if not blank
+                  else "Every condition branch needs a non-empty condition.", node_id, name)
+            config = node.get("nodeConfigurations") or {}
+            condition_type = config.get("conditionType")
+            check("condition_type_valid", condition_type in {"llm_based", "rule_based"},
+                  "Condition type is valid." if condition_type in {"llm_based", "rule_based"}
+                  else "Condition node must set conditionType to llm_based or rule_based.", node_id, name)
+        elif is_entry:
+            check("entry_has_one_outgoing_edge", len(children) == 1,
+                  "Entry node has one outgoing edge." if len(children) == 1
+                  else f"Entry node must have exactly one outgoing edge; found {len(children)}.",
+                  node_id, name)
+        else:
+            # Action nodes can be a valid terminal path (for example, a Slack
+            # notification).  They must never fork implicitly, however.
+            check("node_has_at_most_one_outgoing_edge", len(children) <= 1,
+                  "Node has at most one outgoing edge." if len(children) <= 1
+                  else f"Node must have at most one outgoing edge; found {len(children)}.",
+                  node_id, name)
+
+        requires_tool = not is_entry and not is_exit and node_type not in {"conditionNode", "loopingNode"}
+        if requires_tool:
+            check("tool_configuration_present", bool(tc),
+                  "Node has a tool configuration." if tc else "Execution node is missing toolConfiguration.",
+                  node_id, name)
+            check("tool_function_present", bool(tc.get("toolFunctionName")),
+                  "Node has a tool function." if tc.get("toolFunctionName")
+                  else "Execution node is missing toolFunctionName.", node_id, name)
+
+        input_params = tc.get("inputParams") or []
+        input_names = []
+        for param in input_params:
+            param_name = param.get("paramName")
+            input_names.append(param_name)
+            label = f"{name}.{param_name or '<unnamed>'}"
+            check("input_param_name", bool(param_name),
+                  "Input parameter has a name." if param_name else "Input parameter is missing paramName.",
+                  node_id, label)
+            check("input_param_type", bool(param.get("dataType")),
+                  "Input parameter has a data type." if param.get("dataType")
+                  else "Input parameter is missing dataType.", node_id, label)
+            fill_type = param.get("fillType")
+            check("input_param_fill_type", fill_type in _PARAM_FILL_TYPES,
+                  "Input parameter has a supported fill type." if fill_type in _PARAM_FILL_TYPES
+                  else "Input parameter must set fillType to static, linked, ai_fill, or user_fill.",
+                  node_id, label)
+            if fill_type == "static":
+                value = param.get("staticValue")
+                check("static_input_value", value is not None and value != "",
+                      "Static input has a value." if value is not None and value != ""
+                      else "Static input is missing staticValue.", node_id, label)
+            elif fill_type == "linked":
+                link_id = param.get("linkParamOutputId")
+                check("linked_input_source", link_id in output_ids,
+                      "Linked input resolves to a graph output." if link_id in output_ids
+                      else "Linked input has no valid source output.", node_id, label)
+
+        named_inputs = [n for n in input_names if n]
+        check("input_param_names_unique", len(named_inputs) == len(set(named_inputs)),
+              "Input parameter names are unique." if len(named_inputs) == len(set(named_inputs))
+              else "Input parameter names must be unique within a node.", node_id, name)
+
+        output_params = tc.get("outputParams") or []
+        output_names = []
+        for param in output_params:
+            param_name = param.get("paramName")
+            output_names.append(param_name)
+            label = f"{name}.{param_name or '<unnamed>'}"
+            check("output_param_name", bool(param_name),
+                  "Output parameter has a name." if param_name else "Output parameter is missing paramName.",
+                  node_id, label)
+            check("output_param_type", bool(param.get("dataType")),
+                  "Output parameter has a data type." if param.get("dataType")
+                  else "Output parameter is missing dataType.", node_id, label)
+        named_outputs = [n for n in output_names if n]
+        check("output_param_names_unique", len(named_outputs) == len(set(named_outputs)),
+              "Output parameter names are unique." if len(named_outputs) == len(set(named_outputs))
+              else "Output parameter names must be unique within a node.", node_id, name)
+
+        # Custom GPT nodes have a stricter, documented contract. Their prompt
+        # must declare every input so the runtime can inject it predictably.
+        is_custom_gpt = str(tc.get("toolFunctionName") or "").startswith("GPTAction_")
+        if is_custom_gpt:
+            prompt = str(tc.get("prompt") or "")
+            check("gpt_prompt_present", bool(prompt.strip()),
+                  "Custom GPT node has a prompt." if prompt.strip()
+                  else "Custom GPT node is missing a prompt.", node_id, name)
+            missing_headers = [h for h in _PROMPT_HEADERS if h not in prompt]
+            check("gpt_prompt_structure", not missing_headers,
+                  "Custom GPT prompt has Role, Task, Context, and Rules sections."
+                  if not missing_headers else "Custom GPT prompt is missing: " + ", ".join(missing_headers),
+                  node_id, name)
+            check("gpt_has_input_variable", bool(named_inputs),
+                  "Custom GPT node has at least one input variable." if named_inputs
+                  else "Custom GPT node requires at least one input variable.", node_id, name)
+            placeholders = set(_PROMPT_PLACEHOLDER_RE.findall(prompt))
+            missing_placeholders = sorted(set(named_inputs) - placeholders)
+            unknown_placeholders = sorted(placeholders - set(named_inputs))
+            check("gpt_inputs_are_referenced", not missing_placeholders,
+                  "Every GPT input variable is referenced in the prompt."
+                  if not missing_placeholders else "Prompt is missing placeholders for: " + ", ".join(missing_placeholders),
+                  node_id, name)
+            check("gpt_placeholders_are_declared", not unknown_placeholders,
+                  "Every prompt placeholder has a declared input variable."
+                  if not unknown_placeholders else "Prompt references undeclared variables: " + ", ".join(unknown_placeholders),
+                  node_id, name)
+            check("gpt_has_output_variable", bool(output_params),
+                  "Custom GPT node has an output variable." if output_params
+                  else "Custom GPT node requires at least one output variable.", node_id, name)
+
+        function_name = tc.get("toolFunctionName") or ""
+        if function_name == "BeamSystemAction_TriggerAgent":
+            required_trigger_inputs = {
+                "agentName": ("static", "string"),
+                "urls": ("ai_fill", "string[]"),
+                "payload": ("linked", "object"),
+            }
+            actual_trigger_inputs = {
+                p.get("paramName"): (p.get("fillType"), p.get("dataType"))
+                for p in input_params
+            }
+            check("trigger_agent_input_contract",
+                  actual_trigger_inputs == required_trigger_inputs,
+                  "TriggerAgent inputs match the required agentName, urls, and payload contract."
+                  if actual_trigger_inputs == required_trigger_inputs else
+                  "TriggerAgent requires exactly agentName (static string), urls (ai_fill string[]), and payload (linked object).",
+                  node_id, name)
+
+        if function_name == "StandAloneAction_CodeExecutor":
+            code_language = tc.get("codeLanguage") or tc.get("code_language")
+            code = tc.get("code")
+            check("code_executor_complete", bool(code_language) and bool(str(code or "").strip()),
+                  "CodeExecutor has a language and non-empty code."
+                  if bool(code_language) and bool(str(code or "").strip()) else
+                  "CodeExecutor requires codeLanguage and non-empty code.", node_id, name)
+
+        for attachment in node.get("agentGraphNodeMcpIntegrations") or []:
+            attachment_name = attachment.get("integrationId") or "MCP integration"
+            tools = attachment.get("tools") or []
+            check("mcp_attachment_complete", bool(attachment.get("integrationId")) and bool(tools),
+                  "MCP integration has an ID and at least one tool."
+                  if attachment.get("integrationId") and tools
+                  else "MCP integration needs an integrationId and at least one tool.", node_id, str(attachment_name))
+            inactive = [t for t in tools if not t.get("isActive")]
+            check("mcp_tool_active", not inactive,
+                  "All attached MCP tools are active." if not inactive
+                  else "Attached MCP integration has inactive tools.", node_id, str(attachment_name))
+
+    failures = [c for c in criteria if c["status"] == "failed"]
+    return {
+        "ready": not failures,
+        "graphId": graph_id,
+        "criteria": criteria,
+        "failures": failures,
+        "summary": f"{len(criteria) - len(failures)}/{len(criteria)} publish-readiness criteria passed.",
+    }
+
+
+def evaluate_agent_readiness(api, agent_id):
+    """Fetch the draft graph and evaluate all publish-readiness criteria."""
+    data = api.get(f"/agent-graphs/{agent_id}/nodes/lite")
+    nodes = data.get("nodes", []) or []
+    details = _parallel(
+        lambda n: api.get(f'/agent-graphs/{agent_id}/nodes/{n["id"]}'), nodes)
+    return _readiness_report(details, data.get("graphId"))
+
+
+def _require_publish_ready(api, agent_id, graph_id=None):
+    report = evaluate_agent_readiness(api, agent_id)
+    if graph_id and report.get("graphId") and report["graphId"] != graph_id:
+        raise BeamError(
+            f"Draft graph changed while preparing to publish ({graph_id} -> {report['graphId']}).",
+            code="validation_error",
+            next_step="Re-run the requested update, then run agent-builder readiness before publishing.",
+        )
+    if not report["ready"]:
+        details = "; ".join(
+            f"{f.get('nodeName', 'graph')}: {f['detail']}" for f in report["failures"][:5])
+        raise BeamError(
+            "Publish readiness failed. " + details,
+            code="validation_error",
+            next_step=f"Run: beam agent-builder readiness {agent_id}",
+        )
+    return report
+
+
 def _validate_spec(spec):
     """Catch the most common spec mistakes before any UUIDs are generated."""
     if not isinstance(spec, dict):
@@ -1576,6 +1829,11 @@ def cmd_verify_links(api, args):
     return {"allOk": all_ok, "links": links}
 
 
+def cmd_readiness(api, args):
+    """Evaluate the saved draft against deterministic publish requirements."""
+    return evaluate_agent_readiness(api, args.agent_id)
+
+
 # ===========================================================================
 # Commands - create / deploy
 # ===========================================================================
@@ -1668,6 +1926,9 @@ def cmd_deploy(api, args):
                       "detail": "All links OK" if all_ok else "Some linked params are broken."})
         published = False
         if args.publish:
+            readiness = _require_publish_ready(api, agent_id, graph_id)
+            steps.append({"step": "readiness", "status": "ok",
+                          "detail": readiness["summary"]})
             api.patch(f"/agent-graphs/{graph_id}/publish")
             published = True
             steps.append({"step": "publish", "status": "ok", "detail": f"Published {graph_id}"})
@@ -1829,6 +2090,9 @@ def cmd_deploy(api, args):
     # Step 6 - publish -----------------------------------------------------
     published = False
     if args.publish:
+        readiness = _require_publish_ready(api, agent_id, graph_id)
+        steps.append({"step": "readiness", "status": "ok",
+                      "detail": readiness["summary"]})
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
         steps.append({"step": "publish", "status": "ok", "detail": f"Published {graph_id}"})
@@ -1850,8 +2114,9 @@ def _deploy_result(agent_id, graph_id, published, verified, steps):
 # ===========================================================================
 
 def cmd_publish(api, args):
+    readiness = _require_publish_ready(api, args.agent_id, args.graph_id)
     api.patch(f"/agent-graphs/{args.graph_id}/publish")
-    return {"published": True, "graphId": args.graph_id}
+    return {"published": True, "graphId": args.graph_id, "readiness": readiness}
 
 
 def cmd_attach_tool(api, args):
@@ -1878,7 +2143,7 @@ def cmd_attach_tool(api, args):
     }
     data = api.patch_with_body("/agent-graphs/update-node", {
         "agentId": args.agent_id, "graphId": args.graph_id, "node": node_payload})
-    return {"attached": True, "node": data}
+    return {"attached": True, "agentId": args.agent_id, "node": data}
 
 
 def cmd_update_node(api, args):
@@ -1886,7 +2151,7 @@ def cmd_update_node(api, args):
     node_obj = payload.get("node", payload) if isinstance(payload, dict) else payload
     data = api.patch_with_body("/agent-graphs/update-node", {
         "agentId": args.agent_id, "graphId": args.graph_id, "node": node_obj})
-    return {"updated": True, "node": data}
+    return {"updated": True, "agentId": args.agent_id, "node": data}
 
 
 def cmd_update_node_prompt(api, args):
@@ -1928,10 +2193,11 @@ def cmd_update_node_prompt(api, args):
         )
     published = False
     if args.publish:
+        readiness = _require_publish_ready(api, args.agent_id, graph_id)
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"updated": True, "verified": True, "nodeId": args.node_id,
-            "graphId": graph_id, "published": published}
+            "agentId": args.agent_id, "graphId": graph_id, "published": published}
 
 
 def cmd_update_node_consent(api, args):
@@ -1966,7 +2232,7 @@ def cmd_update_node_consent(api, args):
             "Consent update did not persist - toolConfiguration.requiresConsent "
             "still differs after the update. No change was made.")
     return {"updated": True, "verified": True, "nodeId": args.node_id,
-            "graphId": graph_id, "requiresConsent": saved}
+            "agentId": args.agent_id, "graphId": graph_id, "requiresConsent": saved}
 
 
 def cmd_update_node_params(api, args):
@@ -1981,7 +2247,7 @@ def cmd_update_node_params(api, args):
               body=body)
     graph_id = _maybe_publish(api, args)
     return {"updated": True, "nodeId": args.node_id, "published": bool(args.publish),
-            "graphId": graph_id}
+            "agentId": args.agent_id, "graphId": graph_id}
 
 
 def cmd_update_edge(api, args):
@@ -1992,7 +2258,7 @@ def cmd_update_edge(api, args):
         body["conditionGroups"] = _read_json_file(
             args.condition_groups_file, "Condition-groups file")
     api.put(f"/agent-graphs/update-edge/{args.edge_id}", body)
-    return {"updated": True, "edgeId": args.edge_id}
+    return {"updated": True, "agentId": args.agent_id, "edgeId": args.edge_id}
 
 
 def cmd_update_metadata(api, args):
@@ -2025,6 +2291,7 @@ def cmd_update_metadata(api, args):
                      for n in nodes_data.get("nodes", []) or []]
     published = False
     if args.publish and graph_id:
+        _require_publish_ready(api, args.agent_id, graph_id)
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"updated": True, "agentId": args.agent_id, "agentName": payload["agentName"],
@@ -2184,6 +2451,7 @@ def cmd_add_node(api, args):
     steps.append({"step": "verify", "status": "ok" if all_ok else "warning"})
     published = False
     if args.publish and graph_id:
+        _require_publish_ready(api, args.agent_id, graph_id)
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"added": True, "agentId": args.agent_id, "graphId": graph_id,
@@ -2240,6 +2508,7 @@ def cmd_remove_node(api, args):
     graph_id = result.get("draftGraphId")
     published = False
     if args.publish and graph_id:
+        _require_publish_ready(api, args.agent_id, graph_id)
         api.patch(f"/agent-graphs/{graph_id}/publish")
         published = True
     return {"removed": True, "agentId": args.agent_id, "graphId": graph_id,
@@ -2340,6 +2609,7 @@ def _maybe_publish(api, args):
     nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
     graph_id = nodes_data.get("graphId")
     if graph_id:
+        _require_publish_ready(api, args.agent_id, graph_id)
         api.patch(f"/agent-graphs/{graph_id}/publish")
     return graph_id
 
@@ -2398,6 +2668,9 @@ def build_parser():
     s = sub.add_parser("verify-links", help="Check every linked param is intact.")
     s.add_argument("agent_id")
 
+    s = sub.add_parser("readiness", help="Evaluate required fields and publish readiness.")
+    s.add_argument("agent_id")
+
     s = sub.add_parser("deploy",
                        help="Full deploy: create/update + attach + relink + verify + publish.")
     s.add_argument("spec_file")
@@ -2416,6 +2689,8 @@ def build_parser():
 
     s = sub.add_parser("publish", help="Publish a draft graph (makes the agent live).")
     s.add_argument("graph_id")
+    s.add_argument("--agent-id", required=True,
+                   help="Agent that owns the draft; required for the readiness gate.")
 
     s = sub.add_parser("attach-tool", help="Attach an integration tool to a node.")
     s.add_argument("agent_id")
@@ -2451,6 +2726,8 @@ def build_parser():
 
     s = sub.add_parser("update-edge", help="Update an edge's condition.")
     s.add_argument("edge_id")
+    s.add_argument("--agent-id", required=True,
+                   help="Agent that owns the edge; used to run readiness after the update.")
     s.add_argument("--condition", help="New llm_based condition text ('' = unconditional).")
     s.add_argument("--condition-groups-file", help="JSON array for rule_based edges.")
 
@@ -2547,6 +2824,7 @@ COMMANDS = {
     "get-node": cmd_get_node,
     "get-graph": cmd_get_graph,
     "verify-links": cmd_verify_links,
+    "readiness": cmd_readiness,
     "deploy": cmd_deploy,
     "create": cmd_create,
     "publish": cmd_publish,
@@ -2589,6 +2867,19 @@ def main(argv=None):
                    and not getattr(args, "agent_id", None))
         api = Api("", "", DEFAULT_API_URL) if offline else Api(*resolve_creds())
         result = handler(api, args)
+        # A draft must surface its complete readiness state immediately after
+        # every graph mutation. This does not prevent saving a draft—the
+        # publish gate below does that—but it makes missing required fields
+        # visible before a user attempts to run or publish it.
+        graph_mutations = {
+            "create", "deploy", "attach-tool", "update-node", "update-node-prompt",
+            "update-node-consent", "update-node-params", "update-edge",
+            "update-metadata", "add-node", "remove-node",
+        }
+        if args.command in graph_mutations and not getattr(args, "dry_run", False):
+            agent_id = result.get("agentId") or getattr(args, "agent_id", None)
+            if agent_id:
+                result["readiness"] = evaluate_agent_readiness(api, agent_id)
         print(json.dumps({"ok": True, "command": args.command, **result}, indent=2))
         return 0
     except BeamError as exc:

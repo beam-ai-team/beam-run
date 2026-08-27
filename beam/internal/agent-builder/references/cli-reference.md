@@ -84,6 +84,20 @@ beam agent-builder verify-links AGENT_ID
 ```
 → `{"allOk": true/false, "links": [{status, nodeName, paramName, linkId}]}`.
 
+### `readiness <agentId>`
+Evaluate the saved draft against the deterministic requirements for publication:
+node objectives, graph routing, tool configuration, input/output parameter
+completeness, linked sources, Custom GPT prompt structure and variables, and
+attached MCP tools.
+```bash
+beam agent-builder readiness AGENT_ID
+```
+→ `{"ready": true/false, "summary", "criteria": [...], "failures": [...]}`.
+
+Every graph mutation returns this report. A draft may be saved while it is
+incomplete, but `publish` and every `--publish` path refuse to publish until
+`ready` is `true`.
+
 ---
 
 ## Create & deploy
@@ -91,7 +105,9 @@ beam agent-builder verify-links AGENT_ID
 ### `deploy <specFile> [--agent-id ID] [--publish] [--dry-run]`
 The main command. Creates or updates the agent, attaches every integration in
 the spec, re-links downstream params, and verifies — in one call. **Deploys as
-a draft** unless `--publish` is given.
+a draft** unless `--publish` is given. `--publish` runs `readiness` after all
+nodes and integrations are saved, and blocks publication if any required field
+or graph contract is incomplete.
 ```bash
 beam agent-builder deploy spec.json                  # create, draft
 beam agent-builder deploy spec.json --agent-id ID    # update existing
@@ -114,11 +130,12 @@ beam agent-builder create spec.json
 ```
 → `{"agentId", "agentName", "draftGraphId", "activeGraphId"}`.
 
-### `publish <graphId>`
+### `publish <graphId> --agent-id <agentId>`
 Publish a draft graph — makes the agent live. Only run this when the user
-explicitly asked to publish.
+explicitly asked to publish. The agent ID is required so the CLI can evaluate
+the current draft before performing the live action.
 ```bash
-beam agent-builder publish GRAPH_ID
+beam agent-builder publish GRAPH_ID --agent-id AGENT_ID
 ```
 
 ---
@@ -151,12 +168,12 @@ objects (camelCase: `paramName`, `fillType`, `dataType`, …).
 beam agent-builder update-node-params AGENT_ID NODE_ID --input-params-file ip.json
 ```
 
-### `update-edge <edgeId> [--condition TEXT] [--condition-groups-file F]`
+### `update-edge <edgeId> --agent-id <agentId> [--condition TEXT] [--condition-groups-file F]`
 Update an edge. `--condition` sets an `llm_based` condition (`""` =
 unconditional); `--condition-groups-file` sets `rule_based` groups. Get edge IDs
 from `get-node` (`childEdges[].id`).
 ```bash
-beam agent-builder update-edge EDGE_ID --condition "score is above 80"
+beam agent-builder update-edge EDGE_ID --agent-id AGENT_ID --condition "score is above 80"
 ```
 
 ### `update-metadata <agentId> [--name] [--description] [--personality] [--restrictions] [--prompts-file F] [--publish]`
