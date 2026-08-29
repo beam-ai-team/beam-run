@@ -6,11 +6,15 @@ Generated from `beam/contracts/operations.yaml`. Prefer MCP; on an unavailable o
 | --- | --- | --- | --- | --- | --- |
 | learning.issues | read | optimizeTool | `beam learning issues <agentId>` | none | not-required |
 | learning.issue | read | getToolOptimizationStatus | `beam learning issue <agentId> <issueId>` | none | not-required |
+| learning.list-issues | read | lh_list_issues | `beam learning list-issues <agentId> [toolFunctionName] [sortBy]` | none | not-required |
 | learning.feedbacks | read | lh_get_issue_feedbacks | `beam learning feedbacks <agentId> <issueId>` | none | not-required |
+| learning.feedback-summary | read | lh_get_feedback_node_summary | `beam learning feedback-summary <agentId> <taskNodeId>` | none | not-required |
+| learning.update-feedback | reversible-write | lh_update_feedback | `beam learning update-feedback <feedbackId> <payloadFile>` | none | not-required |
 | learning.issue-jobs | read | lh_get_issue_jobs | `beam learning issue-jobs <agentId> <issueId>` | none | not-required |
+| learning.job-activity | read | lh_get_job_activity | `beam learning job-activity <agentId> <threadId>` | none | not-required |
 | learning.trend | read | lh_get_accuracy_trend | `beam learning trend <agentId> [startDate endDate]` | none | not-required |
-| learning.tools | read | lh_get_learning_tools | `beam learning tools <agentId>` | none | not-required |
-| learning.tool | read | lh_get_tool_detail | `beam learning tool <agentId> <toolFunctionName>` | none | not-required |
+| learning.tools | read | lh_get_learning_tools | `beam learning tools <agentId> <startDate> <endDate> [nodesFilter]` | none | not-required |
+| learning.tool | read | lh_get_tool_detail | `beam learning tool <agentId> <toolFunctionName> <startDate> <endDate> [nodesFilter]` | none | not-required |
 | learning.config | read | lh_get_tuner_config | `beam learning config <agentId>` | none | not-required |
 | learning.set-config | reversible-write | lh_set_tuner_config | `beam learning set-config <agentId> <payloadFile> --confirm <agentId>` | always-two-turn | learning.config |
 | learning.submit-feedback | additive-write | lh_submit_feedback | `beam learning submit-feedback <payloadFile>` | none | not-required |
