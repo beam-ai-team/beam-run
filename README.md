@@ -50,6 +50,12 @@ inbox, integrations, templates, analytics, Views, Learning Hub, agent settings,
 and Flow operations. The Public API remains the surface for embedding Beam in
 external software.
 
+Learning Hub commands cover the documented issue, feedback, job, tuner, and
+accuracy APIs. Use `beam learning` to access them; the public contract is
+available at [Beam API docs](https://api.beamstudio.ai/public-docs).
+For an enterprise deployment, set `BEAM_API_URL` to its API origin before
+running the CLI; it preserves the same API-key and workspace-header transport.
+
 ## Set up
 
 New here? Point your coding agent at **[`GETTING_STARTED.md`](./GETTING_STARTED.md)**

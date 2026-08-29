@@ -535,7 +535,7 @@ Usage:
   beam templates <cmd>       browse templates and create draft agents
   beam analytics <cmd>       inspect or export agent analytics
   beam views <cmd>           inspect records or export a saved view
-  beam learning <cmd>        inspect issues/jobs or dispatch optimization
+  beam learning <cmd>        inspect issues, feedback, jobs, and optimization
   beam agent-builder <cmd>   bundled agent builder (design/build/patch graphs)
   beam mcp check [--tool n]  verify MCP auth and optionally a tool's availability
   beam mcp                   stdio MCP proxy (stdio-only hosts; Claude/Cursor use direct HTTP)
@@ -1551,6 +1551,27 @@ cmd_learning_issue_jobs() {
   cmd_agents_related_get "Learning Hub issue jobs" "/tool/optimize/issues/$issue_id/jobs?agentId=$agent_id"
 }
 
+cmd_learning_list_issues() {
+  agent_id="${1:-}"; tool_name="${2:-}"; sort_by="${3:-}"
+  [ -n "$agent_id" ] || die "validation_error" "usage: beam learning list-issues <agentId> [toolFunctionName] [sortBy]" 2
+  path="/tool/optimize/issues?agentId=$agent_id"
+  [ -z "$tool_name" ] || path="$path&toolFunctionName=$tool_name"
+  [ -z "$sort_by" ] || path="$path&sortBy=$sort_by"
+  cmd_agents_related_get "Learning Hub issue list" "$path"
+}
+
+cmd_learning_feedback_summary() {
+  agent_id="${1:-}"; task_node_id="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$task_node_id" ]; then die "validation_error" "usage: beam learning feedback-summary <agentId> <taskNodeId>" 2; fi
+  cmd_agents_related_get "Learning Hub feedback summary" "/tool/optimize/feedbacks/node-summary?agentId=$agent_id&taskNodeId=$task_node_id"
+}
+
+cmd_learning_job_activity() {
+  agent_id="${1:-}"; thread_id="${2:-}"
+  if [ -z "$agent_id" ] || [ -z "$thread_id" ]; then die "validation_error" "usage: beam learning job-activity <agentId> <threadId>" 2; fi
+  cmd_agents_related_get "Learning Hub job activity" "/tool/optimize/issues/jobs/$thread_id/activity?agentId=$agent_id"
+}
+
 cmd_learning_trend() {
   agent_id="${1:-}"; start="${2:-}"; end="${3:-}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam learning trend <agentId> [startDate endDate]" 2
   if { [ -n "$start" ] && [ -z "$end" ]; } || { [ -z "$start" ] && [ -n "$end" ]; }; then die "validation_error" "provide both startDate and endDate" 2; fi
@@ -1559,15 +1580,20 @@ cmd_learning_trend() {
 }
 
 cmd_learning_tools() {
-  agent_id="${1:-}"; [ -n "$agent_id" ] || die "validation_error" "usage: beam learning tools <agentId>" 2
-  cmd_agents_related_get "Learning Hub tools" "/tool/optimize/agents/$agent_id/learning-tools"
+  agent_id="${1:-}"; start="${2:-}"; end="${3:-}"; nodes_filter="${4:-}"
+  if [ -z "$agent_id" ] || [ -z "$start" ] || [ -z "$end" ]; then die "validation_error" "usage: beam learning tools <agentId> <startDate> <endDate> [nodesFilter]" 2; fi
+  path="/tool/optimize/agents/$agent_id/learning-tools?startDate=$start&endDate=$end"
+  [ -z "$nodes_filter" ] || path="$path&nodesFilter=$nodes_filter"
+  cmd_agents_related_get "Learning Hub tools" "$path"
 }
 
 cmd_learning_tool() {
-  agent_id="${1:-}"; tool_name="${2:-}"
-  if [ -z "$agent_id" ] || [ -z "$tool_name" ]; then die "validation_error" "usage: beam learning tool <agentId> <toolFunctionName>" 2; fi
+  agent_id="${1:-}"; tool_name="${2:-}"; start="${3:-}"; end="${4:-}"; nodes_filter="${5:-}"
+  if [ -z "$agent_id" ] || [ -z "$tool_name" ] || [ -z "$start" ] || [ -z "$end" ]; then die "validation_error" "usage: beam learning tool <agentId> <toolFunctionName> <startDate> <endDate> [nodesFilter]" 2; fi
   safe_query_value "$tool_name" || die "validation_error" "invalid tool function name" 2
-  cmd_agents_related_get "Learning Hub tool detail" "/tool/optimize/agents/$agent_id/tools/$tool_name/detail"
+  path="/tool/optimize/agents/$agent_id/tools/$tool_name/detail?startDate=$start&endDate=$end"
+  [ -z "$nodes_filter" ] || path="$path&nodesFilter=$nodes_filter"
+  cmd_agents_related_get "Learning Hub tool detail" "$path"
 }
 
 cmd_learning_config() {
@@ -1581,6 +1607,12 @@ cmd_learning_payload_write() {
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 5 ]; then die "network_error" "Learning Hub write result is ambiguous; re-read the target before retrying" 5; fi
   printf '%s\n' "$resp"
+}
+
+cmd_learning_update_feedback() {
+  feedback_id="${1:-}"; file="${2:-}"
+  if [ -z "$feedback_id" ] || [ -z "$file" ]; then die "validation_error" "usage: beam learning update-feedback <feedbackId> <payloadFile>" 2; fi
+  cmd_learning_payload_write PUT "/tool/optimize/feedbacks/$feedback_id" "$file"
 }
 
 cmd_learning_confirmed_payload_write() {
@@ -2208,10 +2240,14 @@ main() {
       sub="${1:-}"; shift || true
       case "$sub" in
         issues) cmd_learning_issues "$@" ;;
+        list-issues) cmd_learning_list_issues "$@" ;;
         issue) cmd_learning_issue "$@" ;;
         feedbacks) cmd_learning_feedbacks "$@" ;;
+        feedback-summary) cmd_learning_feedback_summary "$@" ;;
+        update-feedback) cmd_learning_update_feedback "$@" ;;
         issue-jobs) cmd_learning_issue_jobs "$@" ;;
         job) cmd_learning_job "$@" ;;
+        job-activity) cmd_learning_job_activity "$@" ;;
         trend) cmd_learning_trend "$@" ;;
         tools) cmd_learning_tools "$@" ;;
         tool) cmd_learning_tool "$@" ;;
@@ -2229,7 +2265,7 @@ main() {
         cancel-job) thread="${1:-}"; shift || true; cmd_learning_job_action cancel "$thread" "$@" ;;
         run-job) thread="${1:-}"; shift || true; cmd_learning_job_action run "$thread" "$@" ;;
         resume) cmd_learning_resume "$@" ;;
-        *) die "validation_error" "usage: beam learning <issues|issue|feedbacks|issue-jobs|job|trend|tools|tool|config|set-config|submit-feedback|submit-task-feedback|merge|optimize|discard|approve-job|reject-job|reoptimize-job|cancel-job|run-job|resume>" 2 ;;
+        *) die "validation_error" "usage: beam learning <issues|list-issues|issue|feedbacks|feedback-summary|update-feedback|issue-jobs|job|job-activity|trend|tools|tool|config|set-config|submit-feedback|submit-task-feedback|merge|optimize|discard|approve-job|reject-job|reoptimize-job|cancel-job|run-job|resume>" 2 ;;
       esac ;;
     agent-builder) cmd_agent_builder "$@" ;;
     mcp)

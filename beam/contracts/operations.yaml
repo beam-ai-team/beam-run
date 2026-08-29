@@ -576,17 +576,41 @@ operations:
     mcp: getToolOptimizationStatus
     cli: beam learning issue <agentId> <issueId>
     status: ready
+  learning.list-issues:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_list_issues
+    cli: beam learning list-issues <agentId> [toolFunctionName] [sortBy]
+    status: ready
   learning.feedbacks:
     specialist: learning-hub
     safety: read
     mcp: lh_get_issue_feedbacks
     cli: beam learning feedbacks <agentId> <issueId>
     status: ready
+  learning.feedback-summary:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_feedback_node_summary
+    cli: beam learning feedback-summary <agentId> <taskNodeId>
+    status: ready
+  learning.update-feedback:
+    specialist: learning-hub
+    safety: reversible-write
+    mcp: lh_update_feedback
+    cli: beam learning update-feedback <feedbackId> <payloadFile>
+    status: ready
   learning.issue-jobs:
     specialist: learning-hub
     safety: read
     mcp: lh_get_issue_jobs
     cli: beam learning issue-jobs <agentId> <issueId>
+    status: ready
+  learning.job-activity:
+    specialist: learning-hub
+    safety: read
+    mcp: lh_get_job_activity
+    cli: beam learning job-activity <agentId> <threadId>
     status: ready
   learning.trend:
     specialist: learning-hub
@@ -598,13 +622,13 @@ operations:
     specialist: learning-hub
     safety: read
     mcp: lh_get_learning_tools
-    cli: beam learning tools <agentId>
+    cli: beam learning tools <agentId> <startDate> <endDate> [nodesFilter]
     status: ready
   learning.tool:
     specialist: learning-hub
     safety: read
     mcp: lh_get_tool_detail
-    cli: beam learning tool <agentId> <toolFunctionName>
+    cli: beam learning tool <agentId> <toolFunctionName> <startDate> <endDate> [nodesFilter]
     status: ready
   learning.config:
     specialist: learning-hub
