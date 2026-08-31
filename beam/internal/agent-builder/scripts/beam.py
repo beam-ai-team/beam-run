@@ -78,6 +78,7 @@ A minimal spec:
 import argparse
 import concurrent.futures
 import copy
+import datetime as dt
 import json
 import os
 import re
@@ -88,6 +89,11 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+
+try:  # Python 3.9+; keep the CLI usable on its documented Python 3.8 floor.
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - exercised only on Python 3.8
+    ZoneInfo = None
 
 DEFAULT_NODE_MODEL = "BEDROCK_CLAUDE_SONNET_4"
 HTTP_TIMEOUT = 120
@@ -2146,6 +2152,48 @@ def cmd_attach_tool(api, args):
     return {"attached": True, "agentId": args.agent_id, "node": data}
 
 
+def cmd_attach_mcp_tools(api, args):
+    """Attach MCP tools while preserving the node's complete tool configuration.
+
+    The graph API rejects an MCP-only node patch for an execution node. Fetching
+    the complete current node first avoids dropping the GPT prompt, parameters,
+    outputs, or existing node settings while the MCP attachment is updated.
+    """
+    attachments = _read_json_file(args.attachments_file, "MCP attachments file")
+    if not isinstance(attachments, list) or not attachments:
+        raise BeamError(
+            "MCP attachments file must be a non-empty JSON array.",
+            code="validation_error",
+            next_step="Provide [{integrationId, integrationProviderId?, tools:[{toolId,isActive}]}].",
+        )
+    for attachment in attachments:
+        if not isinstance(attachment, dict) or not attachment.get("integrationId"):
+            raise BeamError("Each MCP attachment requires integrationId.", code="validation_error")
+        tools = attachment.get("tools") or []
+        if not tools or any(not t.get("toolId") for t in tools):
+            raise BeamError(
+                "Each MCP attachment requires at least one tools[].toolId.",
+                code="validation_error",
+            )
+    node = api.get(f"/agent-graphs/{args.agent_id}/nodes/{args.node_id}")
+    node.pop("agentGraph", None)
+    if not node.get("toolConfiguration"):
+        raise BeamError(
+            f"Node {args.node_id} has no toolConfiguration; MCP tools can only be attached to a tool node.",
+            code="validation_error",
+        )
+    node["agentGraphNodeMcpIntegrations"] = attachments
+    nodes_data = api.get(f"/agent-graphs/{args.agent_id}/nodes/lite")
+    graph_id = nodes_data.get("graphId")
+    if not graph_id:
+        raise BeamError("Could not resolve the draft graph id for this agent.")
+    data = api.patch_with_body("/agent-graphs/update-node", {
+        "agentId": args.agent_id, "graphId": graph_id, "node": node,
+    })
+    return {"attached": True, "agentId": args.agent_id, "nodeId": args.node_id,
+            "graphId": graph_id, "attachments": attachments, "node": data}
+
+
 def cmd_update_node(api, args):
     payload = _read_json_file(args.node_file, "Node file")
     node_obj = payload.get("node", payload) if isinstance(payload, dict) else payload
@@ -2519,6 +2567,299 @@ def cmd_remove_node(api, args):
 # Commands - triggers / webhooks (Bearer-JWT auth)
 # ===========================================================================
 
+_TIMER_FREQUENCIES = {"minute", "hour", "week", "month"}
+
+
+def _is_uuid(value):
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _schedule_timestamp_ms(value):
+    """Parse Beam's timer start instant as epoch milliseconds or ISO 8601."""
+    if value is None or str(value).strip() == "":
+        return None, "A timer needs userDefinedFrequencyDateTime."
+    text = str(value).strip()
+    if re.fullmatch(r"\d+", text):
+        parsed = int(text)
+        if parsed < 100000000000:
+            return None, "Timer timestamps must be epoch milliseconds, not seconds."
+        return parsed, None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None, "Timer start time must be epoch milliseconds or ISO 8601 with an offset."
+    if parsed.tzinfo is None:
+        return None, "Timer ISO start times must include a UTC offset."
+    return int(parsed.timestamp() * 1000), None
+
+
+def _valid_timezone(value):
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if ZoneInfo is None:
+        return True
+    try:
+        ZoneInfo(value)
+        return True
+    except Exception:
+        return False
+
+
+def _trigger_readiness_report(trigger, entry_node=None, action_catalog=None, saved=False):
+    """Validate one trigger payload against Beam's documented contract.
+
+    This intentionally validates the persisted payload as well as the proposed
+    one. The API accepts some incomplete shapes, which otherwise look saved in
+    the UI but will not schedule or receive events at runtime.
+    """
+    trigger = trigger or {}
+    criteria, warnings = [], []
+
+    def check(name, ok, detail):
+        criteria.append({"name": name, "status": "passed" if ok else "failed",
+                         "detail": detail})
+
+    def warn(name, detail):
+        criteria.append({"name": name, "status": "warning", "detail": detail})
+        warnings.append(detail)
+
+    def nonempty(value):
+        return isinstance(value, str) and bool(value.strip())
+
+    check("trigger_agent_id", _is_uuid(trigger.get("agentId")),
+          "Trigger has a valid agentId." if _is_uuid(trigger.get("agentId"))
+          else "Trigger requires a valid UUID agentId.")
+    check("trigger_entry_node_id", _is_uuid(trigger.get("agentGraphNodeId")),
+          "Trigger has a valid entry-node ID." if _is_uuid(trigger.get("agentGraphNodeId"))
+          else "Trigger requires a valid UUID agentGraphNodeId.")
+    check("trigger_title", nonempty(trigger.get("title")),
+          "Trigger has a title." if nonempty(trigger.get("title"))
+          else "Trigger requires a non-empty title.")
+    check("trigger_prompt", nonempty(trigger.get("prompt")),
+          "Trigger has a run prompt." if nonempty(trigger.get("prompt"))
+          else "Trigger requires a non-empty prompt describing the run.")
+
+    if entry_node is not None:
+        actual_id = entry_node.get("id")
+        is_entry = bool(entry_node.get("isEntryNode"))
+        matches = actual_id == trigger.get("agentGraphNodeId") and is_entry
+        check("trigger_targets_entry_node", matches,
+              "Trigger targets the graph entry node." if matches
+              else "Trigger must target this agent's actual entry node.")
+
+    config = trigger.get("configuration")
+    check("trigger_configuration", isinstance(config, dict),
+          "Trigger has a configuration object." if isinstance(config, dict)
+          else "Trigger requires a configuration object.")
+    config = config if isinstance(config, dict) else {}
+    action = config.get("beamAction")
+    identifier = config.get("integrationIdentifier")
+    check("trigger_action", nonempty(action),
+          "Trigger declares a Beam action." if nonempty(action)
+          else "Trigger configuration requires beamAction.")
+    check("trigger_integration_identifier", nonempty(identifier),
+          "Trigger declares an integration identifier." if nonempty(identifier)
+          else "Trigger configuration requires integrationIdentifier.")
+    for field in ("hasAttachment", "shouldTriggerOnReply"):
+        check(f"trigger_{field}", isinstance(config.get(field), bool),
+              f"{field} is boolean." if isinstance(config.get(field), bool)
+              else f"Trigger configuration requires boolean {field}.")
+
+    is_timer = action == "Timer" or identifier == "timer"
+    trigger_type = "timer" if is_timer else "integration"
+    if is_timer:
+        check("timer_action_and_identifier", action == "Timer" and identifier == "timer",
+              "Timer action and identifier agree." if action == "Timer" and identifier == "timer"
+              else "Timer triggers must use beamAction 'Timer' and integrationIdentifier 'timer'.")
+        check("timer_has_no_provider", not trigger.get("integrationProviderId"),
+              "Timer has no integration provider." if not trigger.get("integrationProviderId")
+              else "Timer triggers must not include integrationProviderId.")
+        frequency = trigger.get("userDefinedFrequency")
+        value = trigger.get("userDefinedFrequencyValue")
+        check("timer_frequency", frequency in _TIMER_FREQUENCIES,
+              "Timer frequency is supported." if frequency in _TIMER_FREQUENCIES
+              else "Timer frequency must be minute, hour, week, or month.")
+        check("timer_frequency_value", isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0,
+              "Timer frequency value is positive." if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+              else "Timer frequency value must be a positive number.")
+        timezone = trigger.get("timezone")
+        check("timer_timezone", _valid_timezone(timezone),
+              "Timer has a valid IANA timezone." if _valid_timezone(timezone)
+              else "Timer requires an IANA timezone, for example Asia/Karachi.")
+        start_ms, start_error = _schedule_timestamp_ms(trigger.get("userDefinedFrequencyDateTime"))
+        check("timer_start_time", start_error is None,
+              "Timer has a concrete start instant." if start_error is None else start_error)
+        if saved:
+            next_ms, next_error = _schedule_timestamp_ms(trigger.get("toBeExecutedAt"))
+            check("timer_next_execution", next_error is None,
+                  "Timer has a concrete next execution time." if next_error is None
+                  else "Saved timer has no usable next execution time: " + next_error)
+            if start_ms is not None and next_ms is not None and frequency != "month":
+                unit_ms = {"minute": 60_000, "hour": 3_600_000,
+                           "week": 604_800_000}.get(frequency)
+                interval_ms = int(unit_ms * value) if unit_ms and isinstance(value, (int, float)) else None
+                aligned = interval_ms is not None and next_ms >= start_ms and (next_ms - start_ms) % interval_ms == 0
+                check("timer_next_execution_aligned", aligned,
+                      "Next execution aligns with the timer cadence." if aligned
+                      else "Saved next execution does not align with the configured start time and cadence.")
+    else:
+        provider_id = trigger.get("integrationProviderId")
+        check("integration_provider", _is_uuid(provider_id),
+              "Integration trigger has a provider ID." if _is_uuid(provider_id)
+              else "Integration triggers require a valid integrationProviderId.")
+        check("integration_not_timer", identifier != "timer" and action != "Timer",
+              "Integration trigger is not configured as a timer." if identifier != "timer" and action != "Timer"
+              else "Non-timer triggers must use an integration action and identifier.")
+        if action_catalog is not None:
+            candidates = [item for item in action_catalog
+                          if item.get("integration") == identifier and item.get("action") == action]
+            check("integration_action_supported", bool(candidates),
+                  "Configured action is available for this integration." if candidates
+                  else "Configured beamAction is not available for this integration in the current workspace.")
+            provider_ids = {
+                provider.get("id")
+                for item in candidates
+                for provider in [((item.get("integrationData") or {}).get("provider") or {})]
+                if provider.get("status") == "active"
+            }
+            check("integration_provider_connected", provider_id in provider_ids,
+                  "Configured provider is connected and active." if provider_id in provider_ids
+                  else "Configured integration provider is not an active connection for this trigger action.")
+            selected = candidates[0] if candidates else {}
+            capabilities = selected.get("configuration") or {}
+            supported = {
+                item.get("key"): item
+                for item in (capabilities.get("filters") or []) + (capabilities.get("globalFilters") or [])
+                if item.get("key")
+            }
+            for filter_key in ("filters", "globalFilters"):
+                groups = config.get(filter_key)
+                if groups is None:
+                    continue
+                group_list = isinstance(groups, list)
+                check(f"integration_{filter_key}_shape", group_list,
+                      f"{filter_key} use condition groups." if group_list
+                      else f"{filter_key} must be an array of condition groups.")
+                for group in groups if group_list else []:
+                    conditions = group.get("conditions") if isinstance(group, dict) else None
+                    check(f"integration_{filter_key}_group", isinstance(group, dict) and group.get("operator") in {"AND", "OR"} and isinstance(conditions, list),
+                          "Filter group is valid." if isinstance(group, dict) and group.get("operator") in {"AND", "OR"} and isinstance(conditions, list)
+                          else "Each filter group needs AND/OR and a conditions array.")
+                    for condition in conditions if isinstance(conditions, list) else []:
+                        prop = condition.get("property") if isinstance(condition, dict) else None
+                        capability = supported.get(prop) or {}
+                        allowed = capability.get("conditions") or []
+                        valid = isinstance(condition, dict) and prop in supported and condition.get("condition") in allowed and nonempty(str(condition.get("value", "")))
+                        check(f"integration_{filter_key}_condition", valid,
+                              "Filter condition is supported." if valid
+                              else "Filter condition uses an unsupported property, operator, or empty value.")
+
+    if saved:
+        check("trigger_not_deactivated", trigger.get("isDeactivated") is False,
+              "Trigger is enabled." if trigger.get("isDeactivated") is False
+              else "Trigger is deactivated and will not run.")
+        if trigger.get("isActive") is False:
+            warn("trigger_activation_state",
+                 "Trigger configuration is saved but inactive until its draft graph is published.")
+
+    failures = [criterion for criterion in criteria if criterion["status"] == "failed"]
+    return {
+        "ready": not failures,
+        "triggerType": trigger_type,
+        "criteria": criteria,
+        "failures": failures,
+        "warnings": warnings,
+    }
+
+
+def _require_trigger_preflight(spec):
+    report = _trigger_readiness_report(spec, saved=False)
+    if report["ready"]:
+        return
+    detail = "; ".join(item["detail"] for item in report["failures"])
+    raise BeamError("Trigger payload is incomplete: " + detail,
+                    code="validation_error",
+                    next_step="Fix the reported trigger fields, then retry the create request.")
+
+
+def _trigger_actions(api, identifier):
+    data = api.t_get("/agent-trigger/integration/actions",
+                     params={"systemIntegrationIdentifier": identifier})
+    return data if isinstance(data, list) else data.get("actions", [data])
+
+
+def _find_saved_trigger(api, agent_id, entry_node_id, trigger_id=None):
+    data = api.t_get(f"/agent-trigger/{agent_id}",
+                     params={"agentGraphNodeId": entry_node_id})
+    triggers = data if isinstance(data, list) else data.get("triggers", [data])
+    triggers = [item for item in triggers if isinstance(item, dict) and item.get("id")]
+    if trigger_id:
+        triggers = [item for item in triggers if item.get("id") == trigger_id]
+    return triggers[0] if len(triggers) == 1 else None
+
+
+def _validate_saved_trigger(api, agent_id, entry_node_id, trigger_id=None):
+    trigger = _find_saved_trigger(api, agent_id, entry_node_id, trigger_id)
+    if trigger is None:
+        return {
+            "ready": False,
+            "triggerType": "unknown",
+            "criteria": [{"name": "trigger_saved", "status": "failed",
+                          "detail": "Could not find exactly one saved trigger for the requested entry node."}],
+            "failures": [{"name": "trigger_saved", "status": "failed",
+                          "detail": "Could not find exactly one saved trigger for the requested entry node."}],
+            "warnings": [],
+        }
+    entry_node = api.get(f"/agent-graphs/{agent_id}/nodes/{entry_node_id}")
+    entry_node = entry_node.get("node", entry_node) if isinstance(entry_node, dict) else {}
+    config = trigger.get("configuration") or {}
+    actions = None if config.get("beamAction") == "Timer" else _trigger_actions(
+        api, config.get("integrationIdentifier", ""))
+    report = _trigger_readiness_report(trigger, entry_node=entry_node,
+                                       action_catalog=actions, saved=True)
+    report["triggerId"] = trigger.get("id")
+    report["trigger"] = trigger
+    return report
+
+
+def _webhook_readiness_report(agent_id, webhook, entry_node=None, base_url=None):
+    criteria, warnings = [], []
+
+    def check(name, ok, detail):
+        criteria.append({"name": name, "status": "passed" if ok else "failed",
+                         "detail": detail})
+
+    check("webhook_payload", isinstance(webhook, dict) and bool(webhook),
+          "Webhook is persisted." if isinstance(webhook, dict) and bool(webhook)
+          else "Webhook endpoint has no persisted payload.")
+    webhook = webhook if isinstance(webhook, dict) else {}
+    expected_url = f"{str(base_url or '').rstrip('/')}/{agent_id}/webhook"
+    check("webhook_url", expected_url.startswith("https://") and agent_id in expected_url,
+          "Webhook URL is HTTPS and scoped to this agent." if expected_url.startswith("https://") and agent_id in expected_url
+          else "Webhook URL must be HTTPS and scoped to the requested agent.")
+    if webhook:
+        check("webhook_triggered", webhook.get("triggered") is True,
+              "Webhook is configured to trigger the agent." if webhook.get("triggered") is True
+              else "Webhook requires triggered: true.")
+        if webhook.get("agentId") is not None:
+            check("webhook_agent_id", webhook.get("agentId") == agent_id,
+                  "Webhook belongs to this agent." if webhook.get("agentId") == agent_id
+                  else "Saved webhook belongs to a different agent.")
+        if entry_node is not None:
+            expected_node = entry_node.get("id")
+            saved_node = webhook.get("agentGraphNodeId")
+            valid_node = bool(entry_node.get("isEntryNode")) and (saved_node is None or saved_node == expected_node)
+            check("webhook_entry_node", valid_node,
+                  "Webhook targets the entry node." if valid_node
+                  else "Webhook must target the graph entry node.")
+    failures = [criterion for criterion in criteria if criterion["status"] == "failed"]
+    return {"ready": not failures, "criteria": criteria, "failures": failures,
+            "warnings": warnings, "webhookUrl": expected_url}
+
 def cmd_trigger_actions(api, args):
     data = api.t_get("/agent-trigger/integration/actions",
                      params={"systemIntegrationIdentifier": args.integration})
@@ -2528,11 +2869,13 @@ def cmd_trigger_actions(api, args):
 
 def cmd_create_trigger(api, args):
     spec = _read_json_file(args.trigger_file, "Trigger file")
-    for field in ("agentId", "agentGraphNodeId", "title", "configuration"):
+    for field in ("agentId", "agentGraphNodeId", "title", "prompt", "configuration"):
         if field not in spec:
             raise BeamError(f"Trigger file is missing required field '{field}'.")
+    _require_trigger_preflight(spec)
     body = {
         "title": spec["title"],
+        "prompt": spec["prompt"],
         "agentId": spec["agentId"],
         "agentGraphNodeId": spec["agentGraphNodeId"],
         "integrationProviderId": spec.get("integrationProviderId"),
@@ -2545,7 +2888,10 @@ def cmd_create_trigger(api, args):
         if spec.get(opt) is not None:
             body[opt] = spec[opt]
     data = api.t_post("/agent-trigger", body)
-    return {"created": True, "triggerId": data.get("id"), "trigger": data}
+    verification = _validate_saved_trigger(api, spec["agentId"],
+                                            spec["agentGraphNodeId"], data.get("id"))
+    return {"created": True, "triggerId": data.get("id"), "trigger": data,
+            "verificationPassed": verification["ready"], "triggerReadiness": verification}
 
 
 def cmd_get_triggers(api, args):
@@ -2557,6 +2903,12 @@ def cmd_get_triggers(api, args):
 
 def cmd_update_trigger(api, args):
     spec = _read_json_file(args.trigger_file, "Trigger file")
+    if not _is_uuid(spec.get("agentId")):
+        raise BeamError("Trigger update requires a valid agentId.", code="validation_error",
+                        next_step="Include the trigger's owning agentId in the update file.")
+    if not isinstance(spec.get("title"), str) or not spec["title"].strip():
+        raise BeamError("Trigger update requires a non-empty title.", code="validation_error",
+                        next_step="Include the existing trigger title in the update file.")
     body = {"agentId": spec.get("agentId")}
     for field in ("title", "prompt", "configuration", "timezone",
                   "userDefinedFrequency", "userDefinedFrequencyValue",
@@ -2564,7 +2916,25 @@ def cmd_update_trigger(api, args):
         if spec.get(field) is not None:
             body[field] = spec[field]
     data = api.t_patch(f"/agent-trigger/{args.trigger_id}", body)
-    return {"updated": True, "trigger": data}
+    entry_node_id = data.get("agentGraphNodeId") or spec.get("agentGraphNodeId")
+    verification = _validate_saved_trigger(api, spec["agentId"], entry_node_id,
+                                            args.trigger_id) if _is_uuid(entry_node_id) else {
+        "ready": False,
+        "triggerType": "unknown",
+        "criteria": [{"name": "trigger_entry_node_id", "status": "failed",
+                      "detail": "Saved trigger did not expose agentGraphNodeId for verification."}],
+        "failures": [{"name": "trigger_entry_node_id", "status": "failed",
+                      "detail": "Saved trigger did not expose agentGraphNodeId for verification."}],
+        "warnings": [],
+    }
+    return {"updated": True, "trigger": data,
+            "verificationPassed": verification["ready"], "triggerReadiness": verification}
+
+
+def cmd_validate_trigger(api, args):
+    """Read the persisted trigger and verify it against its concrete type."""
+    return _validate_saved_trigger(api, args.agent_id, args.entry_node_id,
+                                   getattr(args, "trigger_id", None))
 
 
 def cmd_delete_trigger(api, args):
@@ -2584,13 +2954,31 @@ def cmd_create_webhook(api, args):
     if args.entry_node_id:
         body["agentGraphNodeId"] = args.entry_node_id
     data = api.t_post(f"/{args.agent_id}/webhook", body)
+    webhook = api.t_get(f"/{args.agent_id}/webhook")
+    entry_node = None
+    if args.entry_node_id:
+        entry_node = api.get(f"/agent-graphs/{args.agent_id}/nodes/{args.entry_node_id}")
+        entry_node = entry_node.get("node", entry_node) if isinstance(entry_node, dict) else {}
+    verification = _webhook_readiness_report(args.agent_id, webhook, entry_node,
+                                             api.base)
     return {"created": True, "webhook": data,
-            "webhookUrl": f"{api.base}/{args.agent_id}/webhook"}
+            "webhookUrl": f"{api.base}/{args.agent_id}/webhook",
+            "verificationPassed": verification["ready"], "webhookReadiness": verification}
 
 
 def cmd_get_webhook(api, args):
     data = api.t_get(f"/{args.agent_id}/webhook")
     return {"webhook": data, "webhookUrl": f"{api.base}/{args.agent_id}/webhook"}
+
+
+def cmd_validate_webhook(api, args):
+    """Read the persisted webhook and verify its endpoint and target node."""
+    webhook = api.t_get(f"/{args.agent_id}/webhook")
+    entry_node = None
+    if args.entry_node_id:
+        entry_node = api.get(f"/agent-graphs/{args.agent_id}/nodes/{args.entry_node_id}")
+        entry_node = entry_node.get("node", entry_node) if isinstance(entry_node, dict) else {}
+    return _webhook_readiness_report(args.agent_id, webhook, entry_node, api.base)
 
 
 def cmd_delete_webhook(api, args):
@@ -2699,6 +3087,13 @@ def build_parser():
     s.add_argument("toolconfig_file")
     s.add_argument("--objective", default="")
 
+    s = sub.add_parser("attach-mcp-tools",
+                       help="Attach MCP tools to a node without replacing its tool configuration.")
+    s.add_argument("agent_id")
+    s.add_argument("node_id")
+    s.add_argument("attachments_file",
+                   help="JSON array: [{integrationId, integrationProviderId?, tools:[{toolId,isActive}]}].")
+
     s = sub.add_parser("update-node", help="Update a node from a full node-payload file.")
     s.add_argument("agent_id")
     s.add_argument("graph_id")
@@ -2768,6 +3163,12 @@ def build_parser():
     s.add_argument("trigger_id")
     s.add_argument("trigger_file")
 
+    s = sub.add_parser("validate-trigger",
+                       help="Validate a saved timer or integration trigger against Beam's runtime contract.")
+    s.add_argument("agent_id")
+    s.add_argument("entry_node_id")
+    s.add_argument("--trigger-id")
+
     s = sub.add_parser("delete-trigger", help="Delete a trigger.")
     s.add_argument("trigger_id")
 
@@ -2780,6 +3181,11 @@ def build_parser():
 
     s = sub.add_parser("get-webhook", help="Get an agent's webhook URL.")
     s.add_argument("agent_id")
+
+    s = sub.add_parser("validate-webhook",
+                       help="Validate a saved webhook endpoint and optional entry-node binding.")
+    s.add_argument("agent_id")
+    s.add_argument("--entry-node-id")
 
     s = sub.add_parser("delete-webhook", help="Delete an agent's webhook.")
     s.add_argument("agent_id")
@@ -2829,6 +3235,7 @@ COMMANDS = {
     "create": cmd_create,
     "publish": cmd_publish,
     "attach-tool": cmd_attach_tool,
+    "attach-mcp-tools": cmd_attach_mcp_tools,
     "update-node": cmd_update_node,
     "update-node-prompt": cmd_update_node_prompt,
     "update-node-consent": cmd_update_node_consent,
@@ -2841,10 +3248,12 @@ COMMANDS = {
     "create-trigger": cmd_create_trigger,
     "get-triggers": cmd_get_triggers,
     "update-trigger": cmd_update_trigger,
+    "validate-trigger": cmd_validate_trigger,
     "delete-trigger": cmd_delete_trigger,
     "toggle-trigger": cmd_toggle_trigger,
     "create-webhook": cmd_create_webhook,
     "get-webhook": cmd_get_webhook,
+    "validate-webhook": cmd_validate_webhook,
     "delete-webhook": cmd_delete_webhook,
     "test-node": cmd_test_node,
 }
@@ -2872,7 +3281,7 @@ def main(argv=None):
         # publish gate below does that—but it makes missing required fields
         # visible before a user attempts to run or publish it.
         graph_mutations = {
-            "create", "deploy", "attach-tool", "update-node", "update-node-prompt",
+            "create", "deploy", "attach-tool", "attach-mcp-tools", "update-node", "update-node-prompt",
             "update-node-consent", "update-node-params", "update-edge",
             "update-metadata", "add-node", "remove-node",
         }

@@ -13,3 +13,5 @@ Generated from `beam/contracts/operations.yaml`. Prefer MCP; on an unavailable o
 | graph.add-node | reversible-write | null | `beam agent-builder add-node <agentId> <nodeFile> ...` | none | graph.readiness |
 | graph.remove-node | destructive-write | null | `beam agent-builder remove-node <agentId> <nodeId>` | explicit | graph.readiness |
 | graph.test-node | reversible-write | testGraphNode | `beam agent-builder test-node <agentId> <graphId> <nodeId> <paramsJson>` | none | not-required |
+| graph.trigger-readiness | read | null | `beam agent-builder validate-trigger <agentId> <entryNodeId>` | none | not-required |
+| graph.webhook-readiness | read | null | `beam agent-builder validate-webhook <agentId> [--entry-node-id ID]` | none | not-required |
