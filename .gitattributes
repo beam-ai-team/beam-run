@@ -1,0 +1,2 @@
+# This source snapshot intentionally preserves the upstream trailing blank line.
+beam/references/copilot-baseline/domain/routing-table.ts whitespace=-blank-at-eof

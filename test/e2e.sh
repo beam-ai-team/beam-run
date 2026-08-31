@@ -184,6 +184,17 @@ if sandbox BEAM_API_KEY= sh "$BEAM" tasks get >/dev/null 2>&1; then get_rc=0; el
 if sandbox BEAM_API_KEY= sh "$BEAM" tasks submit-input test-task test-node work_item >/dev/null 2>&1; then submit_rc=0; else submit_rc=$?; fi
 [ "$submit_rc" -eq 2 ] && ok "tasks submit-input validates its arguments" || bad "tasks submit-input missing argument should exit 2"
 
+group "Learning API CLI contract"
+printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam learning <cmd>' && ok "help documents Learning API commands" || bad "missing Learning API help"
+if sandbox BEAM_API_KEY= sh "$BEAM" learning tools test-agent >/dev/null 2>&1; then learning_tools_rc=0; else learning_tools_rc=$?; fi
+[ "$learning_tools_rc" -eq 2 ] && ok "learning tools requires the documented date range" || bad "learning tools should require dates"
+if sandbox BEAM_API_KEY= sh "$BEAM" learning tool test-agent test-tool 2026-01-01 >/dev/null 2>&1; then learning_tool_rc=0; else learning_tool_rc=$?; fi
+[ "$learning_tool_rc" -eq 2 ] && ok "learning tool requires the documented date range" || bad "learning tool should require dates"
+if sandbox BEAM_API_KEY= sh "$BEAM" learning feedback-summary test-agent >/dev/null 2>&1; then feedback_summary_rc=0; else feedback_summary_rc=$?; fi
+[ "$feedback_summary_rc" -eq 2 ] && ok "learning feedback-summary validates its arguments" || bad "feedback-summary should validate its arguments"
+if sandbox BEAM_API_KEY= sh "$BEAM" learning update-feedback feedback-1 >/dev/null 2>&1; then update_feedback_rc=0; else update_feedback_rc=$?; fi
+[ "$update_feedback_rc" -eq 2 ] && ok "learning update-feedback validates its arguments" || bad "update-feedback should validate its arguments"
+
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY to run the authenticated checks.\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] || exit 1
