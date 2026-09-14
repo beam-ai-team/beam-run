@@ -44,7 +44,7 @@ if printf '%s' "$url" | grep -q '/v2/user/me'; then
 elif printf '%s' "$url" | grep -q '/v2/workspace'; then
   printf '%s' '{"id":"workspace-new","name":"Prospect Demo"}' > "$out"; printf 201
 else
-  [ -z "${BEAM_CAPTURE_DIR:-}" ] || printf '%s\t%s\n' "$url" "$workspace" >> "$BEAM_CAPTURE_DIR/requests"
+  [ -z "${BEAM_CAPTURE_DIR:-}" ] || printf '%s\t%s\t%s\n' "$url" "$workspace" "$key" >> "$BEAM_CAPTURE_DIR/requests"
   printf '%s' '{"ok":true}' > "$out"; printf 200
 fi
 SH
@@ -55,18 +55,13 @@ run() {
 }
 
 printf '\n=== connection requires a workspace URL ===\n'
-if missing_url="$(run BEAM_SESSION_ID=no-url BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
+if missing_url="$(run BEAM_SESSION_ID=no-url BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
 if [ "$rc" -ne 3 ] || ! printf '%s' "$missing_url" | grep -q workspace_url_missing; then fail "login assumed an instance without a workspace URL"; fi
 if root_url="$(run BEAM_SESSION_ID=root-url BEAM_WORKSPACE_URL=https://app.beam.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
 if [ "$rc" -ne 2 ] || ! printf '%s' "$root_url" | grep -q workspace_url_invalid; then fail "login accepted an instance root instead of a workspace URL"; fi
 ok "new connections never assume Beam App"
 
 printf '\n=== detected instances and duplicate safety ===\n'
-mkdir -p "$tmp/legacy-config"
-printf 'BEAM_API_KEY=enterprise-key\nBEAM_WORKSPACE_ID=ent-a\n' > "$tmp/legacy-config/credentials"
-if migrated="$(printf '1\n' | env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-config" PATH="$tmp/bin:$PATH" BEAM_TEST_INTERACTIVE=1 BEAM_SESSION_ID=legacy-enterprise BEAM_API_URL=https://api.enterprise.beamstudio.ai sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
-if [ "$rc" -ne 0 ] || ! printf '%s' "$migrated" | grep -q 'Checked out Beam Enterprise'; then fail "legacy enterprise connection did not migrate during checkout"; fi
-[ -f "$tmp/legacy-config/instances/enterprise" ] && [ -f "$tmp/legacy-config/credentials.v1-backup" ] || fail "legacy credentials were not migrated safely"
 run BEAM_SESSION_ID=login BEAM_WORKSPACE_URL=https://app.beam.ai/prod-a/agents BEAM_API_KEY=prod-key sh "$BEAM" login --workspace-id Alpha >/dev/null 2>&1 || fail "Beam App login"
 [ -f "$tmp/config/instances/app" ] || fail "Beam App profile was not saved"
 if duplicate="$(run BEAM_SESSION_ID=duplicate BEAM_WORKSPACE_URL=https://app.beam.ai/prod-a/agents BEAM_API_KEY=prod-key sh "$BEAM" login 2>&1)"; then rc=0; else rc=$?; fi
@@ -88,17 +83,33 @@ if missing="$(run BEAM_SESSION_ID=session-c sh "$BEAM" agents list 2>&1)"; then 
 if [ "$rc" -ne 2 ] || ! printf '%s' "$missing" | grep -q checkout_required; then fail "new multi-instance session did not require checkout"; fi
 ok "parallel sessions retain independent instance and workspace context"
 
+run BEAM_SESSION_ID=session-b BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp BEAM_API_KEY=enterprise-key BEAM_WORKSPACE_ID=ent-a sh "$BEAM" agents list >/dev/null || fail "saved checkout ignored inherited overrides"
+grep -q 'api.beamstudio.ai.*prod-a.*prod-key' "$tmp/requests" || fail "environment values overrode the saved checkout"
+ok "saved checkout controls endpoint, key, and workspace"
+
 printf '\n=== workspace can be completed after a scoped prompt ===\n'
 mkdir -p "$tmp/single-config/instances"
 cp "$tmp/config/instances/app" "$tmp/single-config/instances/app"
 grep -v '^BEAM_WORKSPACE_' "$tmp/single-config/instances/app" > "$tmp/single-config/instances/app.tmp"
 mv "$tmp/single-config/instances/app.tmp" "$tmp/single-config/instances/app"
+env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/single-config" BEAM_SESSION_ID=read-only PATH="$tmp/bin:$PATH" sh "$BEAM" agent-builder --help >/dev/null 2>&1 || fail "read-only help failed"
+[ ! -e "$tmp/single-config/sessions/read-only" ] || fail "read-only help created a session"
 if env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/single-config" BEAM_SESSION_ID=needs-workspace PATH="$tmp/bin:$PATH" sh "$BEAM" agents list >/dev/null 2>&1; then rc=0; else rc=$?; fi
 [ "$rc" -eq 2 ] || fail "missing workspace should stop scoped work"
+recover_tools="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | env BEAM_CONFIG_DIR="$tmp/single-config" BEAM_SESSION_ID=needs-workspace BEAM_API_KEY= python3 "$PROXY")"
+printf '%s' "$recover_tools" | grep -q 'beam_checkout' || fail "locked instance without a workspace hid checkout"
 env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/single-config" BEAM_SESSION_ID=needs-workspace PATH="$tmp/bin:$PATH" sh "$BEAM" checkout app Alpha >/dev/null 2>&1 || fail "instance could not complete its workspace checkout"
 completed="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/single-config" BEAM_SESSION_ID=needs-workspace PATH="$tmp/bin:$PATH" sh "$BEAM" checkout)"
 printf '%s' "$completed" | grep -q '"workspaceId":"prod-a".*"locked":1' || fail "completed checkout did not retain its lock"
 ok "a locked instance can fill its initially missing workspace"
+
+mkdir -p "$tmp/workspace-command/instances"
+cp "$tmp/config/instances/app" "$tmp/workspace-command/instances/app"
+workspace_command="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/workspace-command" BEAM_SESSION_ID=workspace-command PATH="$tmp/bin:$PATH" sh "$BEAM" workspace prod-a)" || fail "workspace compatibility command failed"
+printf '%s' "$workspace_command" | grep -q '"locked":true' || fail "workspace compatibility command did not lock"
+if env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/workspace-command" BEAM_SESSION_ID=workspace-command PATH="$tmp/bin:$PATH" sh "$BEAM" workspace prod-b >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -eq 2 ] || fail "workspace compatibility command switched a locked session"
+ok "workspace compatibility command uses the checkout lock"
 
 fresh_tools='{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 fresh_bridge="$(printf '%s\n' "$fresh_tools" | env BEAM_CONFIG_DIR="$tmp/single-config" BEAM_SESSION_ID=mcp-new BEAM_API_KEY= python3 "$PROXY")"
@@ -118,6 +129,8 @@ printf '\n=== local bridge sees the same session ===\n'
 status='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"beam_session_status","arguments":{}}}'
 bridge="$(printf '%s\n' "$status" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-a BEAM_API_KEY= python3 "$PROXY")"
 printf '%s' "$bridge" | grep -q 'Beam Enterprise.*Enterprise Demo.*locked' || fail "bridge context differs from CLI context"
+saved_bridge="$(printf '%s\n' "$status" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-b BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp BEAM_API_KEY=enterprise-key BEAM_WORKSPACE_ID=ent-a python3 "$PROXY")"
+printf '%s' "$saved_bridge" | grep -q 'Beam App.*Alpha.*locked' || fail "bridge environment overrode its saved checkout"
 ok "agent tools and CLI share the same visible, locked checkout"
 
 printf '\n=== interactive workspace creation ===\n'
@@ -137,19 +150,15 @@ run BEAM_SESSION_ID=future-region BEAM_WORKSPACE_URL=https://app.eu.beam.ai/eu-a
 grep -q 'BEAM_INSTANCE_NAME=Beam EU' "$tmp/config/instances/eu" || fail "unlisted future region was not derived from its URL"
 ok "returning users can add a new instance from checkout"
 
-printf '\n=== existing credentials survive updates ===\n'
+printf '\n=== old single-instance users reconnect once ===\n'
 mkdir -p "$tmp/legacy-app"
 printf 'BEAM_API_KEY=prod-key\nBEAM_WORKSPACE_ID=prod-a\n' > "$tmp/legacy-app/credentials"
-env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" sh "$BEAM" whoami >/dev/null || fail "legacy connection stopped working after update"
-[ -f "$tmp/legacy-app/credentials" ] || fail "ordinary use removed legacy credentials"
-legacy_app="$(printf '1\n' | env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" BEAM_TEST_INTERACTIVE=1 BEAM_SESSION_ID=legacy-app sh "$BEAM" checkout 2>&1)" || fail "legacy Beam App checkout failed"
-printf '%s' "$legacy_app" | grep -q 'Alpha (previously used)' || fail "legacy checkout did not show the previous workspace first"
-if printf '%s' "$legacy_app" | grep -Eq 'Paste your Beam workspace URL|Add your Beam API key'; then fail "legacy checkout asked the user to reconnect"; fi
-[ -f "$tmp/legacy-app/instances/app" ] && [ -f "$tmp/legacy-app/credentials.v1-backup" ] || fail "legacy credentials were not migrated safely"
-mkdir -p "$tmp/legacy-failed"
-printf 'BEAM_API_KEY=unknown-key\nBEAM_WORKSPACE_ID=old-workspace\n' > "$tmp/legacy-failed/credentials"
-if env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-failed" PATH="$tmp/bin:$PATH" BEAM_WORKSPACE_URL=https://app.enterprise.beam.ai/old-workspace BEAM_API_KEY= sh "$BEAM" login </dev/null >/dev/null 2>&1; then rc=0; else rc=$?; fi
-if [ "$rc" -ne 3 ] || [ ! -f "$tmp/legacy-failed/credentials" ] || [ -e "$tmp/legacy-failed/credentials.v1-backup" ]; then fail "failed migration changed legacy credentials"; fi
-ok "existing users remain connected and migrate atomically"
+if env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" sh "$BEAM" whoami >/dev/null 2>&1; then rc=0; else rc=$?; fi
+[ "$rc" -eq 3 ] || fail "old credentials were silently reused"
+if legacy_setup="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" sh "$BEAM" setup </dev/null 2>&1)"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 3 ] || ! printf '%s' "$legacy_setup" | grep -q 'Sign in'; then fail "upgrade did not request a fresh connection"; fi
+env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" BEAM_SESSION_ID=legacy-app BEAM_WORKSPACE_URL=https://app.beam.ai/prod-a/agents BEAM_API_KEY=prod-key sh "$BEAM" login >/dev/null 2>&1 || fail "legacy user could not reconnect normally"
+[ -f "$tmp/legacy-app/instances/app" ] || fail "reconnected instance was not saved"
+ok "old credentials are ignored and the normal connection flow succeeds"
 
 printf '\nSession checkout checks PASSED.\n'

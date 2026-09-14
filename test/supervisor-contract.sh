@@ -59,8 +59,9 @@ if HOME="$tmp" BEAM_CONFIG_DIR="$tmp/config" sh "$BEAM" learning optimize agent-
 ok "auth and destructive confirmation gates are enforced"
 
 printf '\n=== deterministic fallback requests ===\n'
-mkdir -p "$tmp/bin" "$tmp/config"
-printf 'BEAM_API_KEY=sk-test\nBEAM_WORKSPACE_ID=workspace-1\n' > "$tmp/config/credentials"
+mkdir -p "$tmp/bin" "$tmp/config/instances" "$tmp/config/sessions"
+printf 'BEAM_INSTANCE_ID=app\nBEAM_INSTANCE_NAME=Beam App\nBEAM_API_URL=https://api.beamstudio.ai\nBEAM_MCP_URL=https://api.beamstudio.ai/mcp\nBEAM_API_KEY=sk-test\nBEAM_WORKSPACE_ID=workspace-1\nBEAM_WORKSPACE_NAME=Test Workspace\n' > "$tmp/config/instances/app"
+printf 'BEAM_INSTANCE_ID=app\nBEAM_WORKSPACE_ID=workspace-1\nBEAM_WORKSPACE_NAME=Test Workspace\nBEAM_SESSION_LOCKED=1\n' > "$tmp/config/sessions/supervisor"
 cat > "$tmp/bin/curl" <<'SH'
 #!/bin/sh
 body="$(sed -n '1,$p')"
@@ -114,7 +115,7 @@ fi
 SH
 chmod +x "$tmp/bin/curl"
 
-fallback_env="HOME=$tmp BEAM_CONFIG_DIR=$tmp/config PATH=$tmp/bin:$PATH BEAM_TEST_CAPTURE=$tmp/body"
+fallback_env="HOME=$tmp BEAM_CONFIG_DIR=$tmp/config BEAM_SESSION_ID=supervisor PATH=$tmp/bin:$PATH BEAM_TEST_CAPTURE=$tmp/body"
 # shellcheck disable=SC2086
 mcp="$(env $fallback_env sh "$BEAM" mcp check --tool task_create)" || fail "healthy MCP tool check failed"
 printf '%s' "$mcp" | grep -q '"available":true' || fail "MCP tool availability missing"
@@ -122,10 +123,10 @@ if env $fallback_env sh "$BEAM" mcp check --tool absent_tool >/dev/null 2>&1; th
 [ "$rc" -eq 2 ] || fail "missing MCP tool should select fallback with exit 2"
 ok "MCP health distinguishes healthy, available, and missing-tool states"
 
-if single_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/single-config" BEAM_API_URL=https://api.beamstudio.ai BEAM_API_KEY=sk-test sh "$BEAM" login </dev/null 2>&1)"; then :; else fail "single-workspace login failed"; fi
+if single_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/single-config" BEAM_WORKSPACE_URL=https://app.beam.ai/workspace-1 BEAM_API_KEY=sk-test sh "$BEAM" login </dev/null 2>&1)"; then :; else fail "single-workspace login failed"; fi
 printf '%s' "$single_workspace_login" | grep -q '"workspaceId":"workspace-1"' || fail "sole workspace was not selected"
 printf '%s' "$single_workspace_login" | grep -q 'Checked out Beam App / Test Workspace' || fail "sole workspace selection was not named"
-multiple_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/multiple-config" BEAM_API_URL=https://api.beamstudio.ai BEAM_API_KEY=sk-test BEAM_TEST_WORKSPACE_MODE=multiple sh "$BEAM" login </dev/null 2>&1)" || fail "multiple-workspace login failed"
+multiple_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/multiple-config" BEAM_WORKSPACE_URL=https://app.beam.ai/workspace-1 BEAM_API_KEY=sk-test BEAM_TEST_WORKSPACE_MODE=multiple sh "$BEAM" login </dev/null 2>&1)" || fail "multiple-workspace login failed"
 printf '%s' "$multiple_workspace_login" | grep -q '"workspaceId":null,"workspaceCount":2' || fail "multiple workspaces should remain unselected"
 printf '%s' "$multiple_workspace_login" | grep -q 'Beam App has 2 workspaces' || fail "multiple-workspace prompt omitted the workspace count"
 printf '%s' "$multiple_workspace_login" | grep -q 'beam checkout app' || fail "multiple-workspace prompt omitted selection guidance"

@@ -61,13 +61,6 @@ def profile_path(instance_id):
 
 
 def load_context():
-    if API_KEY:
-        return {
-            "key": API_KEY, "api": API_URL, "mcp": MCP_URL,
-            "instance_id": "environment", "instance_name": "Beam",
-            "workspace_id": os.environ.get("BEAM_WORKSPACE_ID", ""),
-            "workspace_name": "", "locked": False,
-        }
     session = read_values(SESSION_FILE)
     profiles = profile_paths()
     instance_id = session.get("BEAM_INSTANCE_ID", "")
@@ -86,12 +79,13 @@ def load_context():
                 "workspace_name": session.get("BEAM_WORKSPACE_NAME", ""),
                 "locked": session.get("BEAM_SESSION_LOCKED") == "1",
             }
-    legacy = read_values(os.path.join(CONFIG_DIR, "credentials"))
-    if legacy.get("BEAM_API_KEY") and not profiles:
+    if profiles:
+        return None
+    if API_KEY:
         return {
-            "key": legacy["BEAM_API_KEY"], "api": API_URL, "mcp": MCP_URL,
-            "instance_id": "app", "instance_name": "Beam App",
-            "workspace_id": legacy.get("BEAM_WORKSPACE_ID", ""),
+            "key": API_KEY, "api": API_URL, "mcp": MCP_URL,
+            "instance_id": "environment", "instance_name": "Beam",
+            "workspace_id": os.environ.get("BEAM_WORKSPACE_ID", ""),
             "workspace_name": "", "locked": False,
         }
     return None
@@ -300,7 +294,7 @@ def handle_local(msg, context):
         return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
     if method == "tools/list":
         tools = [STATUS_TOOL]
-        if not context or not context.get("locked"):
+        if not context or not context.get("locked") or not context.get("workspace_id"):
             tools.append(CHECKOUT_TOOL)
         if not profile_paths() and not API_KEY:
             tools.append(SETUP_TOOL)
@@ -330,7 +324,7 @@ def enrich(reply, context, msg):
             names = {tool.get("name") for tool in result["tools"]}
             if STATUS_TOOL["name"] not in names:
                 result["tools"].append(STATUS_TOOL)
-            if not context.get("locked") and CHECKOUT_TOOL["name"] not in names:
+            if (not context.get("locked") or not context.get("workspace_id")) and CHECKOUT_TOOL["name"] not in names:
                 result["tools"].append(CHECKOUT_TOOL)
         if isinstance(result, dict) and "serverInfo" in result:
             result["instructions"] = context_text(context) + "\n\n" + (result.get("instructions") or "")

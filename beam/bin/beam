@@ -85,7 +85,7 @@ fi
 LEGACY_CREDS_FILE="$CONFIG_DIR/credentials"
 INSTANCES_DIR="$CONFIG_DIR/instances"
 SESSIONS_DIR="$CONFIG_DIR/sessions"
-CREDS_FILE="$LEGACY_CREDS_FILE"
+CREDS_FILE="$CONFIG_DIR/no-checkout"
 ACTIVE_INSTANCE_ID=""
 ACTIVE_INSTANCE_NAME=""
 
@@ -262,8 +262,8 @@ activate_profile_file() {
   CREDS_FILE="$profile"
   ACTIVE_INSTANCE_ID="$(file_value "$profile" BEAM_INSTANCE_ID 2>/dev/null || basename "$profile")"
   ACTIVE_INSTANCE_NAME="$(file_value "$profile" BEAM_INSTANCE_NAME 2>/dev/null || printf '%s' "$ACTIVE_INSTANCE_ID")"
-  if [ -z "$USER_API_URL" ]; then API_BASE="$(file_value "$profile" BEAM_API_URL 2>/dev/null || printf '%s' "$PRODUCTION_API_BASE")"; fi
-  if [ -z "$USER_MCP_URL" ]; then MCP_URL="$(file_value "$profile" BEAM_MCP_URL 2>/dev/null || printf '%s/mcp' "${API_BASE%/}")"; fi
+  API_BASE="$(file_value "$profile" BEAM_API_URL 2>/dev/null || printf '%s' "$PRODUCTION_API_BASE")"
+  MCP_URL="$(file_value "$profile" BEAM_MCP_URL 2>/dev/null || printf '%s/mcp' "${API_BASE%/}")"
 }
 
 load_session_context() {
@@ -276,9 +276,6 @@ load_session_context() {
   profile="$(only_profile 2>/dev/null || true)"
   if [ -n "$profile" ]; then
     activate_profile_file "$profile"
-    # A new host session chooses its own workspace; never inherit another
-    # session's last workspace from the instance profile.
-    write_session "$ACTIVE_INSTANCE_ID" "" "" 0
   elif [ "$(profile_count)" -gt 0 ]; then
     # Multiple saved instances require an explicit per-session checkout. Never
     # fall back to the legacy file, which could send work to the wrong instance.
@@ -287,15 +284,19 @@ load_session_context() {
 }
 
 read_key() {
+  if [ -n "$ACTIVE_INSTANCE_ID" ]; then creds_value BEAM_API_KEY; return; fi
   if [ -n "${BEAM_API_KEY:-}" ]; then printf '%s' "$BEAM_API_KEY"; return 0; fi
   creds_value BEAM_API_KEY
 }
 
 read_workspace() {
+  if [ -n "$ACTIVE_INSTANCE_ID" ]; then
+    value="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
+    [ -n "$value" ] || return 1
+    printf '%s' "$value"
+    return 0
+  fi
   if [ -n "${BEAM_WORKSPACE_ID:-}" ]; then printf '%s' "$BEAM_WORKSPACE_ID"; return 0; fi
-  value="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
-  if [ -n "$value" ]; then printf '%s' "$value"; return 0; fi
-  [ -z "$ACTIVE_INSTANCE_ID" ] || return 1
   creds_value BEAM_WORKSPACE_ID
 }
 
@@ -308,27 +309,6 @@ write_creds() {
     write_session "$ACTIVE_INSTANCE_ID" "$workspace" "$workspace_name" "$(file_value "$SESSION_FILE" BEAM_SESSION_LOCKED 2>/dev/null || printf '0')"
     return
   fi
-  ensure_config_dir
-  umask 077
-  {
-    printf 'BEAM_API_KEY=%s\n' "$key"
-    if [ -n "$workspace" ]; then printf 'BEAM_WORKSPACE_ID=%s\n' "$workspace"; fi
-  } > "$CREDS_FILE"
-  chmod 600 "$CREDS_FILE"
-}
-
-migrate_legacy_profile() {
-  [ -f "$LEGACY_CREDS_FILE" ] || return 0
-  [ "$(profile_count)" -eq 0 ] || return 0
-  key="$(file_value "$LEGACY_CREDS_FILE" BEAM_API_KEY 2>/dev/null || true)"
-  [ -n "$key" ] || return 0
-  workspace="$(file_value "$LEGACY_CREDS_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
-  # Old Beam Run meant Beam App unless the user explicitly supplied another
-  # API URL. Verify that same destination before changing any local file.
-  legacy_url="${USER_API_URL:-$PRODUCTION_API_BASE}"
-  if detect_key_instance "$key" "$legacy_url" api; then :; else return 0; fi
-  write_profile "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_MCP_URL" "$key" "$workspace" ""
-  mv "$LEGACY_CREDS_FILE" "$CONFIG_DIR/credentials.v1-backup"
 }
 
 # --- JSON (jq -> python3 -> POSIX best-effort) ---------------------------------
@@ -869,13 +849,6 @@ cmd_instance() {
 cmd_checkout() {
   selector="${1:-}"; workspace_selector="${2:-}"
   [ $# -le 2 ] || die "validation_error" "usage: beam checkout <instance> [workspace]" 2
-  if [ "$(profile_count)" -eq 0 ] && [ -f "$LEGACY_CREDS_FILE" ]; then
-    # An existing v1 connection already had a destination: its explicit API URL,
-    # or Beam App when none was configured. Reuse exactly that routing, verify it,
-    # and migrate atomically so an update never asks for the key again.
-    migrate_legacy_profile
-    [ "$(profile_count)" -eq 0 ] || load_session_context
-  fi
   if [ -z "$selector" ]; then
     if [ -n "$ACTIVE_INSTANCE_ID" ] && read_workspace >/dev/null 2>&1; then
       ws="$(read_workspace 2>/dev/null || true)"
@@ -1007,9 +980,6 @@ EOF
 }
 
 cmd_login() {
-  # Upgrade legacy credentials only during an explicit auth change. Ordinary
-  # reads remain read-only and keep working with the v1 credentials file.
-  migrate_legacy_profile
   load_session_context
   key=""; workspace=""; workspace_url="${BEAM_WORKSPACE_URL:-}"; url_kind="workspace"; replace=0
   while [ $# -gt 0 ]; do
@@ -1025,7 +995,6 @@ cmd_login() {
     esac
   done
 
-  if [ -z "$workspace_url" ] && [ -n "$USER_API_URL" ] && [ "$ignored_loopback_endpoint" != "1" ]; then workspace_url="$API_BASE"; url_kind="api"; fi
   if [ -z "$workspace_url" ] && [ "$replace" -eq 1 ] && [ -n "$ACTIVE_INSTANCE_ID" ]; then
     workspace_url="$API_BASE"; url_kind="api"
   fi
@@ -1049,10 +1018,6 @@ cmd_login() {
 
   if [ "$key" = "-" ]; then IFS= read -r key || true; fi
   if [ -z "$key" ] && [ -n "${BEAM_API_KEY:-}" ]; then key="$BEAM_API_KEY"; fi
-  if [ -z "$key" ] && [ -f "$LEGACY_CREDS_FILE" ]; then
-    key="$(file_value "$LEGACY_CREDS_FILE" BEAM_API_KEY 2>/dev/null || true)"
-    [ -z "$key" ] || printf 'Existing Beam key found; it will be carried over.\n' >&2
-  fi
   if [ -z "$key" ]; then
     if can_prompt; then
       printf 'Add your Beam API key (it stays hidden as you type): ' >&2
@@ -1095,9 +1060,6 @@ cmd_login() {
   unset LOGIN_KEY
 
   write_profile "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_MCP_URL" "$key" "$SELECTED_WORKSPACE_ID" "$SELECTED_WORKSPACE_NAME"
-  if [ -f "$LEGACY_CREDS_FILE" ] && [ "$(file_value "$LEGACY_CREDS_FILE" BEAM_API_KEY 2>/dev/null || true)" = "$key" ]; then
-    mv "$LEGACY_CREDS_FILE" "$CONFIG_DIR/credentials.v1-backup"
-  fi
   if [ "$current_locked" != "1" ] || [ "$current_instance" = "$DETECTED_INSTANCE_ID" ]; then
     write_session "$DETECTED_INSTANCE_ID" "$SELECTED_WORKSPACE_ID" "$SELECTED_WORKSPACE_NAME" "$(if [ -n "$SELECTED_WORKSPACE_ID" ]; then printf 1; else printf 0; fi)"
     activate_profile_file "$target_profile"
@@ -1130,7 +1092,6 @@ cmd_login() {
 cmd_logout() {
   if [ "$ACTIVE_INSTANCE_ID" != "" ] && [ -f "$(profile_file "$ACTIVE_INSTANCE_ID")" ]; then
     rm -f "$(profile_file "$ACTIVE_INSTANCE_ID")" "$SESSION_FILE"
-    [ -f "$CONFIG_DIR/credentials.v1-backup" ] && rm -f "$CONFIG_DIR/credentials.v1-backup"
     printf '{"ok":true,"loggedOut":true,"instanceId":"%s"}\n' "$ACTIVE_INSTANCE_ID"
   elif [ -f "$LEGACY_CREDS_FILE" ]; then
     rm -f "$LEGACY_CREDS_FILE"
@@ -1219,32 +1180,8 @@ cmd_workspace() {
     printf '{"workspaceId":"%s"}\n' "$workspace"
     return 0
   fi
-  require_instance_checkout
-  key="$(read_key)" || die "auth_missing" "not signed in — run beam login first" 3
-  if verify_response="$(verify_key "$key")"; then verify_rc=0; else verify_rc=$?; fi
-  if [ "$verify_rc" -eq 3 ]; then die "auth_missing" "API key rejected — run beam login" 3; fi
-  if [ "$verify_rc" -ne 0 ]; then die "network_error" "could not validate workspace access with $API_BASE" 5; fi
-  workspace_ids="$(printf '%s' "$verify_response" | workspaces_tsv | cut -f1)"
-  if ! printf '%s\n' "$workspace_ids" | grep -Fx -- "$1" >/dev/null 2>&1; then
-    die "workspace_not_found" "workspace $1 is not available to this account. Run: beam workspace list <search>" 2
-  fi
-  workspace_name="$(printf '%s' "$verify_response" | workspaces_tsv | awk -F '\t' -v id="$1" '$1 == id {print $2; exit}')"
-  current_workspace="$(read_workspace 2>/dev/null || true)"
-  if [ "$(file_value "$SESSION_FILE" BEAM_SESSION_LOCKED 2>/dev/null || printf '0')" = "1" ]; then
-    if [ "$current_workspace" != "$1" ]; then
-      [ -z "$current_workspace" ] || die "session_locked" "this session is locked to workspace $current_workspace. Start a new session to use another workspace." 2
-    else
-      printf '{"ok":true,"instanceId":"%s","workspaceId":"%s","workspaceName":%s,"locked":true}\n' "$ACTIVE_INSTANCE_ID" "$1" "$(if [ -n "$workspace_name" ]; then json_quote "$workspace_name"; else printf null; fi)"
-      return 0
-    fi
-  fi
-  if [ -n "$ACTIVE_INSTANCE_ID" ]; then
-    write_profile "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$API_BASE" "$MCP_URL" "$key" "$1" "$workspace_name"
-    write_session "$ACTIVE_INSTANCE_ID" "$1" "$workspace_name" "$(file_value "$SESSION_FILE" BEAM_SESSION_LOCKED 2>/dev/null || printf '0')"
-  else
-    write_creds "$key" "$1"
-  fi
-  printf '{"ok":true,"instanceId":"%s","workspaceId":"%s","workspaceName":%s}\n' "$ACTIVE_INSTANCE_ID" "$1" "$(if [ -n "$workspace_name" ]; then json_quote "$workspace_name"; else printf null; fi)"
+  [ -n "$ACTIVE_INSTANCE_ID" ] || die "checkout_required" "connect an instance first with: beam login" 2
+  cmd_checkout "$ACTIVE_INSTANCE_ID" "$1"
 }
 
 cmd_workspace_create() {

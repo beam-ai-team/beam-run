@@ -68,7 +68,7 @@ needs to a permanent location.
 
 ## Run the `setup` skill
 
-Once installed, run the bundled **`setup` skill** — in a terminal, `beam setup` asks for a Beam workspace URL, opens the masked API-key prompt, then lets the user select or create a workspace. When an agent or CI runs it without a terminal, it prints the exact next command instead. Existing credentials remain valid across plugin updates. Each coding-agent conversation selects and locks its own instance and workspace.
+Once installed, run the bundled **`setup` skill** — in a terminal, `beam setup` asks for a Beam workspace URL, opens the masked API-key prompt, then lets the user select or create a workspace. When an agent or CI runs it without a terminal, it prints the exact next command instead. Users upgrading from the old single-instance connection reconnect once. Each coding-agent conversation selects and locks its own instance and workspace.
 
 Installing the plugin wires up the connection, but it can't authenticate you: until you run `beam login`, the Beam server has no key and exposes a single `beam_setup_status` tool that tells your agent exactly what to do next. `beam login` then stores the key and registers the connection with your agent automatically — including the Claude desktop app, which has no `claude` CLI.
 

@@ -126,7 +126,7 @@ PY
 if DEV_LOGIN="$(env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-local" \
   BEAM_CONFIG_DIR="$FAKE/.config/beam-local" BEAM_API_URL="http://localhost:4000" \
   BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV=1 \
-  sh "$BEAM" login --api-key sk-test 2>&1)"; then dev_login_rc=0; else dev_login_rc=$?; fi
+  sh "$BEAM" login --api-url http://localhost:4000 --api-key sk-test 2>&1)"; then dev_login_rc=0; else dev_login_rc=$?; fi
 [ "$dev_login_rc" -eq 3 ] && ok "explicit local development keeps fake auth failure" || bad "unexpected local-dev login exit $dev_login_rc"
 grep -q 'http://localhost:4000/v2/user/me' "$FAKE/curl-local" && ok "explicit local development keeps loopback API" || bad "explicit local development did not preserve loopback API"
 printf '%s' "$DEV_LOGIN" | grep -q 'Ignoring inherited Beam localhost' && bad "local-development mode was incorrectly ignored" || ok "explicit local development avoids production fallback warning"
