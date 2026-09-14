@@ -96,7 +96,9 @@ When fully connected and a tool call has succeeded, **celebrate** — 🎉 — a
 ## Notes
 - A workspace URL routes the key to exactly one instance. Regional hosts use
   `app.{region}.beam.ai`, from which Beam Run derives
-  `api.{region}.beamstudio.ai`; no static region registry is used. Connections are stored locally, and legacy credentials are
-  kept until migration succeeds. A conversation uses exactly one locked
-  instance/workspace; the CLI and MCP bridge share that context.
+  `api.{region}.beamstudio.ai`; no static region registry is used. Connections
+  are stored locally, and legacy credentials are kept until migration succeeds.
+  Legacy connections retain their previous routing and do not ask for the URL
+  or key again. A conversation uses exactly one locked instance/workspace; the
+  CLI and MCP bridge share that context.
 - A few Beam MCP tools are temporarily broken server-side (`getCurrentUser`, `getTaskDetails`, `getToolOutputSchema`, `getToolOptimizationStatus`) — use the matching Beam Run CLI fallback after setup completes.

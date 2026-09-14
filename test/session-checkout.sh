@@ -64,8 +64,8 @@ ok "new connections never assume Beam App"
 printf '\n=== detected instances and duplicate safety ===\n'
 mkdir -p "$tmp/legacy-config"
 printf 'BEAM_API_KEY=enterprise-key\nBEAM_WORKSPACE_ID=ent-a\n' > "$tmp/legacy-config/credentials"
-if migrated="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-config" PATH="$tmp/bin:$PATH" BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_API_KEY=enterprise-key sh "$BEAM" login 2>&1)"; then rc=0; else rc=$?; fi
-if [ "$rc" -ne 2 ] || ! printf '%s' "$migrated" | grep -q instance_exists; then fail "legacy enterprise key was not detected during migration"; fi
+if migrated="$(printf '1\n' | env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-config" PATH="$tmp/bin:$PATH" BEAM_TEST_INTERACTIVE=1 BEAM_SESSION_ID=legacy-enterprise BEAM_API_URL=https://api.enterprise.beamstudio.ai sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ] || ! printf '%s' "$migrated" | grep -q 'Checked out Beam Enterprise'; then fail "legacy enterprise connection did not migrate during checkout"; fi
 [ -f "$tmp/legacy-config/instances/enterprise" ] && [ -f "$tmp/legacy-config/credentials.v1-backup" ] || fail "legacy credentials were not migrated safely"
 run BEAM_SESSION_ID=login BEAM_WORKSPACE_URL=https://app.beam.ai/prod-a/agents BEAM_API_KEY=prod-key sh "$BEAM" login --workspace-id Alpha >/dev/null 2>&1 || fail "Beam App login"
 [ -f "$tmp/config/instances/app" ] || fail "Beam App profile was not saved"
@@ -142,7 +142,9 @@ mkdir -p "$tmp/legacy-app"
 printf 'BEAM_API_KEY=prod-key\nBEAM_WORKSPACE_ID=prod-a\n' > "$tmp/legacy-app/credentials"
 env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" sh "$BEAM" whoami >/dev/null || fail "legacy connection stopped working after update"
 [ -f "$tmp/legacy-app/credentials" ] || fail "ordinary use removed legacy credentials"
-env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" BEAM_WORKSPACE_URL=https://app.beam.ai/prod-a/agents BEAM_API_KEY=prod-key sh "$BEAM" login >/dev/null 2>&1 || rc=$?
+legacy_app="$(printf '1\n' | env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/legacy-app" PATH="$tmp/bin:$PATH" BEAM_TEST_INTERACTIVE=1 BEAM_SESSION_ID=legacy-app sh "$BEAM" checkout 2>&1)" || fail "legacy Beam App checkout failed"
+printf '%s' "$legacy_app" | grep -q 'Alpha (previously used)' || fail "legacy checkout did not show the previous workspace first"
+if printf '%s' "$legacy_app" | grep -Eq 'Paste your Beam workspace URL|Add your Beam API key'; then fail "legacy checkout asked the user to reconnect"; fi
 [ -f "$tmp/legacy-app/instances/app" ] && [ -f "$tmp/legacy-app/credentials.v1-backup" ] || fail "legacy credentials were not migrated safely"
 mkdir -p "$tmp/legacy-failed"
 printf 'BEAM_API_KEY=unknown-key\nBEAM_WORKSPACE_ID=old-workspace\n' > "$tmp/legacy-failed/credentials"

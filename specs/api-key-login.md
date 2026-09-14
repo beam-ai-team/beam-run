@@ -23,7 +23,10 @@ history and process listings.
 4. Validate the key before saving it with mode `0600`.
 5. Let the user select a workspace or create one in the chosen instance.
 6. Lock the instance and workspace for the current session.
-7. Preserve legacy credentials until a verified profile has been written.
+7. Preserve legacy credentials until a verified profile has been written. An
+   existing connection keeps its former routing—an explicit API URL when one was
+   configured, otherwise Beam App—and migrates during checkout without asking
+   for its URL or key again.
 8. Register the MCP server using `Authorization: Bearer <key>`.
 
 Regional workspace hosts follow `app.{region}.beam.ai`; Beam Run derives the API

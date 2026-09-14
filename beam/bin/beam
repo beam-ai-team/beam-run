@@ -295,6 +295,7 @@ read_workspace() {
   if [ -n "${BEAM_WORKSPACE_ID:-}" ]; then printf '%s' "$BEAM_WORKSPACE_ID"; return 0; fi
   value="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
   if [ -n "$value" ]; then printf '%s' "$value"; return 0; fi
+  [ -z "$ACTIVE_INSTANCE_ID" ] || return 1
   creds_value BEAM_WORKSPACE_ID
 }
 
@@ -424,9 +425,10 @@ create_workspace_for_selection() {
 }
 
 select_workspace() {
-  # $1 = /v2/user/me response; $2 = optional exact id/name.
+  # $1 = /v2/user/me response; $2 = optional exact id/name; $3 = previous id.
   workspace_rows="$(printf '%s' "$1" | workspaces_tsv)"
   selector="${2:-}"
+  previous="${3:-}"
   workspace_count=0; [ -n "$workspace_rows" ] && workspace_count="$(printf '%s\n' "$workspace_rows" | grep -c .)"
   SELECTED_WORKSPACE_ID=""; SELECTED_WORKSPACE_NAME=""
 
@@ -447,13 +449,22 @@ select_workspace() {
   fi
 
   printf '\nSelect a workspace:\n' >&2
-  shown="$(printf '%s\n' "$workspace_rows" | head -n 25)"
+  previous_row=""
+  if [ -n "$previous" ]; then
+    previous_row="$(printf '%s\n' "$workspace_rows" | awk -F '\t' -v q="$previous" '$1 == q {print; exit}')"
+  fi
+  if [ -n "$previous_row" ]; then
+    shown="$(printf '%s\n' "$previous_row"; printf '%s\n' "$workspace_rows" | awk -F '\t' -v q="$previous" '$1 != q' | head -n 24)"
+  else
+    shown="$(printf '%s\n' "$workspace_rows" | head -n 25)"
+  fi
   if [ -n "$shown" ]; then
-    printf '%s\n' "$shown" | awk -F '\t' '{printf "  %d. %s\n", NR, ($2 == "" ? $1 : $2)}' >&2
+    printf '%s\n' "$shown" | awk -F '\t' -v q="$previous" '{printf "  %d. %s%s\n", NR, ($2 == "" ? $1 : $2), ($1 == q ? " (previously used)" : "")}' >&2
   fi
   shown_count=0; [ -n "$shown" ] && shown_count="$(printf '%s\n' "$shown" | grep -c .)"
   create_number=$((shown_count + 1))
-  printf '  %s. + Create new workspace\n\n> ' "$create_number" >&2
+  printf '  %s. + Create new workspace\n' "$create_number" >&2
+  printf 'Enter a number, or type an exact workspace name or ID.\n\n> ' >&2
   IFS= read -r choice || true
   case "$choice" in
     +|new|create|"$create_number") create_workspace_for_selection; return 0 ;;
@@ -858,6 +869,13 @@ cmd_instance() {
 cmd_checkout() {
   selector="${1:-}"; workspace_selector="${2:-}"
   [ $# -le 2 ] || die "validation_error" "usage: beam checkout <instance> [workspace]" 2
+  if [ "$(profile_count)" -eq 0 ] && [ -f "$LEGACY_CREDS_FILE" ]; then
+    # An existing v1 connection already had a destination: its explicit API URL,
+    # or Beam App when none was configured. Reuse exactly that routing, verify it,
+    # and migrate atomically so an update never asks for the key again.
+    migrate_legacy_profile
+    [ "$(profile_count)" -eq 0 ] || load_session_context
+  fi
   if [ -z "$selector" ]; then
     if [ -n "$ACTIVE_INSTANCE_ID" ] && read_workspace >/dev/null 2>&1; then
       ws="$(read_workspace 2>/dev/null || true)"
@@ -890,6 +908,7 @@ cmd_checkout() {
     die "instance_not_found" "no saved Beam instance matches '$selector'. Run: beam instance list" 2
   fi
   target_id="$(file_value "$profile" BEAM_INSTANCE_ID 2>/dev/null || basename "$profile")"
+  previous_workspace="$(file_value "$profile" BEAM_WORKSPACE_ID 2>/dev/null || true)"
   current_ws="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
   session_locked="$(file_value "$SESSION_FILE" BEAM_SESSION_LOCKED 2>/dev/null || printf '0')"
   if [ "$session_locked" = "1" ]; then
@@ -910,7 +929,7 @@ cmd_checkout() {
     die "network_error" "could not reach $ACTIVE_INSTANCE_NAME; this session was not changed" 5
   fi
 
-  if select_workspace "$user_profile" "$workspace_selector"; then select_rc=0; else select_rc=$?; fi
+  if select_workspace "$user_profile" "$workspace_selector" "$previous_workspace"; then select_rc=0; else select_rc=$?; fi
   if [ "$select_rc" -eq 4 ]; then die "workspace_not_found" "choose one workspace available in $ACTIVE_INSTANCE_NAME" 2; fi
   if [ "$select_rc" -eq 6 ]; then
     rows="$(printf '%s' "$user_profile" | workspaces_tsv)"
