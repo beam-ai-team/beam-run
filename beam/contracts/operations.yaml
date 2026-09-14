@@ -219,13 +219,25 @@ operations:
     specialist: agent-flow
     safety: read
     mcp: getAgentGraph
-    cli: beam agent-builder get-triggers <entryNodeId>
+    cli: beam agent-builder get-triggers <agentId> <entryNodeId>
+    status: ready
+  graph.trigger-readiness:
+    specialist: agent-builder
+    safety: read
+    mcp: null
+    cli: beam agent-builder validate-trigger <agentId> <entryNodeId>
     status: ready
   graph.webhook:
     specialist: agent-flow
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-webhook <agentId>
+    status: ready
+  graph.webhook-readiness:
+    specialist: agent-builder
+    safety: read
+    mcp: null
+    cli: beam agent-builder validate-webhook <agentId> [--entry-node-id ID]
     status: ready
 
   task.list:

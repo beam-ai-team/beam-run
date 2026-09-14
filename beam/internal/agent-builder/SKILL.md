@@ -114,7 +114,11 @@ These checks are mandatory but should not become visible ceremony:
 3. Prefer managed integrations: `nango_cloud`, then `pipedream`. Ask before
    choosing a custom fallback.
 4. Run lint and a dry-run before every full deploy. Every graph mutation returns
-   a readiness report; resolve every failure before testing or publishing.
+   a readiness report; resolve every failure before testing or publishing. After
+   every timer or integration-trigger create/update, inspect its returned
+   `triggerReadiness`; after every webhook create, inspect `webhookReadiness`.
+   Do not report a trigger as working until the persisted payload passes its
+   type-specific checks.
 5. Beam executes nodes sequentially. The entry node has one outgoing edge;
    other non-condition nodes have at most one (a terminal action can have zero).
    Model alternatives with condition or looping nodes.

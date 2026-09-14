@@ -15,9 +15,9 @@
     "runtime/domains/templates.md": "1400d519ab2b99bd1260ab4f05e0eb91819e67e7f75cdea381bd4820587d0324",
     "runtime/domains/views.md": "7660c974681b9dab78f6abc969d0bf2149443b55e53c9601ac8e00f06248eda9",
     "runtime/operations/agent-analytics.md": "cc886d4e20aa820825e9db334c882a19da046660e9018bbd597734bb92501eba",
-    "runtime/operations/agent-builder.md": "5750a6419e24b51a80d7a75296e090bd5926ed51dcb03dc8069839bb3a4b6dc0",
+    "runtime/operations/agent-builder.md": "24473672e76611e3017cf065d214a458de5d6bf571805f7d8166c595edd9ead1",
     "runtime/operations/agent-config.md": "b9b47f4c029c3ab4781ffeda0a58a344223d5113d7a423c0c37ddc3538cbd6aa",
-    "runtime/operations/agent-flow.md": "8356a718d19e67e7b81ac8ef6b90ffb54312be18054927f7e31226815e49586e",
+    "runtime/operations/agent-flow.md": "b8866c4032bd2837c3179ad6f5b71256f2a6ca6c075898de2a5783fca6f7c98e",
     "runtime/operations/agent-tasks.md": "d087722dadaae5863ba040e01988d508dc141c1c3318dcc1833a301dd6305607",
     "runtime/operations/general-workspace.md": "897c98e8e1c41e961b357ba5fa7382f4f8781e525b004de9bfc6005d9a436864",
     "runtime/operations/global-tasks.md": "881361e1635cd20369c14364c4dbd2e7095bbd71d0efc7295495ba87e2ccbddd",
@@ -29,7 +29,7 @@
     "runtime/routes.md": "54d6c09898ce822446312fffaea151126634614985e2d6a9e6913b0dfb777f37"
   },
   "sources": {
-    "contracts/operations.yaml": "76f5e9c0c6080648a1376db5b585a3b01a57432c68815ba865a1c8a429946b07",
+    "contracts/operations.yaml": "de83d91077a3c37b57bb1ec9accdbc3b4d256c89ad30dda9597810ef1c701c1b",
     "references/copilot-baseline/builder/prompt.ts": "935f8b929a5b17e9a592c186062abf1004662fdffb2e3747d89195e7c68c771a",
     "references/copilot-baseline/domain/routing-table.ts": "d959d13bddea23077208586b7a4efe581569492d9d9dd16462e73fa02c572f62",
     "references/copilot-baseline/general-agent/prompt.ts": "6d24de39e1a4d641a34aab60a10e76c0e6a1ded7bf1f2cf3f4b0fa73c86ead44",

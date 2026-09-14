@@ -21,6 +21,26 @@ publish path until the report passes. This is intentionally separate from a
 node's `evaluationCriteria`, which evaluates model response quality rather than
 schema and graph correctness.
 
+## Trigger readiness after every save
+
+Graph readiness does not validate a timer, integration trigger, or webhook.
+`create-trigger` and `update-trigger` therefore return a separate
+`triggerReadiness` report after reading the payload back from Beam; webhook
+creation returns `webhookReadiness`. Do not say a trigger is configured until
+`verificationPassed` is true.
+
+```bash
+beam agent-builder validate-trigger AGENT_ID ENTRY_NODE_ID
+beam agent-builder validate-webhook AGENT_ID --entry-node-id ENTRY_NODE_ID
+```
+
+Timer validation requires a non-empty prompt and concrete start/next-execution
+timestamps. Integration validation additionally verifies that the saved action
+and provider match the workspace's dynamic `trigger-actions` catalog. Webhook
+validation verifies a persisted, enabled endpoint and its optional entry-node
+binding. A draft trigger can be configuration-ready but inactive until publish;
+that state is a warning, not a passing live deployment.
+
 ## Test a requested scenario
 
 Create only the cases the user asks for. When they ask for broad confidence,

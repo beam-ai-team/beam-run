@@ -217,6 +217,99 @@ assert not report["ready"]
 assert any(f["name"] == "gpt_has_input_variable" for f in report["failures"])
 PY
 
+group "MCP attachment preserves complete prompt-node configuration"
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$WORK/mcp-tools.json" <<'PY' \
+  && ok "MCP attachment keeps the existing node configuration" \
+  || bad "MCP attachment dropped prompt-node configuration"
+import importlib.util, json, sys
+script, attachment_file = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("beam_builder", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+json.dump([{"integrationId": "0fa1723f-b865-4c81-b24b-837369b49db8",
+            "tools": [{"toolId": "70a8d9b2-f02f-4d8b-924f-1978f8caf76d", "isActive": True}]}],
+          open(attachment_file, "w"))
+
+class Api:
+    def __init__(self): self.payload = None
+    def get(self, path):
+        if path.endswith("/nodes/lite"): return {"graphId": "graph-1"}
+        return {"id": "node-1", "agentGraph": {"id": "graph-1"},
+                "toolConfiguration": {"prompt": "Keep this prompt", "inputParams": [{"paramName": "input"}]}}
+    def patch_with_body(self, path, body): self.payload = body; return {"id": "node-1"}
+
+args = type("Args", (), {"agent_id": "agent-1", "node_id": "node-1", "attachments_file": attachment_file})()
+api = Api()
+module.cmd_attach_mcp_tools(api, args)
+node = api.payload["node"]
+assert node["toolConfiguration"]["prompt"] == "Keep this prompt"
+assert node["agentGraphNodeMcpIntegrations"][0]["tools"][0]["isActive"] is True
+PY
+
+group "trigger readiness validates timer, integration, and webhook payloads"
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" <<'PY' \
+  && ok "trigger readiness catches type-specific payload defects" \
+  || bad "trigger readiness missed a timer, integration, or webhook defect"
+import copy, importlib.util, sys
+
+spec = importlib.util.spec_from_file_location("beam_builder", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+agent_id = "5badf9b2-c833-4be9-9966-aed3c18264d1"
+entry_id = "d4af6aec-43c6-4d1c-ac81-589e4ed35690"
+provider_id = "5a0438d4-1fc8-4a81-9bfc-b6f1cb33b79e"
+entry = {"id": entry_id, "isEntryNode": True}
+
+timer = {
+    "id": "b32501f4-2f06-4ec7-a167-ccb20ae590f6",
+    "agentId": agent_id, "agentGraphNodeId": entry_id,
+    "title": "Weekly report", "prompt": "Generate and post the weekly report.",
+    "configuration": {"beamAction": "Timer", "integrationIdentifier": "timer",
+                      "hasAttachment": False, "shouldTriggerOnReply": False},
+    "userDefinedFrequency": "week", "userDefinedFrequencyValue": 1,
+    "userDefinedFrequencyDateTime": "1788418800000",
+    "toBeExecutedAt": "1788418800000", "timezone": "Asia/Karachi",
+    "isDeactivated": False, "isActive": False,
+}
+assert module._trigger_readiness_report(timer, entry, saved=True)["ready"]
+broken_timer = copy.deepcopy(timer)
+broken_timer["prompt"] = ""
+assert not module._trigger_readiness_report(broken_timer, entry, saved=True)["ready"]
+broken_timer = copy.deepcopy(timer)
+broken_timer["toBeExecutedAt"] = "0"
+assert not module._trigger_readiness_report(broken_timer, entry, saved=True)["ready"]
+
+catalog = [{
+    "integration": "google-mail", "action": "GmailFetchEmails",
+    "configuration": {"filters": [{"key": "from", "conditions": ["is", "is_not"]}]},
+    "integrationData": {"provider": {"id": provider_id, "status": "active"}},
+}]
+integration = {
+    "id": "41a7060b-a46f-4b89-b69e-05a404ac7b75",
+    "agentId": agent_id, "agentGraphNodeId": entry_id,
+    "title": "New customer email", "prompt": "Process qualifying customer emails.",
+    "integrationProviderId": provider_id,
+    "configuration": {"beamAction": "GmailFetchEmails", "integrationIdentifier": "google-mail",
+                      "hasAttachment": False, "shouldTriggerOnReply": False,
+                      "filters": [{"operator": "AND", "conditions": [
+                          {"property": "from", "condition": "is", "value": "customer@example.com"}
+                      ]}]},
+    "isDeactivated": False, "isActive": True,
+}
+assert module._trigger_readiness_report(integration, entry, catalog, saved=True)["ready"]
+broken_integration = copy.deepcopy(integration)
+broken_integration["integrationProviderId"] = "7d7a2f54-8b64-463d-9a04-042fb58f6f04"
+assert not module._trigger_readiness_report(broken_integration, entry, catalog, saved=True)["ready"]
+
+webhook = {"triggered": True, "agentId": agent_id, "agentGraphNodeId": entry_id}
+assert module._webhook_readiness_report(agent_id, webhook, entry,
+                                        "https://api.beamstudio.ai")["ready"]
+assert not module._webhook_readiness_report(agent_id, {"triggered": False}, entry,
+                                            "https://api.beamstudio.ai")["ready"]
+PY
+
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY for the authenticated checks.\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] || exit 1
