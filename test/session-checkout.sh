@@ -54,6 +54,8 @@ run() {
   env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/config" PATH="$tmp/bin:$PATH" BEAM_CAPTURE_DIR="$tmp" "$@"
 }
 
+status_call='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"beam_session_status","arguments":{}}}'
+
 printf '\n=== connection requires a workspace URL ===\n'
 if missing_url="$(run BEAM_SESSION_ID=no-url BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
 if [ "$rc" -ne 3 ] || ! printf '%s' "$missing_url" | grep -q workspace_url_missing; then fail "login assumed an instance without a workspace URL"; fi
@@ -71,6 +73,37 @@ run BEAM_SESSION_ID=another-login BEAM_WORKSPACE_URL=https://app.enterprise.beam
 run BEAM_SESSION_ID=region-login BEAM_WORKSPACE_URL=https://app.anz.beam.ai/anz-a/agents BEAM_API_KEY=anz-key sh "$BEAM" login >/dev/null 2>&1 || fail "regional login"
 if [ ! -f "$tmp/config/instances/anz" ] || ! grep -q 'BEAM_INSTANCE_NAME=Beam ANZ' "$tmp/config/instances/anz"; then fail "regional profile was not derived dynamically"; fi
 ok "workspace URLs resolve instances dynamically and duplicates fail safely"
+
+printf '\n=== structured session initialization ===\n'
+mkdir -p "$tmp/empty-config"
+new_user="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=new-user BEAM_API_KEY= python3 "$PROXY")"
+printf '%s' "$new_user" | grep -q 'Beam session setup' || fail "new-user status omitted setup heading"
+printf '%s' "$new_user" | grep -q 'Paste a Beam workspace URL' || fail "new-user status omitted URL step"
+printf '%s' "$new_user" | grep -q 'Enter the API key in the hidden prompt' || fail "new-user status omitted secure key step"
+if new_checkout="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=new-checkout PATH="$tmp/bin:$PATH" sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
+[ "$rc" -eq 3 ] || fail "unconnected checkout should require login"
+printf '%s' "$new_checkout" | grep -q 'Beam session setup' || fail "unconnected CLI omitted structured setup"
+
+multiple_instances="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=choose-instance BEAM_API_KEY= python3 "$PROXY")"
+printf '%s' "$multiple_instances" | grep -q 'Connected instances' || fail "returning-user status omitted instance choice"
+printf '%s' "$multiple_instances" | grep -q 'Beam App' || fail "returning-user status omitted Beam App"
+printf '%s' "$multiple_instances" | grep -q 'Beam Enterprise' || fail "returning-user status omitted Beam Enterprise"
+printf '%s' "$multiple_instances" | grep -q 'Add another' || fail "returning-user status omitted add-instance choice"
+if instance_checkout="$(run BEAM_SESSION_ID=choose-instance-cli sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
+[ "$rc" -eq 2 ] || fail "multi-instance checkout should require a choice"
+printf '%s' "$instance_checkout" | grep -q 'Connected instances' || fail "CLI omitted structured instance choice"
+if printf '%s' "$instance_checkout" | grep -q 'prod-a\|ent-a'; then fail "CLI instance choice leaked workspace rows"; fi
+
+mkdir -p "$tmp/previous-config/instances"
+cp "$tmp/config/instances/app" "$tmp/previous-config/instances/app"
+previous_status="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/previous-config" BEAM_SESSION_ID=previous-status BEAM_API_KEY= python3 "$PROXY")"
+printf '%s' "$previous_status" | grep -q 'Previously used: Alpha' || fail "one-instance status did not suggest the previous workspace"
+if previous_checkout="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/previous-config" BEAM_SESSION_ID=previous-checkout PATH="$tmp/bin:$PATH" sh "$BEAM" checkout app 2>&1)"; then rc=0; else rc=$?; fi
+[ "$rc" -eq 2 ] || fail "workspace confirmation should be required"
+printf '%s' "$previous_checkout" | grep -q 'Beam session setup' || fail "checkout fallback omitted structured setup"
+printf '%s' "$previous_checkout" | grep -q 'Previously used: Alpha' || fail "checkout fallback omitted previous workspace"
+if printf '%s' "$previous_checkout" | grep -q 'prod-b\|Beta'; then fail "checkout fallback dumped unrelated workspaces"; fi
+ok "new, returning, and multi-instance sessions receive one structured setup flow"
 
 printf '\n=== isolated session checkouts ===\n'
 run BEAM_SESSION_ID=session-a sh "$BEAM" checkout enterprise >/dev/null 2>&1 || fail "enterprise checkout"
@@ -126,11 +159,10 @@ grep -q 'api.enterprise.beamstudio.ai.*ent-a' "$tmp/requests" || fail "enterpris
 ok "a used session cannot switch and requests carry its checked-out workspace"
 
 printf '\n=== local bridge sees the same session ===\n'
-status='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"beam_session_status","arguments":{}}}'
-bridge="$(printf '%s\n' "$status" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-a BEAM_API_KEY= python3 "$PROXY")"
-printf '%s' "$bridge" | grep -q 'Beam Enterprise.*Enterprise Demo.*locked' || fail "bridge context differs from CLI context"
-saved_bridge="$(printf '%s\n' "$status" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-b BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp BEAM_API_KEY=enterprise-key BEAM_WORKSPACE_ID=ent-a python3 "$PROXY")"
-printf '%s' "$saved_bridge" | grep -q 'Beam App.*Alpha.*locked' || fail "bridge environment overrode its saved checkout"
+bridge="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-a BEAM_API_KEY= python3 "$PROXY")"
+printf '%s' "$bridge" | grep -q 'Beam Enterprise.*Enterprise Demo.*Locked' || fail "bridge context differs from CLI context"
+saved_bridge="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-b BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp BEAM_API_KEY=enterprise-key BEAM_WORKSPACE_ID=ent-a python3 "$PROXY")"
+printf '%s' "$saved_bridge" | grep -q 'Beam App.*Alpha.*Locked' || fail "bridge environment overrode its saved checkout"
 ok "agent tools and CLI share the same visible, locked checkout"
 
 printf '\n=== interactive workspace creation ===\n'

@@ -77,6 +77,8 @@ def load_context():
                 "instance_name": profile.get("BEAM_INSTANCE_NAME") or instance_id,
                 "workspace_id": session.get("BEAM_WORKSPACE_ID", ""),
                 "workspace_name": session.get("BEAM_WORKSPACE_NAME", ""),
+                "previous_workspace_id": profile.get("BEAM_WORKSPACE_ID", ""),
+                "previous_workspace_name": profile.get("BEAM_WORKSPACE_NAME", ""),
                 "locked": session.get("BEAM_SESSION_LOCKED") == "1",
             }
     if profiles:
@@ -175,12 +177,12 @@ def forward(msg, context):
 
 STATUS_TOOL = {
     "name": "beam_session_status",
-    "description": "Show the Beam instance and workspace checked out for this session.",
+    "description": "Initialize or show the structured Beam instance and workspace setup for this session.",
     "inputSchema": {"type": "object", "properties": {}},
 }
 CHECKOUT_TOOL = {
     "name": "beam_checkout",
-    "description": "Choose one saved Beam instance and workspace for this session before doing Beam work.",
+    "description": "Choose and lock one saved Beam instance and workspace for this session. If status suggests a previous workspace, ask the user to confirm it before calling this tool with that workspace.",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -200,27 +202,57 @@ def connections_text():
     profiles = profile_paths()
     if not profiles:
         return (
-            "Beam is not signed in. Create an API key, then run `beam login` in a terminal. "
-            "The key is saved locally; do not paste it into chat."
+            "🚀 Beam session setup\n"
+            "✅ Beam Run ready\n"
+            "⬜ Connect Beam\n\n"
+            "Next: run `beam login` in a terminal.\n"
+            "1. Paste a Beam workspace URL\n"
+            "2. Enter the API key in the hidden prompt\n"
+            "3. Select or create a workspace\n\n"
+            "Never ask the user to paste an API key into chat."
         )
     rows = []
-    for path in profiles:
+    for number, path in enumerate(profiles, 1):
         profile = read_values(path)
-        rows.append("- %s (%s)" % (
-            profile.get("BEAM_INSTANCE_NAME") or os.path.basename(path),
-            profile.get("BEAM_INSTANCE_ID") or os.path.basename(path),
-        ))
-    return "No Beam checkout is selected for this session. Saved instances:\n%s\nUse beam_checkout to select one, or run `beam login` to add another." % "\n".join(rows)
+        rows.append("%s. %s" % (number, profile.get("BEAM_INSTANCE_NAME") or os.path.basename(path)))
+    return (
+        "🚀 Beam session setup\n"
+        "⬜ Instance\n"
+        "⬜ Workspace\n\n"
+        "Connected instances:\n%s\n"
+        "%s. + Add another\n\n"
+        "Ask the user to choose an instance. Then select a workspace."
+    ) % ("\n".join(rows), len(rows) + 1)
 
 
 def context_text(context):
     if not context:
         return connections_text()
-    workspace = context.get("workspace_name") or context.get("workspace_id") or "not selected"
-    state = "locked" if context.get("locked") else "ready"
-    return "Beam session: %s (%s) / %s [%s]" % (
-        context["instance_name"], context["instance_id"], workspace, state
+    workspace = context.get("workspace_name") or context.get("workspace_id")
+    if workspace and context.get("locked"):
+        return (
+            "✅ Beam session ready\n"
+            "✅ Instance: %s\n"
+            "✅ Workspace: %s\n"
+            "🔒 Locked for this session"
+        ) % (context["instance_name"], workspace)
+    previous = context.get("previous_workspace_name") or context.get("previous_workspace_id")
+    suggestion = "\n\nPreviously used: %s\nAsk the user: “Use %s again?”" % (previous, previous) if previous else (
+        "\n\nAsk the user for a workspace name, or offer to create a new workspace."
     )
+    return (
+        "🚀 Beam session setup\n"
+        "✅ Instance: %s\n"
+        "⬜ Workspace%s"
+    ) % (context["instance_name"], suggestion)
+
+
+def context_badge(context):
+    workspace = context.get("workspace_name") or context.get("workspace_id")
+    if not workspace:
+        return context_text(context)
+    state = "locked" if context.get("locked") else "ready"
+    return "Beam context: %s / %s [%s]" % (context["instance_name"], workspace, state)
 
 
 def choose_checkout(arguments):
@@ -262,6 +294,7 @@ def choose_checkout(arguments):
     except Exception as exc:
         return None, "Could not reach %s (%s). Nothing changed." % (name, type(exc).__name__)
     workspaces = user.get("workspaces") or ([user["workspace"]] if user.get("workspace") else [])
+    workspaces = [w for w in workspaces if isinstance(w, dict) and w.get("id")]
     preferred = workspace_selector
     choices = [w for w in workspaces if isinstance(w, dict) and w.get("id") and preferred.lower() in {
         str(w["id"]).lower(), str(w.get("name") or "").lower()
@@ -273,8 +306,24 @@ def choose_checkout(arguments):
     elif len(workspaces) == 1:
         selected = workspaces[0]
     else:
-        listing = "\n".join("- %s (%s)" % (w.get("name") or w["id"], w["id"]) for w in workspaces[:25])
-        return None, "%s has multiple workspaces. Call beam_checkout again with `workspace`.\n%s" % (name, listing)
+        previous_id = profile.get("BEAM_WORKSPACE_ID", "")
+        previous = next((w for w in workspaces if str(w["id"]) == previous_id), None)
+        if previous:
+            previous_name = str(previous.get("name") or previous["id"])
+            return None, (
+                "🚀 Beam session setup\n"
+                "✅ Instance: %s\n"
+                "⬜ Workspace\n\n"
+                "Previously used: %s\n"
+                "Ask the user: “Use %s again?”"
+            ) % (name, previous_name, previous_name)
+        return None, (
+            "🚀 Beam session setup\n"
+            "✅ Instance: %s\n"
+            "⬜ Workspace\n\n"
+            "Ask the user for a workspace name, or offer to create a new workspace. "
+            "Do not list every workspace."
+        ) % name
     context["workspace_id"] = str(selected["id"])
     context["workspace_name"] = str(selected.get("name") or "")
     context["locked"] = True
@@ -308,7 +357,7 @@ def handle_local(msg, context):
             if problem:
                 return tool_result(msg_id, problem, True)
             write({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
-            return tool_result(msg_id, "Checked out " + context_text(selected))
+            return tool_result(msg_id, context_text(selected))
     return error(msg_id, -32001, context_text(context))
 
 
@@ -330,7 +379,7 @@ def enrich(reply, context, msg):
             result["instructions"] = context_text(context) + "\n\n" + (result.get("instructions") or "")
             result.setdefault("capabilities", {}).setdefault("tools", {})["listChanged"] = True
         if msg.get("method") == "tools/call" and isinstance(result, dict) and isinstance(result.get("content"), list):
-            result["content"].append({"type": "text", "text": context_text(context)})
+            result["content"].append({"type": "text", "text": context_badge(context)})
     except Exception:
         pass
     return reply

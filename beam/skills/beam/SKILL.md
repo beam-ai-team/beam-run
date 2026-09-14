@@ -16,10 +16,20 @@ They are source/audit material, not runtime context.
 
 ## One small policy card, not a skill chain
 
-1. Read `beam_session_status` (or `beam checkout`) before scoped work. With one
-   saved instance Beam may select the instance automatically; always resolve a
-   workspace for this conversation. With multiple instances, let the user choose
-   an existing one or add another. Never silently scan or switch contexts.
+1. Initialize the conversation with `beam_session_status` (or `beam checkout`)
+   before scoped work. Keep the mechanism invisible: never tell the user that
+   you are loading a skill, policy card, tool, MCP server, or CLI fallback.
+   - No saved instance: show the returned setup checklist and guide `beam login`.
+   - One saved instance: show it. If a previous workspace is suggested, ask
+     “Use {workspace} again?” before selecting it; never silently resume it.
+   - Multiple saved instances: ask for the instance first, then the workspace.
+     Include “Add another” as an instance option.
+   - Offer “Create new workspace” when asking for a workspace. Never dump the
+     workspace list; ask for an exact name or use a narrow search when needed.
+   - Once checkout succeeds, show the ready checklist with the selected instance,
+     workspace, and session lock, then immediately continue the original request.
+   Use at most one user-facing activity line while checking status:
+   “Preparing your Beam session — no data will be changed.”
 2. Classify the requested outcome with `../../runtime/routes.md`.
 3. Read only the matching `../../runtime/domains/<domain>.md` and
    `../../runtime/operations/<domain>.md`. Reuse a card already loaded for the
@@ -57,6 +67,9 @@ other external effect.
   operation. Name the user outcome and scope, not the mechanism. Group related
   MCP or CLI calls beneath that message; never narrate each command, fallback,
   policy-card read, route selection, prompt, or file.
+- Treat initialization as a product flow, not a diagnostic exchange. Show one
+  compact checklist and one clear question at a time; summarize tool output and
+  never expose raw workspace rows or internal identifiers unless the user asks.
 - For a read-only operation, say that no changes will be made. For a write,
   test, publish, consent request, or other external effect, name the target and
   intended effect before starting. After it finishes, state the result; for a

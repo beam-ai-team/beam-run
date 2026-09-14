@@ -428,7 +428,10 @@ select_workspace() {
     return 0
   fi
 
-  printf '\nSelect a workspace:\n' >&2
+  printf '\n🚀 Beam session setup\n' >&2
+  printf '✅ Instance: %s\n' "$ACTIVE_INSTANCE_NAME" >&2
+  printf '⬜ Workspace\n\n' >&2
+  printf 'Select a workspace:\n' >&2
   previous_row=""
   if [ -n "$previous" ]; then
     previous_row="$(printf '%s\n' "$workspace_rows" | awk -F '\t' -v q="$previous" '$1 == q {print; exit}')"
@@ -810,7 +813,10 @@ choose_instance_for_session() {
   if [ "$count" -eq 1 ]; then CHOSEN_PROFILE="$profiles"; return 0; fi
   can_prompt || return 6
 
-  printf '\nSelect an instance:\n' >&2
+  printf '\n🚀 Beam session setup\n' >&2
+  printf '⬜ Instance\n' >&2
+  printf '⬜ Workspace\n\n' >&2
+  printf 'Select an instance:\n' >&2
   number=0
   while IFS= read -r candidate; do
     number=$((number + 1))
@@ -835,15 +841,21 @@ cmd_instance() {
   [ "${1:-list}" = "list" ] || die "validation_error" "usage: beam instance list" 2
   count="$(profile_count)"
   if [ "$count" -eq 0 ]; then die "auth_missing" "no Beam instances are connected — run: beam login" 3; fi
+  printf '🚀 Beam session setup\n' >&2
+  printf '⬜ Instance\n' >&2
+  printf '⬜ Workspace\n\n' >&2
+  printf 'Connected instances:\n' >&2
+  number=0
   for profile in "$INSTANCES_DIR"/*; do
     [ -f "$profile" ] || continue
+    number=$((number + 1))
     id="$(file_value "$profile" BEAM_INSTANCE_ID 2>/dev/null || basename "$profile")"
     name="$(file_value "$profile" BEAM_INSTANCE_NAME 2>/dev/null || printf '%s' "$id")"
-    marker=" "
-    [ "$id" = "$ACTIVE_INSTANCE_ID" ] && marker="*"
-    printf '%s\t%s\t%s\n' "$marker" "$id" "$name"
+    printf '%s. %s\n' "$number" "$name" >&2
   done
-  if [ -z "$ACTIVE_INSTANCE_ID" ]; then printf '\nChoose for this session: beam checkout <instance> [workspace]\n' >&2; fi
+  printf '%s. + Add another\n\n' "$((number + 1))" >&2
+  printf 'Choose for this session: beam checkout <instance-name>\n' >&2
+  printf 'Add another: beam login\n' >&2
 }
 
 cmd_checkout() {
@@ -866,7 +878,16 @@ cmd_checkout() {
       if choose_instance_for_session; then choose_rc=0; else choose_rc=$?; fi
       case "$choose_rc" in
         0) selector="$(file_value "$CHOSEN_PROFILE" BEAM_INSTANCE_ID 2>/dev/null || basename "$CHOSEN_PROFILE")" ;;
-        3) can_prompt && { cmd_login; return; }; die "auth_missing" "no Beam instances are connected — run: beam login" 3 ;;
+        3)
+          can_prompt && { cmd_login; return; }
+          printf '🚀 Beam session setup\n' >&2
+          printf '✅ Beam Run ready\n' >&2
+          printf '⬜ Connect Beam\n\n' >&2
+          printf 'Next: run beam login, then:\n' >&2
+          printf '1. Paste a Beam workspace URL\n' >&2
+          printf '2. Enter the API key in the hidden prompt\n' >&2
+          printf '3. Select or create a workspace\n' >&2
+          die "auth_missing" "Beam connection is required before work can begin" 3 ;;
         7) cmd_login; return ;;
         6) cmd_instance list; return 2 ;;
         *) die "instance_required" "choose one of the listed Beam instances" 2 ;;
@@ -906,8 +927,23 @@ cmd_checkout() {
   if [ "$select_rc" -eq 4 ]; then die "workspace_not_found" "choose one workspace available in $ACTIVE_INSTANCE_NAME" 2; fi
   if [ "$select_rc" -eq 6 ]; then
     rows="$(printf '%s' "$user_profile" | workspaces_tsv)"
-    printf '%s\n' "$rows" | head -n 25 >&2
-    die "workspace_required" "$ACTIVE_INSTANCE_NAME has $workspace_count workspaces. Run: beam checkout $ACTIVE_INSTANCE_ID <workspace-id-or-name>" 2
+    previous_row=""
+    if [ -n "$previous_workspace" ]; then
+      previous_row="$(printf '%s\n' "$rows" | awk -F '\t' -v q="$previous_workspace" '$1 == q {print; exit}')"
+    fi
+    printf '🚀 Beam session setup\n' >&2
+    printf '✅ Instance: %s\n' "$ACTIVE_INSTANCE_NAME" >&2
+    printf '⬜ Workspace\n\n' >&2
+    if [ -n "$previous_row" ]; then
+      previous_name="$(printf '%s' "$previous_row" | cut -f2-)"
+      printf 'Previously used: %s\n' "${previous_name:-$previous_workspace}" >&2
+      printf 'Run beam checkout again with that workspace name to confirm it.\n' >&2
+    else
+      printf 'Choose a workspace by exact name, or create a new one.\n' >&2
+      printf 'Select: beam checkout %s <workspace-name>\n' "$ACTIVE_INSTANCE_ID" >&2
+      printf 'Create: beam workspace create <name>, then select it with beam checkout\n' >&2
+    fi
+    die "workspace_required" "workspace selection is required before Beam work can begin" 2
   fi
   workspace="$SELECTED_WORKSPACE_ID"; workspace_name="$SELECTED_WORKSPACE_NAME"
 
@@ -931,7 +967,7 @@ Usage:
   beam login                 connect from a workspace URL, then select a workspace
   beam login --replace       replace the key for that workspace URL's instance
   beam logout
-  beam instance list         show saved Beam instances (* = this session)
+  beam instance list         show saved Beam instances and the add-new option
   beam checkout <instance> [workspace]
                              choose one instance + workspace for this session
   beam whoami [--raw]          compact identity summary (use --raw only when needed)
@@ -1085,7 +1121,12 @@ cmd_login() {
     printf 'Checked out %s / %s ✅\n' "$DETECTED_INSTANCE_NAME" "${SELECTED_WORKSPACE_NAME:-$SELECTED_WORKSPACE_ID}" >&2
     printf 'This session is locked to this instance and workspace.\n' >&2
   else
-    printf '%s has %s workspaces. Select one with: beam checkout %s <workspace>\n' "$DETECTED_INSTANCE_NAME" "$workspace_count" "$DETECTED_INSTANCE_ID" >&2
+    printf '\n🚀 Beam session setup\n' >&2
+    printf '✅ Instance: %s\n' "$DETECTED_INSTANCE_NAME" >&2
+    printf '⬜ Workspace\n\n' >&2
+    printf 'Choose a workspace by exact name, or create a new one.\n' >&2
+    printf 'Select: beam checkout %s <workspace-name>\n' "$DETECTED_INSTANCE_ID" >&2
+    printf 'Create: beam workspace create <name>, then select it with beam checkout\n' >&2
   fi
 }
 

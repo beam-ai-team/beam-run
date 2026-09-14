@@ -128,7 +128,8 @@ printf '%s' "$single_workspace_login" | grep -q '"workspaceId":"workspace-1"' ||
 printf '%s' "$single_workspace_login" | grep -q 'Checked out Beam App / Test Workspace' || fail "sole workspace selection was not named"
 multiple_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/multiple-config" BEAM_WORKSPACE_URL=https://app.beam.ai/workspace-1 BEAM_API_KEY=sk-test BEAM_TEST_WORKSPACE_MODE=multiple sh "$BEAM" login </dev/null 2>&1)" || fail "multiple-workspace login failed"
 printf '%s' "$multiple_workspace_login" | grep -q '"workspaceId":null,"workspaceCount":2' || fail "multiple workspaces should remain unselected"
-printf '%s' "$multiple_workspace_login" | grep -q 'Beam App has 2 workspaces' || fail "multiple-workspace prompt omitted the workspace count"
+printf '%s' "$multiple_workspace_login" | grep -q 'Beam session setup' || fail "multiple-workspace login omitted structured setup"
+printf '%s' "$multiple_workspace_login" | grep -q 'Create: beam workspace create' || fail "multiple-workspace login omitted workspace creation"
 printf '%s' "$multiple_workspace_login" | grep -q 'beam checkout app' || fail "multiple-workspace prompt omitted selection guidance"
 ok "onboarding selects a sole workspace and prompts before choosing among many"
 
