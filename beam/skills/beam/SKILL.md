@@ -17,9 +17,9 @@ They are source/audit material, not runtime context.
 ## One small policy card, not a skill chain
 
 1. Read `beam_session_status` (or `beam checkout`) before scoped work. With one
-   saved instance Beam may select it automatically; with multiple instances,
-   require an explicit instance and workspace checkout for this conversation.
-   Never silently scan or switch contexts.
+   saved instance Beam may select the instance automatically; always resolve a
+   workspace for this conversation. With multiple instances, let the user choose
+   an existing one or add another. Never silently scan or switch contexts.
 2. Classify the requested outcome with `../../runtime/routes.md`.
 3. Read only the matching `../../runtime/domains/<domain>.md` and
    `../../runtime/operations/<domain>.md`. Reuse a card already loaded for the

@@ -82,15 +82,15 @@ def load_context():
                 "mcp": profile.get("BEAM_MCP_URL") or (profile.get("BEAM_API_URL") or PRODUCTION_API_BASE).rstrip("/") + "/mcp",
                 "instance_id": instance_id,
                 "instance_name": profile.get("BEAM_INSTANCE_NAME") or instance_id,
-                "workspace_id": session.get("BEAM_WORKSPACE_ID") or profile.get("BEAM_WORKSPACE_ID", ""),
-                "workspace_name": session.get("BEAM_WORKSPACE_NAME") or profile.get("BEAM_WORKSPACE_NAME", ""),
+                "workspace_id": session.get("BEAM_WORKSPACE_ID", ""),
+                "workspace_name": session.get("BEAM_WORKSPACE_NAME", ""),
                 "locked": session.get("BEAM_SESSION_LOCKED") == "1",
             }
     legacy = read_values(os.path.join(CONFIG_DIR, "credentials"))
     if legacy.get("BEAM_API_KEY") and not profiles:
         return {
             "key": legacy["BEAM_API_KEY"], "api": API_URL, "mcp": MCP_URL,
-            "instance_id": "production", "instance_name": "Beam Cloud",
+            "instance_id": "app", "instance_name": "Beam App",
             "workspace_id": legacy.get("BEAM_WORKSPACE_ID", ""),
             "workspace_name": "", "locked": False,
         }
@@ -216,7 +216,7 @@ def connections_text():
             profile.get("BEAM_INSTANCE_NAME") or os.path.basename(path),
             profile.get("BEAM_INSTANCE_ID") or os.path.basename(path),
         ))
-    return "No Beam checkout is selected for this session. Saved instances:\n%s\nUse beam_checkout to select one." % "\n".join(rows)
+    return "No Beam checkout is selected for this session. Saved instances:\n%s\nUse beam_checkout to select one, or run `beam login` to add another." % "\n".join(rows)
 
 
 def context_text(context):
@@ -283,7 +283,8 @@ def choose_checkout(arguments):
         return None, "%s has multiple workspaces. Call beam_checkout again with `workspace`.\n%s" % (name, listing)
     context["workspace_id"] = str(selected["id"])
     context["workspace_name"] = str(selected.get("name") or "")
-    save_session(context, keep_locked)
+    context["locked"] = True
+    save_session(context, True)
     return context, None
 
 
@@ -360,10 +361,11 @@ def main():
                     pass
             continue
         name = ((msg.get("params") or {}).get("name") if msg.get("method") == "tools/call" else "")
-        local = not context or msg.get("method") == "ping" or name in {
+        needs_checkout = not context or not context.get("workspace_id")
+        local = needs_checkout or msg.get("method") == "ping" or name in {
             "beam_session_status", "beam_checkout", "beam_setup_status"
         }
-        if msg.get("method") == "tools/list" and not context:
+        if msg.get("method") == "tools/list" and needs_checkout:
             local = True
         if local:
             write(handle_local(msg, context))

@@ -36,8 +36,6 @@ VERSION=""
 REPO="beam-ai-team/beam-run"
 PRODUCTION_API_BASE="https://api.beamstudio.ai"
 PRODUCTION_MCP_URL="https://api.beamstudio.ai/mcp"
-ENTERPRISE_API_BASE="https://api.enterprise.beamstudio.ai"
-ENTERPRISE_MCP_URL="https://api.enterprise.beamstudio.ai/mcp"
 
 # A developer shell often exports localhost endpoints for a running Beam stack.
 # Plugins inherit that shell environment, so silently honouring those values can
@@ -137,6 +135,78 @@ creds_value() { file_value "$CREDS_FILE" "$1"; }
 
 profile_file() { printf '%s/%s' "$INSTANCES_DIR" "$1"; }
 
+profile_for_api() {
+  wanted="${1%/}"
+  for candidate in "$INSTANCES_DIR"/*; do
+    [ -f "$candidate" ] || continue
+    saved="$(file_value "$candidate" BEAM_API_URL 2>/dev/null || true)"
+    [ "${saved%/}" = "$wanted" ] && { printf '%s' "$candidate"; return 0; }
+  done
+  return 1
+}
+
+derive_instance_from_url() {
+  # Accept the workspace URL a user knows, or an API URL supplied by automation.
+  raw="${1%/}"
+  case "$raw" in
+    https://*) scheme="https" ;;
+    http://*)
+      is_loopback_url "$raw" && [ "${BEAM_LOCAL_DEV:-}" = "1" ] || return 2
+      scheme="http" ;;
+    *) return 2 ;;
+  esac
+  location="${raw#*://}"
+  if [ "${2:-workspace}" = "workspace" ]; then
+    case "$location" in */?*) ;; *) return 2 ;; esac
+  fi
+  authority="${location%%/*}"
+  case "$authority" in ""|*@*|*\?*|*\#*) return 2 ;; esac
+  host="$(printf '%s' "${authority%%:*}" | tr '[:upper:]' '[:lower:]')"
+  [ -n "$host" ] || return 2
+
+  case "$host" in
+    app.beam.ai|api.beamstudio.ai)
+      DETECTED_INSTANCE_ID="app"
+      DETECTED_INSTANCE_NAME="Beam App"
+      DETECTED_API_URL="$PRODUCTION_API_BASE" ;;
+    app.*.beam.ai)
+      region="${host#app.}"; region="${region%.beam.ai}"
+      [ -n "$region" ] || return 2
+      DETECTED_INSTANCE_ID="$region"
+      if [ "$region" = "enterprise" ]; then DETECTED_INSTANCE_NAME="Beam Enterprise"
+      else DETECTED_INSTANCE_NAME="Beam $(printf '%s' "$region" | tr '[:lower:]' '[:upper:]')"; fi
+      DETECTED_API_URL="https://api.$region.beamstudio.ai" ;;
+    enterprise.beamstudio.ai|api.enterprise.beamstudio.ai)
+      DETECTED_INSTANCE_ID="enterprise"
+      DETECTED_INSTANCE_NAME="Beam Enterprise"
+      DETECTED_API_URL="https://api.enterprise.beamstudio.ai" ;;
+    api.*.beamstudio.ai)
+      region="${host#api.}"; region="${region%.beamstudio.ai}"
+      [ -n "$region" ] || return 2
+      DETECTED_INSTANCE_ID="$region"
+      DETECTED_INSTANCE_NAME="Beam $(printf '%s' "$region" | tr '[:lower:]' '[:upper:]')"
+      DETECTED_API_URL="$scheme://$authority" ;;
+    *.beamstudio.ai)
+      region="${host%.beamstudio.ai}"
+      [ -n "$region" ] || return 2
+      DETECTED_INSTANCE_ID="$region"
+      DETECTED_INSTANCE_NAME="Beam $(printf '%s' "$region" | tr '[:lower:]' '[:upper:]')"
+      DETECTED_API_URL="https://api.$region.beamstudio.ai" ;;
+    localhost|127.0.0.1|::1)
+      [ "${BEAM_LOCAL_DEV:-}" = "1" ] || return 2
+      DETECTED_INSTANCE_ID="local"
+      DETECTED_INSTANCE_NAME="Beam Local"
+      DETECTED_API_URL="$scheme://$authority" ;;
+    *)
+      # An explicit API URL remains supported for private/custom deployments.
+      [ "${2:-workspace}" = "api" ] || return 2
+      DETECTED_INSTANCE_ID="$(printf '%s' "$authority" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._-' '-')"
+      DETECTED_INSTANCE_NAME="Beam ($host)"
+      DETECTED_API_URL="$scheme://$authority" ;;
+  esac
+  DETECTED_MCP_URL="${DETECTED_API_URL%/}/mcp"
+}
+
 profile_count() {
   count=0
   for profile in "$INSTANCES_DIR"/*; do [ -f "$profile" ] && count=$((count + 1)); done
@@ -206,9 +276,9 @@ load_session_context() {
   profile="$(only_profile 2>/dev/null || true)"
   if [ -n "$profile" ]; then
     activate_profile_file "$profile"
-    workspace="$(creds_value BEAM_WORKSPACE_ID 2>/dev/null || true)"
-    workspace_name="$(creds_value BEAM_WORKSPACE_NAME 2>/dev/null || true)"
-    write_session "$ACTIVE_INSTANCE_ID" "$workspace" "$workspace_name" 0
+    # A new host session chooses its own workspace; never inherit another
+    # session's last workspace from the instance profile.
+    write_session "$ACTIVE_INSTANCE_ID" "" "" 0
   elif [ "$(profile_count)" -gt 0 ]; then
     # Multiple saved instances require an explicit per-session checkout. Never
     # fall back to the legacy file, which could send work to the wrong instance.
@@ -252,11 +322,10 @@ migrate_legacy_profile() {
   key="$(file_value "$LEGACY_CREDS_FILE" BEAM_API_KEY 2>/dev/null || true)"
   [ -n "$key" ] || return 0
   workspace="$(file_value "$LEGACY_CREDS_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
-  if detect_key_instance "$key"; then :; else
-    rc=$?
-    [ "$rc" -eq 6 ] && die "legacy_instance_ambiguous" "the existing saved key works on more than one Beam instance, so it was not migrated" 2
-    die "legacy_instance_unknown" "the existing saved key's Beam instance could not be detected safely; nothing was changed" 5
-  fi
+  # Old Beam Run meant Beam App unless the user explicitly supplied another
+  # API URL. Verify that same destination before changing any local file.
+  legacy_url="${USER_API_URL:-$PRODUCTION_API_BASE}"
+  if detect_key_instance "$key" "$legacy_url" api; then :; else return 0; fi
   write_profile "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_MCP_URL" "$key" "$workspace" ""
   mv "$LEGACY_CREDS_FILE" "$CONFIG_DIR/credentials.v1-backup"
 }
@@ -332,12 +401,80 @@ print_workspace_resolution() {
   fi
 }
 
+can_prompt() { [ -t 0 ] || [ "${BEAM_TEST_INTERACTIVE:-}" = "1" ]; }
+
+create_workspace_for_selection() {
+  printf '\nCreate in %s\n' "$ACTIVE_INSTANCE_NAME" >&2
+  printf 'Workspace name: ' >&2
+  IFS= read -r new_workspace_name || true
+  [ -n "$new_workspace_name" ] || die "validation_error" "workspace name cannot be empty" 2
+  [ "${#new_workspace_name}" -le 30 ] || die "validation_error" "workspace name must be 30 characters or fewer" 2
+  body=$(printf '{"name":%s}' "$(json_quote "$new_workspace_name")")
+  selection_key="${LOGIN_KEY:-$(read_key 2>/dev/null || true)}"
+  [ -n "$selection_key" ] || die "auth_missing" "no saved key is available for $ACTIVE_INSTANCE_NAME" 3
+  if created="$(_http_send POST "$API_BASE/v2/workspace" "$body" -H "x-api-key: $selection_key")"; then :; else
+    rc=$?
+    [ "$rc" -eq 3 ] && die "workspace_create_forbidden" "the workspace could not be created in $ACTIVE_INSTANCE_NAME; check your permission" 2
+    die "network_error" "workspace creation result is unknown; check the instance before retrying" 5
+  fi
+  SELECTED_WORKSPACE_ID="$(printf '%s' "$created" | extract_workspace_id)"
+  [ -n "$SELECTED_WORKSPACE_ID" ] || die "invalid_response" "the workspace was created but Beam did not return its id" 5
+  SELECTED_WORKSPACE_NAME="$new_workspace_name"
+  printf 'Created %s ✅\n' "$new_workspace_name" >&2
+}
+
+select_workspace() {
+  # $1 = /v2/user/me response; $2 = optional exact id/name.
+  workspace_rows="$(printf '%s' "$1" | workspaces_tsv)"
+  selector="${2:-}"
+  workspace_count=0; [ -n "$workspace_rows" ] && workspace_count="$(printf '%s\n' "$workspace_rows" | grep -c .)"
+  SELECTED_WORKSPACE_ID=""; SELECTED_WORKSPACE_NAME=""
+
+  if [ -n "$selector" ]; then
+    match="$(printf '%s\n' "$workspace_rows" | awk -F '\t' -v q="$selector" 'tolower($1)==tolower(q) || tolower($2)==tolower(q) {print}')"
+    match_count=0; [ -n "$match" ] && match_count="$(printf '%s\n' "$match" | grep -c .)"
+    [ "$match_count" -eq 1 ] || return 4
+    SELECTED_WORKSPACE_ID="$(printf '%s' "$match" | cut -f1)"
+    SELECTED_WORKSPACE_NAME="$(printf '%s' "$match" | cut -f2-)"
+    return 0
+  fi
+
+  if ! can_prompt; then
+    [ "$workspace_count" -eq 1 ] || return 6
+    SELECTED_WORKSPACE_ID="$(printf '%s' "$workspace_rows" | cut -f1)"
+    SELECTED_WORKSPACE_NAME="$(printf '%s' "$workspace_rows" | cut -f2-)"
+    return 0
+  fi
+
+  printf '\nSelect a workspace:\n' >&2
+  shown="$(printf '%s\n' "$workspace_rows" | head -n 25)"
+  if [ -n "$shown" ]; then
+    printf '%s\n' "$shown" | awk -F '\t' '{printf "  %d. %s\n", NR, ($2 == "" ? $1 : $2)}' >&2
+  fi
+  shown_count=0; [ -n "$shown" ] && shown_count="$(printf '%s\n' "$shown" | grep -c .)"
+  create_number=$((shown_count + 1))
+  printf '  %s. + Create new workspace\n\n> ' "$create_number" >&2
+  IFS= read -r choice || true
+  case "$choice" in
+    +|new|create|"$create_number") create_workspace_for_selection; return 0 ;;
+    *[!0-9]*|"")
+      match="$(printf '%s\n' "$workspace_rows" | awk -F '\t' -v q="$choice" 'tolower($1)==tolower(q) || tolower($2)==tolower(q) {print}')"
+      [ "$(printf '%s\n' "$match" | grep -c .)" -eq 1 ] || return 4
+      selected_row="$match" ;;
+    *)
+      [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$shown_count" ] || return 4
+      selected_row="$(printf '%s\n' "$shown" | sed -n "${choice}p")" ;;
+  esac
+  SELECTED_WORKSPACE_ID="$(printf '%s' "$selected_row" | cut -f1)"
+  SELECTED_WORKSPACE_NAME="$(printf '%s' "$selected_row" | cut -f2-)"
+}
+
 extract_workspace_id() {
-  # reads /v2/user/me JSON on stdin, prints the first workspace id (or empty).
+  # reads a workspace or /v2/user/me JSON, prints the workspace id (or empty).
   # Only safe to use when the caller has confirmed there is exactly ONE workspace —
   # guessing across many is how users land in the wrong (often empty) workspace.
   if command -v jq >/dev/null 2>&1; then
-    jq -r 'if .workspaces then (.workspaces[0].id // "") elif .workspace then (.workspace.id // "") else "" end' 2>/dev/null || true
+    jq -r 'if .id then .id elif .workspaces then (.workspaces[0].id // "") elif .workspace then (.workspace.id // "") else "" end' 2>/dev/null || true
   elif command -v python3 >/dev/null 2>&1; then
     python3 -c 'import json,sys
 try:
@@ -345,7 +482,9 @@ try:
 except Exception:
     sys.exit(0)
 ws=d.get("workspaces") or d.get("workspace") or []
-if isinstance(ws, dict):
+if d.get("id"):
+    print(d["id"])
+elif isinstance(ws, dict):
     print(ws.get("id") or "")
 elif isinstance(ws, list) and ws:
     w=ws[0]
@@ -417,43 +556,11 @@ verify_key() {
 }
 
 detect_key_instance() {
-  key="$1"
+  key="$1"; instance_url="$2"; url_kind="${3:-workspace}"
   warn_if_loopback_was_ignored
-  detected_count=0; unavailable_count=0
   DETECTED_INSTANCE_ID=""; DETECTED_INSTANCE_NAME=""; DETECTED_API_URL=""; DETECTED_MCP_URL=""; DETECTED_PROFILE=""
-
-  if [ -n "$USER_API_URL" ]; then
-    case "${API_BASE%/}" in
-      "$PRODUCTION_API_BASE") candidates="production|Beam Cloud|$PRODUCTION_API_BASE|$PRODUCTION_MCP_URL" ;;
-      "$ENTERPRISE_API_BASE") candidates="enterprise|Beam Enterprise|$ENTERPRISE_API_BASE|$ENTERPRISE_MCP_URL" ;;
-      *) candidates="custom|Beam (${API_BASE#*://})|${API_BASE%/}|${MCP_URL%/}" ;;
-    esac
-  else
-    candidates="production|Beam Cloud|$PRODUCTION_API_BASE|$PRODUCTION_MCP_URL
-enterprise|Beam Enterprise|$ENTERPRISE_API_BASE|$ENTERPRISE_MCP_URL"
-  fi
-
-  while IFS='|' read -r instance name api mcp; do
-    [ -n "$instance" ] || continue
-    if profile="$(_http_get "$api/v2/user/me" -H "x-api-key: $key")"; then
-      detected_count=$((detected_count + 1))
-      DETECTED_INSTANCE_ID="$instance"
-      DETECTED_INSTANCE_NAME="$name"
-      DETECTED_API_URL="$api"
-      DETECTED_MCP_URL="$mcp"
-      DETECTED_PROFILE="$profile"
-    else
-      rc=$?
-      [ "$rc" -eq 5 ] && unavailable_count=$((unavailable_count + 1))
-    fi
-  done <<EOF
-$candidates
-EOF
-
-  [ "$detected_count" -gt 1 ] && return 6
-  [ "$unavailable_count" -gt 0 ] && return 5
-  [ "$detected_count" -eq 1 ] && return 0
-  return 3
+  derive_instance_from_url "$instance_url" "$url_kind" || return 2
+  if DETECTED_PROFILE="$(_http_get "$DETECTED_API_URL/v2/user/me" -H "x-api-key: $key")"; then return 0; else return $?; fi
 }
 
 api_request() {
@@ -703,6 +810,36 @@ instance_profile_for() {
   printf '%s' "$matches"
 }
 
+choose_instance_for_session() {
+  profiles=""
+  for candidate in "$INSTANCES_DIR"/*; do [ -f "$candidate" ] && profiles="${profiles}${profiles:+
+}$candidate"; done
+  count=0; [ -n "$profiles" ] && count="$(printf '%s\n' "$profiles" | grep -c .)"
+  [ "$count" -gt 0 ] || return 3
+  if [ "$count" -eq 1 ]; then CHOSEN_PROFILE="$profiles"; return 0; fi
+  can_prompt || return 6
+
+  printf '\nSelect an instance:\n' >&2
+  number=0
+  while IFS= read -r candidate; do
+    number=$((number + 1))
+    name="$(file_value "$candidate" BEAM_INSTANCE_NAME 2>/dev/null || basename "$candidate")"
+    printf '  %s. %s\n' "$number" "$name" >&2
+  done <<EOF
+$profiles
+EOF
+  add_number=$((count + 1))
+  printf '  %s. + Add new instance\n\n> ' "$add_number" >&2
+  IFS= read -r choice || true
+  case "$choice" in
+    +|new|add|"$add_number") return 7 ;;
+    *[!0-9]*|"") return 4 ;;
+    *)
+      [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] || return 4
+      CHOSEN_PROFILE="$(printf '%s\n' "$profiles" | sed -n "${choice}p")" ;;
+  esac
+}
+
 cmd_instance() {
   [ "${1:-list}" = "list" ] || die "validation_error" "usage: beam instance list" 2
   count="$(profile_count)"
@@ -722,7 +859,7 @@ cmd_checkout() {
   selector="${1:-}"; workspace_selector="${2:-}"
   [ $# -le 2 ] || die "validation_error" "usage: beam checkout <instance> [workspace]" 2
   if [ -z "$selector" ]; then
-    if [ -n "$ACTIVE_INSTANCE_ID" ]; then
+    if [ -n "$ACTIVE_INSTANCE_ID" ] && read_workspace >/dev/null 2>&1; then
       ws="$(read_workspace 2>/dev/null || true)"
       ws_name="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_NAME 2>/dev/null || true)"
       locked="$(file_value "$SESSION_FILE" BEAM_SESSION_LOCKED 2>/dev/null || printf '0')"
@@ -732,8 +869,18 @@ cmd_checkout() {
         "$(if [ -n "$ws_name" ]; then json_quote "$ws_name"; else printf null; fi)" "$locked"
       return 0
     fi
-    cmd_instance list
-    return 2
+    if [ -n "$ACTIVE_INSTANCE_ID" ]; then
+      selector="$ACTIVE_INSTANCE_ID"
+    else
+      if choose_instance_for_session; then choose_rc=0; else choose_rc=$?; fi
+      case "$choose_rc" in
+        0) selector="$(file_value "$CHOSEN_PROFILE" BEAM_INSTANCE_ID 2>/dev/null || basename "$CHOSEN_PROFILE")" ;;
+        3) can_prompt && { cmd_login; return; }; die "auth_missing" "no Beam instances are connected — run: beam login" 3 ;;
+        7) cmd_login; return ;;
+        6) cmd_instance list; return 2 ;;
+        *) die "instance_required" "choose one of the listed Beam instances" 2 ;;
+      esac
+    fi
   fi
 
   if profile="$(instance_profile_for "$selector")"; then :
@@ -763,37 +910,22 @@ cmd_checkout() {
     die "network_error" "could not reach $ACTIVE_INSTANCE_NAME; this session was not changed" 5
   fi
 
-  rows="$(printf '%s' "$user_profile" | workspaces_tsv)"
-  workspace=""; workspace_name=""
-  preferred="$workspace_selector"
-  if [ -n "$preferred" ]; then
-    match="$(printf '%s\n' "$rows" | awk -F '\t' -v q="$preferred" 'tolower($1)==tolower(q) || tolower($2)==tolower(q) {print}')"
-    match_count=0; [ -n "$match" ] && match_count="$(printf '%s\n' "$match" | grep -c .)"
-    if [ "$match_count" -eq 1 ]; then
-      workspace="$(printf '%s' "$match" | cut -f1)"; workspace_name="$(printf '%s' "$match" | cut -f2-)"
-    elif [ -n "$workspace_selector" ]; then
-      [ "$match_count" -gt 1 ] && die "workspace_ambiguous" "more than one workspace is named '$workspace_selector'; use its id" 2
-      die "workspace_not_found" "workspace '$workspace_selector' is not available in $ACTIVE_INSTANCE_NAME" 2
-    fi
+  if select_workspace "$user_profile" "$workspace_selector"; then select_rc=0; else select_rc=$?; fi
+  if [ "$select_rc" -eq 4 ]; then die "workspace_not_found" "choose one workspace available in $ACTIVE_INSTANCE_NAME" 2; fi
+  if [ "$select_rc" -eq 6 ]; then
+    rows="$(printf '%s' "$user_profile" | workspaces_tsv)"
+    printf '%s\n' "$rows" | head -n 25 >&2
+    die "workspace_required" "$ACTIVE_INSTANCE_NAME has $workspace_count workspaces. Run: beam checkout $ACTIVE_INSTANCE_ID <workspace-id-or-name>" 2
   fi
-  if [ -z "$workspace" ]; then
-    count=0; [ -n "$rows" ] && count="$(printf '%s\n' "$rows" | grep -c .)"
-    if [ "$count" -eq 1 ]; then
-      workspace="$(printf '%s' "$rows" | cut -f1)"; workspace_name="$(printf '%s' "$rows" | cut -f2-)"
-    elif [ "$count" -gt 1 ]; then
-      printf '%s\n' "$rows" | head -n 25 >&2
-      die "workspace_required" "$ACTIVE_INSTANCE_NAME has $count workspaces. Run: beam checkout $ACTIVE_INSTANCE_ID <workspace-id-or-name>" 2
-    else
-      die "workspace_required" "$ACTIVE_INSTANCE_NAME has no available workspace" 2
-    fi
-  fi
+  workspace="$SELECTED_WORKSPACE_ID"; workspace_name="$SELECTED_WORKSPACE_NAME"
 
   write_profile "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$API_BASE" "$MCP_URL" "$key" "$workspace" "$workspace_name"
-  write_session "$ACTIVE_INSTANCE_ID" "$workspace" "$workspace_name" "$session_locked"
+  write_session "$ACTIVE_INSTANCE_ID" "$workspace" "$workspace_name" 1
   printf '{"ok":true,"instanceId":"%s","instanceName":"%s","workspaceId":"%s","workspaceName":%s,"locked":%s}\n' \
     "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$workspace" "$(if [ -n "$workspace_name" ]; then json_quote "$workspace_name"; else printf null; fi)" \
-    "$(if [ "$session_locked" = 1 ]; then printf true; else printf false; fi)"
+    true
   printf 'Checked out %s / %s for this session ✅\n' "$ACTIVE_INSTANCE_NAME" "${workspace_name:-$workspace}" >&2
+  printf 'This session is locked to this instance and workspace.\n' >&2
 }
 
 cmd_help() {
@@ -804,8 +936,8 @@ Usage:
   beam setup                 guided install: PATH + auth + MCP registration
   beam register              register the Beam MCP server with your agent
   beam doctor                self-diagnose install/auth/connection (human checklist)
-  beam login                 save an API key (masked terminal prompt)
-  beam login --replace       replace the key for its detected instance
+  beam login                 connect from a workspace URL, then select a workspace
+  beam login --replace       replace the key for that workspace URL's instance
   beam logout
   beam instance list         show saved Beam instances (* = this session)
   beam checkout <instance> [workspace]
@@ -847,9 +979,9 @@ Usage:
   beam --version | --help
 
 Auth:
-  beam login                   # masked prompt (recommended)
-  BEAM_API_KEY=... beam login  # env
-  printf '%s' "\$KEY" | beam login --api-key -   # stdin
+  beam login                   # workspace URL + masked key prompts (recommended)
+  BEAM_WORKSPACE_URL=... BEAM_API_KEY=... beam login
+  printf '%s' "\$KEY" | beam login --url "\$WORKSPACE_URL" --api-key -
 
 Docs: https://github.com/$REPO
 EOF
@@ -860,23 +992,52 @@ cmd_login() {
   # reads remain read-only and keep working with the v1 credentials file.
   migrate_legacy_profile
   load_session_context
-  key=""; workspace=""; replace=0
+  key=""; workspace=""; workspace_url="${BEAM_WORKSPACE_URL:-}"; url_kind="workspace"; replace=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --api-key) key="${2:-}"; shift 2 ;;
       --workspace-id) workspace="${2:-}"; shift 2 ;;
+      --workspace-url|--url) workspace_url="${2:-}"; url_kind="workspace"; shift 2 ;;
+      --api-url) workspace_url="${2:-}"; url_kind="api"; shift 2 ;;
       --replace) replace=1; shift ;;
       --paste) shift ;;
       -h|--help) cmd_help; exit 0 ;;
       *) die "validation_error" "unknown flag: $1 (try beam login --help)" 2 ;;
     esac
   done
+
+  if [ -z "$workspace_url" ] && [ -n "$USER_API_URL" ] && [ "$ignored_loopback_endpoint" != "1" ]; then workspace_url="$API_BASE"; url_kind="api"; fi
+  if [ -z "$workspace_url" ] && [ "$replace" -eq 1 ] && [ -n "$ACTIVE_INSTANCE_ID" ]; then
+    workspace_url="$API_BASE"; url_kind="api"
+  fi
+  if [ -z "$workspace_url" ]; then
+    if can_prompt; then
+      printf 'Paste your Beam workspace URL: ' >&2
+      IFS= read -r workspace_url || true
+    else
+      die "workspace_url_missing" "no workspace URL — use BEAM_WORKSPACE_URL=https://… with beam login; the API key must be supplied securely through BEAM_API_KEY or --api-key -" 3
+    fi
+  fi
+  [ -n "$workspace_url" ] || die "workspace_url_missing" "workspace URL cannot be empty" 2
+  derive_instance_from_url "$workspace_url" "$url_kind" || die "workspace_url_invalid" "use a Beam workspace URL such as https://app.us.beam.ai/<workspace>" 2
+  existing_profile="$(profile_for_api "$DETECTED_API_URL" 2>/dev/null || true)"
+  if [ -n "$existing_profile" ] && [ "$replace" -ne 1 ]; then
+    die "instance_exists" "$DETECTED_INSTANCE_NAME is already connected. Nothing changed. Use beam login --replace to update its saved key." 2
+  fi
+  if [ -z "$existing_profile" ] && [ "$replace" -eq 1 ]; then
+    die "instance_not_found" "$DETECTED_INSTANCE_NAME is not connected, so there is no saved key to replace. Run beam login to add it." 2
+  fi
+
   if [ "$key" = "-" ]; then IFS= read -r key || true; fi
   if [ -z "$key" ] && [ -n "${BEAM_API_KEY:-}" ]; then key="$BEAM_API_KEY"; fi
+  if [ -z "$key" ] && [ -f "$LEGACY_CREDS_FILE" ]; then
+    key="$(file_value "$LEGACY_CREDS_FILE" BEAM_API_KEY 2>/dev/null || true)"
+    [ -z "$key" ] || printf 'Existing Beam key found; it will be carried over.\n' >&2
+  fi
   if [ -z "$key" ]; then
-    if [ -t 0 ]; then
-      printf 'Paste your Beam API key and press Enter (it stays hidden as you type): ' >&2
-      if command -v stty >/dev/null 2>&1; then
+    if can_prompt; then
+      printf 'Add your Beam API key (it stays hidden as you type): ' >&2
+      if [ -t 0 ] && command -v stty >/dev/null 2>&1; then
         stty -echo 2>/dev/null || true; IFS= read -r key || true; stty echo 2>/dev/null || true; printf '\n' >&2
       else
         IFS= read -r key || true
@@ -887,47 +1048,45 @@ cmd_login() {
   fi
   if [ -z "$key" ]; then die "auth_missing" "empty API key" 3; fi
 
-  set +e; detect_key_instance "$key"; vc=$?; set -e
-  if [ "$vc" -eq 3 ]; then die "auth_invalid" "API key was rejected by every supported Beam instance — nothing was saved" 3; fi
-  if [ "$vc" -eq 5 ]; then die "instance_detection_incomplete" "one or more Beam instances could not be reached, so the key's instance could not be identified safely — nothing was saved" 5; fi
-  if [ "$vc" -eq 6 ]; then die "instance_ambiguous" "more than one Beam instance accepted this key — nothing was saved" 2; fi
+  set +e; detect_key_instance "$key" "$workspace_url" "$url_kind"; vc=$?; set -e
+  if [ "$vc" -eq 2 ]; then die "workspace_url_invalid" "the Beam instance could not be resolved from that workspace URL" 2; fi
+  if [ "$vc" -eq 3 ]; then die "auth_invalid" "the API key was rejected by $DETECTED_INSTANCE_NAME — nothing was saved" 3; fi
+  if [ "$vc" -eq 5 ]; then die "network_error" "could not reach $DETECTED_INSTANCE_NAME — nothing was saved" 5; fi
 
-  target_profile="$(profile_file "$DETECTED_INSTANCE_ID")"
-  if [ -f "$target_profile" ] && [ "$replace" -ne 1 ]; then
-    die "instance_exists" "$DETECTED_INSTANCE_NAME is already connected. Nothing changed. Use beam login --replace to update its saved key." 2
+  if [ -n "$existing_profile" ]; then
+    DETECTED_INSTANCE_ID="$(file_value "$existing_profile" BEAM_INSTANCE_ID 2>/dev/null || basename "$existing_profile")"
   fi
-  if [ ! -f "$target_profile" ] && [ "$replace" -eq 1 ]; then
-    die "instance_not_found" "$DETECTED_INSTANCE_NAME is not connected, so there is no saved key to replace. Run beam login to add it." 2
-  fi
+  target_profile="${existing_profile:-$(profile_file "$DETECTED_INSTANCE_ID")}"
   resp="$DETECTED_PROFILE"
 
-  # Resolve an explicit choice, a still-accessible remembered default, or the
-  # only available workspace. Multiple memberships remain unset until context
-  # or the user provides a deterministic answer.
-  if [ -n "$workspace" ]; then
-    preferred_workspace="$workspace"
-    preference_is_explicit=1
-  elif [ -n "${BEAM_WORKSPACE_ID:-}" ]; then
-    preferred_workspace="$BEAM_WORKSPACE_ID"
-    preference_is_explicit=1
-  else
-    preferred_workspace="$(file_value "$target_profile" BEAM_WORKSPACE_ID 2>/dev/null || true)"
-    preference_is_explicit=0
+  LOGIN_KEY="$key"
+  API_BASE="$DETECTED_API_URL"; MCP_URL="$DETECTED_MCP_URL"
+  ACTIVE_INSTANCE_ID="$DETECTED_INSTANCE_ID"; ACTIVE_INSTANCE_NAME="$DETECTED_INSTANCE_NAME"
+  current_locked="$(file_value "$SESSION_FILE" BEAM_SESSION_LOCKED 2>/dev/null || printf '0')"
+  current_instance="$(file_value "$SESSION_FILE" BEAM_INSTANCE_ID 2>/dev/null || true)"
+  selection_request="${workspace:-${BEAM_WORKSPACE_ID:-}}"
+  if [ "$current_locked" = "1" ] && [ "$current_instance" = "$DETECTED_INSTANCE_ID" ]; then
+    selection_request="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
   fi
-  if ! resolve_workspace_from_profile "$resp" "$preferred_workspace" "$preference_is_explicit"; then
-    die "workspace_not_found" "workspace $preferred_workspace is not available to this account. Run: beam workspace list <search>" 2
+  if select_workspace "$resp" "$selection_request"; then select_rc=0; else select_rc=$?; fi
+  if [ "$select_rc" -eq 4 ]; then die "workspace_not_found" "choose one workspace available in $DETECTED_INSTANCE_NAME" 2; fi
+  if [ "$select_rc" -eq 6 ]; then
+    SELECTED_WORKSPACE_ID=""; SELECTED_WORKSPACE_NAME=""
   fi
-  workspace="$resolved_workspace"
+  unset LOGIN_KEY
 
-  write_profile "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_MCP_URL" "$key" "$workspace" "$resolved_workspace_name"
-  if [ "$(profile_count)" -eq 1 ] && [ ! -f "$SESSION_FILE" ]; then
-    write_session "$DETECTED_INSTANCE_ID" "$workspace" "$resolved_workspace_name" 0
+  write_profile "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_MCP_URL" "$key" "$SELECTED_WORKSPACE_ID" "$SELECTED_WORKSPACE_NAME"
+  if [ -f "$LEGACY_CREDS_FILE" ] && [ "$(file_value "$LEGACY_CREDS_FILE" BEAM_API_KEY 2>/dev/null || true)" = "$key" ]; then
+    mv "$LEGACY_CREDS_FILE" "$CONFIG_DIR/credentials.v1-backup"
+  fi
+  if [ "$current_locked" != "1" ] || [ "$current_instance" = "$DETECTED_INSTANCE_ID" ]; then
+    write_session "$DETECTED_INSTANCE_ID" "$SELECTED_WORKSPACE_ID" "$SELECTED_WORKSPACE_NAME" "$(if [ -n "$SELECTED_WORKSPACE_ID" ]; then printf 1; else printf 0; fi)"
     activate_profile_file "$target_profile"
   fi
   emit_event auth_ok
   printf '{"ok":true,"instanceId":"%s","instanceName":"%s","workspaceId":%s,"workspaceCount":%s}\n' \
     "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" \
-    "$(if [ -n "$workspace" ]; then printf '"%s"' "$workspace"; else printf 'null'; fi)" "$workspace_count"
+    "$(if [ -n "$SELECTED_WORKSPACE_ID" ]; then printf '"%s"' "$SELECTED_WORKSPACE_ID"; else printf 'null'; fi)" "$workspace_count"
 
   # Wire the MCP connection now that the key is stored (all supported hosts).
   if cmd_register >/dev/null 2>&1; then reg=0; else reg=$?; fi
@@ -935,15 +1094,17 @@ cmd_login() {
   if [ "$replace" -eq 1 ]; then printf 'Updated the key for %s ✅\n' "$DETECTED_INSTANCE_NAME" >&2
   else printf 'Connected to %s ✅\n' "$DETECTED_INSTANCE_NAME" >&2; fi
   if [ "$reg" -eq 0 ]; then printf 'Beam connection registered ✅\n' >&2; fi
-  if [ -n "$ACTIVE_INSTANCE_ID" ] && [ "$ACTIVE_INSTANCE_ID" != "$DETECTED_INSTANCE_ID" ]; then
+  if [ "$current_locked" = "1" ] && [ -n "$current_instance" ] && [ "$current_instance" != "$DETECTED_INSTANCE_ID" ]; then
+    current_profile="$(profile_file "$current_instance")"
+    current_name="$(file_value "$current_profile" BEAM_INSTANCE_NAME 2>/dev/null || printf '%s' "$current_instance")"
     current_workspace="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_NAME 2>/dev/null || file_value "$SESSION_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
-    printf 'This session remains on %s / %s.\n' "$ACTIVE_INSTANCE_NAME" "${current_workspace:-not selected}" >&2
+    printf 'This session remains on %s / %s.\n' "$current_name" "${current_workspace:-not selected}" >&2
     printf 'To use %s, start a new session and run: beam checkout %s [workspace]\n' "$DETECTED_INSTANCE_NAME" "$DETECTED_INSTANCE_ID" >&2
-  elif [ -z "$ACTIVE_INSTANCE_ID" ] && [ "$(profile_count)" -gt 1 ]; then
-    printf 'Choose this session before doing Beam work: beam checkout %s [workspace]\n' "$DETECTED_INSTANCE_ID" >&2
+  elif [ -n "$SELECTED_WORKSPACE_ID" ]; then
+    printf 'Checked out %s / %s ✅\n' "$DETECTED_INSTANCE_NAME" "${SELECTED_WORKSPACE_NAME:-$SELECTED_WORKSPACE_ID}" >&2
+    printf 'This session is locked to this instance and workspace.\n' >&2
   else
-    print_workspace_resolution
-    printf '\nNext: ask "list my Beam agents".\n' >&2
+    printf '%s has %s workspaces. Select one with: beam checkout %s <workspace>\n' "$DETECTED_INSTANCE_NAME" "$workspace_count" "$DETECTED_INSTANCE_ID" >&2
   fi
 }
 
@@ -2454,7 +2615,7 @@ cmd_setup() {
     path_line
     printf '  ⬜ Sign in\n'
     printf '\nNext:\n'
-    printf '  🔑 Create a key at app.beam.ai → Personal settings → API Keys, then run: beam login\n'
+    printf '  🔑 Copy a URL from your Beam workspace, create an API key there, then run: beam login\n'
     return 3
   fi
 
