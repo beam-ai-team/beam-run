@@ -53,8 +53,9 @@ external software.
 Learning Hub commands cover the documented issue, feedback, job, tuner, and
 accuracy APIs. Use `beam learning` to access them; the public contract is
 available at [Beam API docs](https://api.beamstudio.ai/public-docs).
-For an enterprise deployment, set `BEAM_API_URL` to its API origin before
-running the CLI; it preserves the same API-key and workspace-header transport.
+`beam login` detects whether a key belongs to Beam Cloud or Beam Enterprise and
+saves both when needed. Each conversation checks out one instance and workspace;
+parallel conversations can use different contexts without sharing active state.
 
 ## Set up
 

@@ -16,8 +16,10 @@ They are source/audit material, not runtime context.
 
 ## One small policy card, not a skill chain
 
-1. Resolve the workspace from an explicit request or URL, then remembered default,
-   then sole membership. Never silently scan or switch all workspaces.
+1. Read `beam_session_status` (or `beam checkout`) before scoped work. With one
+   saved instance Beam may select it automatically; with multiple instances,
+   require an explicit instance and workspace checkout for this conversation.
+   Never silently scan or switch contexts.
 2. Classify the requested outcome with `../../runtime/routes.md`.
 3. Read only the matching `../../runtime/domains/<domain>.md` and
    `../../runtime/operations/<domain>.md`. Reuse a card already loaded for the
@@ -69,7 +71,11 @@ other external effect.
 - Lead with the result and summarize raw output. Use a table only when it makes
   comparison clearer.
 - A missing resource can mean the wrong workspace. Name the current workspace and
-  offer a focused workspace selection; do not scan all workspaces silently.
+  explain that a different workspace requires a new conversation; do not scan or
+  switch the current conversation silently.
+- Once scoped Beam work begins, the conversation's instance and workspace are
+  locked. If the user wants another context, start a new conversation and use
+  `beam checkout <instance> [workspace]` there. Parallel conversations remain isolated.
 - Keep live tasks and draft tests separate. Resolve active versus draft graph
   before creation; a relevant draft test uses `beam tasks test`, while a normal
   live run uses the live task path.

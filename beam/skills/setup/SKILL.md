@@ -34,27 +34,33 @@ It installs `beam`, puts it on PATH (and your shell rc), and, in an interactive 
 beam login
 ```
 
-Wait for confirmation — do **not** take the key yourself. The command validates and stores the key, resolves an existing or unambiguous workspace when possible, and registers MCP. Then re-run `beam setup`; it verifies the connection.
+Wait for confirmation — do **not** take the key yourself. The command detects
+whether the key belongs to Beam Cloud or Beam Enterprise, names the detected
+instance, saves it locally, and registers the local Beam bridge. If that instance
+already has a key, it changes nothing; use `beam login --replace` only when the
+user intends to replace it. Then re-run `beam setup` to verify the connection.
 
 `beam login` registers the MCP connection itself — including on the Claude desktop app,
 which has no `claude` CLI. Only if it prints **"Could not auto-register"** do you relay the
-manual fallback: add a remote HTTP server named `beam`, url `https://api.beamstudio.ai/mcp`,
-header `Authorization: Bearer <their key>`.
+manual local-command fallback printed by the CLI. Never put the key in host configuration.
 
-Workspace choice happens in the coding-agent conversation, not the browser. Resolve it in this order:
+Instance and workspace choice happen in the coding-agent conversation, not the browser:
 
-1. Use an explicit workspace ID/name or Beam URL in the user's request.
-2. Otherwise use a still-accessible default returned by `beam workspace`.
-3. If the account has exactly one workspace, `beam login` remembers it automatically.
-4. If multiple workspaces remain possible, say: "You have **N** available workspaces. Which one would you like to use? I can show a short, searchable list." Wait for their answer, then remember the chosen workspace with `beam workspace <id>`.
+1. If only one instance is saved, keep the existing low-friction behavior.
+2. If multiple instances are saved, show `beam instance list`, ask once which
+   instance and workspace this conversation should use, then run
+   `beam checkout <instance> [workspace]`.
+3. State the selected instance and workspace before work begins. After the first
+   scoped operation, the checkout is locked; use a new conversation to work elsewhere.
 
 Do not list every workspace automatically: accounts can have thousands. If the user asks to see them, use `beam workspace list <search>` to narrow by name or ID; the CLI shows a bounded set of matches.
 
-If an agent or resource is missing, do not search or switch silently. Name the current workspace and ask whether they want to switch:
+If an agent or resource is missing, do not search or switch silently. Name the
+current context and offer to continue in a new conversation:
 
 ```bash
-beam workspace list <search>   # e.g. beam workspace list acme
-beam workspace <id>
+beam instance list
+beam checkout <instance> [workspace]
 ```
 
 ### 4 · Confirm
@@ -88,5 +94,7 @@ When fully connected and a tool call has succeeded, **celebrate** — 🎉 — a
 - **Anything unclear** — `beam doctor` re-runs every check with a plain-language fix for each red.
 
 ## Notes
-- API keys are global and do not select or scope a workspace. A later user choice is remembered locally as the default. CLI auth uses `x-api-key`; MCP uses `Authorization: Bearer`. `beam` handles both.
+- API keys are detected against Beam's supported Cloud and Enterprise origins
+  and stored locally by instance. A conversation uses exactly one checked-out
+  instance/workspace; the CLI and MCP bridge share that context.
 - A few Beam MCP tools are temporarily broken server-side (`getCurrentUser`, `getTaskDetails`, `getToolOutputSchema`, `getToolOptimizationStatus`) — use the matching Beam Run CLI fallback after setup completes.

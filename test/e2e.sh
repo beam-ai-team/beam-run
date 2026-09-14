@@ -30,7 +30,7 @@ REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"beam_setup_status","arguments":{}}}'
-OUT="$(printf '%s\n' "$REQ" | env BEAM_API_KEY= python3 "$PROXY" 2>/dev/null)"
+OUT="$(printf '%s\n' "$REQ" | env HOME="$FAKE" BEAM_CONFIG_DIR="$FAKE/.config/beam" BEAM_API_KEY= python3 "$PROXY" 2>/dev/null)"
 [ "$(printf '%s\n' "$OUT" | grep -c .)" -eq 3 ] && ok "3 replies, notification stays silent" || bad "wrong reply count"
 printf '%s' "$OUT" | grep -q '"protocolVersion"' && ok "initialize succeeds unauthenticated" || bad "no initialize result"
 printf '%s' "$OUT" | grep -q 'beam_setup_status' && ok "exposes setup-status tool" || bad "missing status tool"
@@ -42,15 +42,15 @@ printf '%s' "$OUT2" | grep -q '"result"' && ok "beam mcp serves a live session" 
 printf '%s' "$OUT2" | grep -q 'auth_missing' && bad "MCP exited with auth_missing" || ok "no auth_missing death"
 
 group "host registration (no claude CLI)"
-REG="$(sandbox BEAM_API_KEY=sk-test-key sh "$BEAM" register 2>/dev/null)"
+REG="$(sandbox sh "$BEAM" register 2>/dev/null)"
 printf '%s' "$REG" | grep -q '"ok":true' && ok "register succeeds" || bad "register failed"
-python3 - "$FAKE/.claude.json" <<'PY' && ok "valid HTTP Bearer entry, unrelated keys preserved" || bad "bad host config"
+python3 - "$FAKE/.claude.json" <<'PY' && ok "valid local bridge entry, unrelated keys preserved" || bad "bad host config"
 import json, sys
 d = json.load(open(sys.argv[1]))
 b = d["mcpServers"]["beam"]
-assert b["type"] == "http"
-assert b["url"].endswith("/mcp")
-assert b["headers"]["Authorization"].startswith("Bearer ")
+assert b["command"].endswith("/beam")
+assert b["args"] == ["mcp"]
+assert "headers" not in b
 assert d["numStartups"] == 7
 PY
 [ -f "$FAKE/.claude.json.beam-backup" ] && ok "original config backed up" || bad "no backup"
@@ -59,13 +59,13 @@ if [ "$(uname -s)" = "Darwin" ]; then
 else
   file_mode="$(stat -c '%a' "$FAKE/.claude.json")"
 fi
-[ "$file_mode" = "600" ] && ok "key-bearing config is chmod 600" || bad "wrong permissions"
+[ "$file_mode" = "600" ] && ok "host config is chmod 600" || bad "wrong permissions"
 
 printf 'not json at all' > "$FAKE/.claude.json"
-sandbox BEAM_API_KEY=sk-test-key sh "$BEAM" register >/dev/null 2>&1
+sandbox sh "$BEAM" register >/dev/null 2>&1
 grep -q 'not json at all' "$FAKE/.claude.json" && ok "unparseable config left untouched" || bad "clobbered a bad config"
 printf '{\n  "numStartups": 7,\n  "mcpServers": {}\n}\n' > "$FAKE/.claude.json"
-sandbox BEAM_API_KEY=sk-test-key sh "$BEAM" register >/dev/null 2>&1
+sandbox sh "$BEAM" register >/dev/null 2>&1
 
 group "uninstall"
 sandbox sh "$BEAM" uninstall >/dev/null 2>&1
@@ -115,12 +115,12 @@ printf '%s' "$PROD_LOGIN" | grep -q 'Ignoring inherited Beam localhost' && ok "e
 printf '{"mcpServers":{}}\n' > "$FAKE/.claude.json"
 env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-register" \
   BEAM_CONFIG_DIR="$FAKE/.config/beam" BEAM_API_URL="http://localhost:4000" \
-  BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV= BEAM_API_KEY=sk-test \
+  BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV= \
   sh "$BEAM" register >/dev/null 2>&1
-python3 - "$FAKE/.claude.json" <<'PY' && ok "loopback MCP override registers production endpoint" || bad "loopback MCP override leaked into host registration"
+python3 - "$FAKE/.claude.json" <<'PY' && ok "registration uses the local session bridge" || bad "registration bypassed the local bridge"
 import json, sys
 entry = json.load(open(sys.argv[1]))["mcpServers"]["beam"]
-assert entry["url"] == "https://api.beamstudio.ai/mcp"
+assert entry["command"].endswith("/beam") and entry["args"] == ["mcp"]
 PY
 
 if DEV_LOGIN="$(env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-local" \
