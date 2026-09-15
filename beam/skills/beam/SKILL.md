@@ -22,6 +22,7 @@ They are source/audit material, not runtime context.
    - No saved instance: show the returned setup checklist and guide `beam login`.
    - One saved instance: show it. If a previous workspace is suggested, ask
      “Use {workspace} again?” before selecting it; never silently resume it.
+     Give the choice directly; do not explain it by citing this skill or its rules.
    - Multiple saved instances: ask for the instance first, then the workspace.
      Include “Add another” as an instance option.
    - Offer “Create new workspace” when asking for a workspace. Never dump the

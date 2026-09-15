@@ -80,6 +80,10 @@ new_user="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/empty-confi
 printf '%s' "$new_user" | grep -q 'Beam session setup' || fail "new-user status omitted setup heading"
 printf '%s' "$new_user" | grep -q 'Paste a Beam workspace URL' || fail "new-user status omitted URL step"
 printf '%s' "$new_user" | grep -q 'Enter the API key in the hidden prompt' || fail "new-user status omitted secure key step"
+printf '%s' "$new_user" | grep -q 'Select or create a workspace' || fail "new-user status omitted workspace step"
+if printf '%s' "$new_user" | grep -q 'Ask the user\|Never ask\|skill\|policy card'; then fail "new-user response exposed agent instructions"; fi
+setup_user="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"beam_setup_status","arguments":{}}}' | env BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=setup-user BEAM_API_KEY= python3 "$PROXY")"
+printf '%s' "$setup_user" | grep -q 'Paste a Beam workspace URL' || fail "setup skill status omitted the first connection step"
 if new_checkout="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=new-checkout PATH="$tmp/bin:$PATH" sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 3 ] || fail "unconnected checkout should require login"
 printf '%s' "$new_checkout" | grep -q 'Beam session setup' || fail "unconnected CLI omitted structured setup"
@@ -89,6 +93,8 @@ printf '%s' "$multiple_instances" | grep -q 'Connected instances' || fail "retur
 printf '%s' "$multiple_instances" | grep -q 'Beam App' || fail "returning-user status omitted Beam App"
 printf '%s' "$multiple_instances" | grep -q 'Beam Enterprise' || fail "returning-user status omitted Beam Enterprise"
 printf '%s' "$multiple_instances" | grep -q 'Add another' || fail "returning-user status omitted add-instance choice"
+printf '%s' "$multiple_instances" | grep -q 'Which instance would you like to use?' || fail "returning-user response lacked a direct question"
+if printf '%s' "$multiple_instances" | grep -q 'Ask the user\|Never ask\|skill\|policy card'; then fail "returning-user response exposed agent instructions"; fi
 if instance_checkout="$(run BEAM_SESSION_ID=choose-instance-cli sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 2 ] || fail "multi-instance checkout should require a choice"
 printf '%s' "$instance_checkout" | grep -q 'Connected instances' || fail "CLI omitted structured instance choice"
@@ -98,6 +104,8 @@ mkdir -p "$tmp/previous-config/instances"
 cp "$tmp/config/instances/app" "$tmp/previous-config/instances/app"
 previous_status="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/previous-config" BEAM_SESSION_ID=previous-status BEAM_API_KEY= python3 "$PROXY")"
 printf '%s' "$previous_status" | grep -q 'Previously used: Alpha' || fail "one-instance status did not suggest the previous workspace"
+printf '%s' "$previous_status" | grep -q 'Use Alpha again, choose another workspace, or create a new one?' || fail "one-instance response lacked workspace options"
+if printf '%s' "$previous_status" | grep -q 'Ask the user\|Never ask\|skill\|policy card'; then fail "previous-workspace response exposed agent instructions"; fi
 if previous_checkout="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/previous-config" BEAM_SESSION_ID=previous-checkout PATH="$tmp/bin:$PATH" sh "$BEAM" checkout app 2>&1)"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 2 ] || fail "workspace confirmation should be required"
 printf '%s' "$previous_checkout" | grep -q 'Beam session setup' || fail "checkout fallback omitted structured setup"
@@ -161,6 +169,7 @@ ok "a used session cannot switch and requests carry its checked-out workspace"
 printf '\n=== local bridge sees the same session ===\n'
 bridge="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-a BEAM_API_KEY= python3 "$PROXY")"
 printf '%s' "$bridge" | grep -q 'Beam Enterprise.*Enterprise Demo.*Locked' || fail "bridge context differs from CLI context"
+if printf '%s' "$bridge" | grep -q 'Ask the user\|Never ask\|skill\|policy card'; then fail "ready response exposed agent instructions"; fi
 saved_bridge="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=session-b BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp BEAM_API_KEY=enterprise-key BEAM_WORKSPACE_ID=ent-a python3 "$PROXY")"
 printf '%s' "$saved_bridge" | grep -q 'Beam App.*Alpha.*Locked' || fail "bridge environment overrode its saved checkout"
 ok "agent tools and CLI share the same visible, locked checkout"

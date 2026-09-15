@@ -1264,7 +1264,7 @@ cmd_workspace_create() {
 
   set +e; resp="$(api_unscoped_write POST /v2/workspace "$body")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in or key rejected — run beam login first" 3; fi
-  if [ "$rc" -eq 5 ]; then die "network_error" "workspace creation result is unknown; do not retry automatically. Check with: beam workspace list <name>" 5; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "workspace creation may have succeeded. Check with beam workspace list <name> before trying again." 5; fi
   printf '%s\n' "$resp"
 }
 
@@ -1277,7 +1277,7 @@ cmd_agents_list() {
   printf '%s\n' "$resp"
   if printf '%s' "$resp" | json_collection_empty; then
     ws="$(read_workspace 2>/dev/null || true)"
-    printf 'No agents found in workspace %s. If the user expected one elsewhere, name this context and use a new session for another checkout; do not scan silently.\n' "$ws" >&2
+    printf 'No agents found in workspace %s. To check another workspace, start a new session.\n' "$ws" >&2
   fi
 }
 
@@ -1288,7 +1288,7 @@ cmd_agents_get() {
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 4 ]; then
     ws="$(read_workspace 2>/dev/null || true)"
-    die "agent_not_found" "agent $id was not found in workspace $ws. Name this context and use a new session for another checkout; do not scan silently." 2
+    die "agent_not_found" "agent $id was not found in workspace $ws. To check another workspace, start a new session." 2
   fi
   if [ "$rc" -eq 5 ]; then die "network_error" "agents get failed (network/timeout)" 5; fi
   printf '%s\n' "$resp"

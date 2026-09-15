@@ -9,7 +9,8 @@ Get the user from nothing to "talking to Beam" with the fewest prompts. **You dr
 
 Setup is a user-facing initialization flow, not a narration of agent mechanics.
 Never say that you are reading a skill, calling a tool, using MCP, or falling back
-to the CLI. Show one compact checklist and one clear next action at a time.
+to the CLI, or cite setup rules to explain a question. Show one compact checklist
+and one clear next action at a time.
 
 **Two rules that must hold:**
 - **Never** ask the user to paste an API key into chat or pass it as `--api-key <key>`. They enter it in `beam login`'s masked terminal prompt.

@@ -208,8 +208,7 @@ def connections_text():
             "Next: run `beam login` in a terminal.\n"
             "1. Paste a Beam workspace URL\n"
             "2. Enter the API key in the hidden prompt\n"
-            "3. Select or create a workspace\n\n"
-            "Never ask the user to paste an API key into chat."
+            "3. Select or create a workspace"
         )
     rows = []
     for number, path in enumerate(profiles, 1):
@@ -221,7 +220,7 @@ def connections_text():
         "⬜ Workspace\n\n"
         "Connected instances:\n%s\n"
         "%s. + Add another\n\n"
-        "Ask the user to choose an instance. Then select a workspace."
+        "Which instance would you like to use?"
     ) % ("\n".join(rows), len(rows) + 1)
 
 
@@ -237,8 +236,8 @@ def context_text(context):
             "🔒 Locked for this session"
         ) % (context["instance_name"], workspace)
     previous = context.get("previous_workspace_name") or context.get("previous_workspace_id")
-    suggestion = "\n\nPreviously used: %s\nAsk the user: “Use %s again?”" % (previous, previous) if previous else (
-        "\n\nAsk the user for a workspace name, or offer to create a new workspace."
+    suggestion = "\n\nPreviously used: %s\nUse %s again, choose another workspace, or create a new one?" % (previous, previous) if previous else (
+        "\n\nWhich workspace would you like to use? You can also create a new one."
     )
     return (
         "🚀 Beam session setup\n"
@@ -315,14 +314,13 @@ def choose_checkout(arguments):
                 "✅ Instance: %s\n"
                 "⬜ Workspace\n\n"
                 "Previously used: %s\n"
-                "Ask the user: “Use %s again?”"
+                "Use %s again, choose another workspace, or create a new one?"
             ) % (name, previous_name, previous_name)
         return None, (
             "🚀 Beam session setup\n"
             "✅ Instance: %s\n"
             "⬜ Workspace\n\n"
-            "Ask the user for a workspace name, or offer to create a new workspace. "
-            "Do not list every workspace."
+            "Which workspace would you like to use? You can also create a new one."
         ) % name
     context["workspace_id"] = str(selected["id"])
     context["workspace_name"] = str(selected.get("name") or "")
