@@ -8,9 +8,9 @@ description: Beam setup — a guided, near-zero-prompt install. Run when the use
 Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, pastes a normal Beam workspace URL, enters their API key in their own terminal, then selects or creates a workspace. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
 
 Setup is a user-facing initialization flow, not a narration of agent mechanics.
-Never say that you are reading a skill, calling a tool, using MCP, or falling back
-to the CLI, or cite setup rules to explain a question. Show one compact checklist
-and one clear next action at a time.
+Never add an explanation, file link, or citation for a setup question. Keep skill,
+tool, and fallback mechanics out of the user-facing reply. Show one compact
+checklist and one clear next action at a time.
 
 **Two rules that must hold:**
 - **Never** ask the user to paste an API key into chat or pass it as `--api-key <key>`. They enter it in `beam login`'s masked terminal prompt.

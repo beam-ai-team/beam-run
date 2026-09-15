@@ -89,7 +89,7 @@ if new_checkout="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESS
 printf '%s' "$new_checkout" | grep -q 'Beam session setup' || fail "unconnected CLI omitted structured setup"
 
 multiple_instances="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/config" BEAM_SESSION_ID=choose-instance BEAM_API_KEY= python3 "$PROXY")"
-printf '%s' "$multiple_instances" | grep -q 'Connected instances' || fail "returning-user status omitted instance choice"
+printf '%s' "$multiple_instances" | grep -q 'Saved instances' || fail "returning-user status omitted instance choice"
 printf '%s' "$multiple_instances" | grep -q 'Beam App' || fail "returning-user status omitted Beam App"
 printf '%s' "$multiple_instances" | grep -q 'Beam Enterprise' || fail "returning-user status omitted Beam Enterprise"
 printf '%s' "$multiple_instances" | grep -q 'Add another' || fail "returning-user status omitted add-instance choice"

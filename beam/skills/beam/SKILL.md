@@ -14,21 +14,22 @@ This file is the only public runtime entry point. Do **not** load the raw Copilo
 TypeScript snapshots or the legacy specialist skills during an ordinary request.
 They are source/audit material, not runtime context.
 
-## One small policy card, not a skill chain
+## Start with the session
 
 1. Initialize the conversation with `beam_session_status` (or `beam checkout`)
-   before scoped work. Keep the mechanism invisible: never tell the user that
-   you are loading a skill, policy card, tool, MCP server, or CLI fallback.
+   before scoped work. Relay only the user-facing checklist and its next question.
+   Do not add an explanation, file link, or citation for why the question is asked.
+   Keep skill, tool, and fallback mechanics out of the user-facing reply.
    - No saved instance: show the returned setup checklist and guide `beam login`.
-   - One saved instance: show it. If a previous workspace is suggested, ask
-     “Use {workspace} again?” before selecting it; never silently resume it.
-     Give the choice directly; do not explain it by citing this skill or its rules.
+   - One saved instance: show it and relay the workspace question from status.
    - Multiple saved instances: ask for the instance first, then the workspace.
      Include “Add another” as an instance option.
    - Offer “Create new workspace” when asking for a workspace. Never dump the
      workspace list; ask for an exact name or use a narrow search when needed.
    - Once checkout succeeds, show the ready checklist with the selected instance,
      workspace, and session lock, then immediately continue the original request.
+   For a choice screen, use the status question as the reply, without a policy
+   explanation or source citation.
    Use at most one user-facing activity line while checking status:
    “Preparing your Beam session — no data will be changed.”
 2. Classify the requested outcome with `../../runtime/routes.md`.

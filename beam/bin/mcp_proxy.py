@@ -182,7 +182,7 @@ STATUS_TOOL = {
 }
 CHECKOUT_TOOL = {
     "name": "beam_checkout",
-    "description": "Choose and lock one saved Beam instance and workspace for this session. If status suggests a previous workspace, ask the user to confirm it before calling this tool with that workspace.",
+    "description": "Choose and lock one saved Beam instance and workspace for this session. A suggested previous workspace must be selected explicitly by the user.",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -218,7 +218,7 @@ def connections_text():
         "🚀 Beam session setup\n"
         "⬜ Instance\n"
         "⬜ Workspace\n\n"
-        "Connected instances:\n%s\n"
+        "Saved instances:\n%s\n"
         "%s. + Add another\n\n"
         "Which instance would you like to use?"
     ) % ("\n".join(rows), len(rows) + 1)
@@ -241,7 +241,7 @@ def context_text(context):
     )
     return (
         "🚀 Beam session setup\n"
-        "✅ Instance: %s\n"
+        "✅ Saved instance: %s\n"
         "⬜ Workspace%s"
     ) % (context["instance_name"], suggestion)
 
@@ -298,27 +298,27 @@ def choose_checkout(arguments):
     choices = [w for w in workspaces if isinstance(w, dict) and w.get("id") and preferred.lower() in {
         str(w["id"]).lower(), str(w.get("name") or "").lower()
     }] if preferred else []
+    previous_id = profile.get("BEAM_WORKSPACE_ID", "")
+    previous = next((w for w in workspaces if str(w["id"]) == previous_id), None)
     if len(choices) == 1:
         selected = choices[0]
     elif workspace_selector:
         return None, "No unique workspace matches '%s' in %s." % (workspace_selector, name)
+    elif previous:
+        previous_name = str(previous.get("name") or previous["id"])
+        return None, (
+            "🚀 Beam session setup\n"
+            "✅ Saved instance: %s\n"
+            "⬜ Workspace\n\n"
+            "Previously used: %s\n"
+            "Use %s again, choose another workspace, or create a new one?"
+        ) % (name, previous_name, previous_name)
     elif len(workspaces) == 1:
         selected = workspaces[0]
     else:
-        previous_id = profile.get("BEAM_WORKSPACE_ID", "")
-        previous = next((w for w in workspaces if str(w["id"]) == previous_id), None)
-        if previous:
-            previous_name = str(previous.get("name") or previous["id"])
-            return None, (
-                "🚀 Beam session setup\n"
-                "✅ Instance: %s\n"
-                "⬜ Workspace\n\n"
-                "Previously used: %s\n"
-                "Use %s again, choose another workspace, or create a new one?"
-            ) % (name, previous_name, previous_name)
         return None, (
             "🚀 Beam session setup\n"
-            "✅ Instance: %s\n"
+            "✅ Saved instance: %s\n"
             "⬜ Workspace\n\n"
             "Which workspace would you like to use? You can also create a new one."
         ) % name

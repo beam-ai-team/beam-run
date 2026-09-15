@@ -59,9 +59,13 @@ with tempfile.TemporaryDirectory(prefix="beam-response-") as tmp:
     selected, choice = beam.choose_checkout({"instance": "Beam App"})
     assert selected is None
     assert_copy(choice, "Use Alpha again, choose another workspace, or create a new one?")
-    selected, choice = beam.choose_checkout({"instance": "Beam Enterprise"})
+    beam.request_json = lambda url, key: {"workspaces": [{"id": "w-a", "name": "Alpha"}]}
+    selected, choice = beam.choose_checkout({"instance": "Beam App"})
     assert selected is None
-    assert_copy(choice, "Which workspace would you like to use?")
+    assert_copy(choice, "Use Alpha again")
+    selected, choice = beam.choose_checkout({"instance": "Beam Enterprise"})
+    assert choice is None and selected["locked"]
+    (root / "sessions" / "test").unlink()
     print("ok  checkout: no silent reuse and no workspace dump")
 
     beam.request_json = lambda url, key: {"workspaces": [
