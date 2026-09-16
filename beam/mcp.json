@@ -1,7 +1,9 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
     "beam": {
-      "command": "beam",
+      "type": "stdio",
+      "command": "./bin/beam",
       "args": ["mcp"]
     }
   }

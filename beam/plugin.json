@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "beam",
-  "version": "0.6.0",
+  "version": "0.6.0+codex.20260916111829",
   "description": "Universally operate Beam workspaces, agents, tasks, flows, and integrations from any coding agent.",
   "author": {
     "name": "Beam AI"

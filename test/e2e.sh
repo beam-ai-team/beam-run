@@ -30,7 +30,7 @@ REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"beam_setup_status","arguments":{}}}'
-OUT="$(printf '%s\n' "$REQ" | env BEAM_API_KEY= python3 "$PROXY" 2>/dev/null)"
+OUT="$(printf '%s\n' "$REQ" | env HOME="$FAKE" BEAM_CONFIG_DIR="$FAKE/.config/beam" BEAM_API_KEY= python3 "$PROXY" 2>/dev/null)"
 [ "$(printf '%s\n' "$OUT" | grep -c .)" -eq 3 ] && ok "3 replies, notification stays silent" || bad "wrong reply count"
 printf '%s' "$OUT" | grep -q '"protocolVersion"' && ok "initialize succeeds unauthenticated" || bad "no initialize result"
 printf '%s' "$OUT" | grep -q 'beam_setup_status' && ok "exposes setup-status tool" || bad "missing status tool"
@@ -42,15 +42,15 @@ printf '%s' "$OUT2" | grep -q '"result"' && ok "beam mcp serves a live session" 
 printf '%s' "$OUT2" | grep -q 'auth_missing' && bad "MCP exited with auth_missing" || ok "no auth_missing death"
 
 group "host registration (no claude CLI)"
-REG="$(sandbox BEAM_API_KEY=sk-test-key sh "$BEAM" register 2>/dev/null)"
+REG="$(sandbox sh "$BEAM" register 2>/dev/null)"
 printf '%s' "$REG" | grep -q '"ok":true' && ok "register succeeds" || bad "register failed"
-python3 - "$FAKE/.claude.json" <<'PY' && ok "valid HTTP Bearer entry, unrelated keys preserved" || bad "bad host config"
+python3 - "$FAKE/.claude.json" <<'PY' && ok "valid local bridge entry, unrelated keys preserved" || bad "bad host config"
 import json, sys
 d = json.load(open(sys.argv[1]))
 b = d["mcpServers"]["beam"]
-assert b["type"] == "http"
-assert b["url"].endswith("/mcp")
-assert b["headers"]["Authorization"].startswith("Bearer ")
+assert b["command"].endswith("/beam")
+assert b["args"] == ["mcp"]
+assert "headers" not in b
 assert d["numStartups"] == 7
 PY
 [ -f "$FAKE/.claude.json.beam-backup" ] && ok "original config backed up" || bad "no backup"
@@ -59,13 +59,13 @@ if [ "$(uname -s)" = "Darwin" ]; then
 else
   file_mode="$(stat -c '%a' "$FAKE/.claude.json")"
 fi
-[ "$file_mode" = "600" ] && ok "key-bearing config is chmod 600" || bad "wrong permissions"
+[ "$file_mode" = "600" ] && ok "host config is chmod 600" || bad "wrong permissions"
 
 printf 'not json at all' > "$FAKE/.claude.json"
-sandbox BEAM_API_KEY=sk-test-key sh "$BEAM" register >/dev/null 2>&1
+sandbox sh "$BEAM" register >/dev/null 2>&1
 grep -q 'not json at all' "$FAKE/.claude.json" && ok "unparseable config left untouched" || bad "clobbered a bad config"
 printf '{\n  "numStartups": 7,\n  "mcpServers": {}\n}\n' > "$FAKE/.claude.json"
-sandbox BEAM_API_KEY=sk-test-key sh "$BEAM" register >/dev/null 2>&1
+sandbox sh "$BEAM" register >/dev/null 2>&1
 
 group "uninstall"
 sandbox sh "$BEAM" uninstall >/dev/null 2>&1
@@ -92,9 +92,9 @@ printf '%s' "$NETWORK_LIST" | grep -q '"code":"network_error"' && ok "workspace 
 group "API-key login guidance"
 if NO_KEY="$(sandbox BEAM_API_KEY= sh "$BEAM" login </dev/null 2>&1)"; then no_key_rc=0; else no_key_rc=$?; fi
 [ "$no_key_rc" -eq 3 ] && printf '%s' "$NO_KEY" | grep -q 'BEAM_API_KEY' && ok "non-interactive login gives secure options" || bad "missing API-key login guidance"
-printf '%s' "$(sh "$BEAM" --help)" | grep -q 'masked prompt' && ok "help documents masked API-key login" || bad "help still describes browser login"
+printf '%s' "$(sh "$BEAM" --help)" | grep -q 'workspace URL + masked key' && ok "help documents URL-led masked login" || bad "help omits the connection flow"
 
-group "production endpoint safety"
+group "new-login endpoint safety"
 mkdir -p "$FAKE/bin"
 cat > "$FAKE/bin/curl" <<'SH'
 #!/bin/sh
@@ -102,31 +102,31 @@ printf '%s\n' "$*" > "$BEAM_CURL_CAPTURE"
 printf '401'
 SH
 chmod +x "$FAKE/bin/curl"
-# A user can have old local-development exports in their shell. The installed
-# production CLI must ignore them unless local development is explicitly opted in.
+# A stale local-development export must not make a new login assume Beam App or
+# send the key anywhere. Local development remains an explicit opt-in.
 if PROD_LOGIN="$(env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-production" \
   BEAM_CONFIG_DIR="$FAKE/.config/beam" BEAM_API_URL="http://localhost:4000" \
   BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV= \
   sh "$BEAM" login --api-key sk-test 2>&1)"; then prod_login_rc=0; else prod_login_rc=$?; fi
-[ "$prod_login_rc" -eq 3 ] && ok "loopback login returns auth failure from fake API" || bad "unexpected loopback login exit $prod_login_rc"
-grep -q 'https://api.beamstudio.ai/v2/user/me' "$FAKE/curl-production" && ok "loopback API override falls back to production" || bad "loopback API override leaked into production login"
-printf '%s' "$PROD_LOGIN" | grep -q 'Ignoring inherited Beam localhost' && ok "explains ignored local development settings" || bad "no loopback override guidance"
+[ "$prod_login_rc" -eq 3 ] && ok "new login requires a workspace URL" || bad "unexpected loopback login exit $prod_login_rc"
+printf '%s' "$PROD_LOGIN" | grep -q 'workspace_url_missing' && ok "does not assume Beam App" || bad "missing workspace URL guidance"
+[ ! -e "$FAKE/curl-production" ] && ok "key was not sent to an assumed instance" || bad "login sent the key without a workspace URL"
 
 printf '{"mcpServers":{}}\n' > "$FAKE/.claude.json"
 env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-register" \
   BEAM_CONFIG_DIR="$FAKE/.config/beam" BEAM_API_URL="http://localhost:4000" \
-  BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV= BEAM_API_KEY=sk-test \
+  BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV= \
   sh "$BEAM" register >/dev/null 2>&1
-python3 - "$FAKE/.claude.json" <<'PY' && ok "loopback MCP override registers production endpoint" || bad "loopback MCP override leaked into host registration"
+python3 - "$FAKE/.claude.json" <<'PY' && ok "registration uses the local session bridge" || bad "registration bypassed the local bridge"
 import json, sys
 entry = json.load(open(sys.argv[1]))["mcpServers"]["beam"]
-assert entry["url"] == "https://api.beamstudio.ai/mcp"
+assert entry["command"].endswith("/beam") and entry["args"] == ["mcp"]
 PY
 
 if DEV_LOGIN="$(env HOME="$FAKE" PATH="$FAKE/bin:$PATH" BEAM_CURL_CAPTURE="$FAKE/curl-local" \
   BEAM_CONFIG_DIR="$FAKE/.config/beam-local" BEAM_API_URL="http://localhost:4000" \
   BEAM_MCP_URL="http://localhost:4000/mcp" BEAM_LOCAL_DEV=1 \
-  sh "$BEAM" login --api-key sk-test 2>&1)"; then dev_login_rc=0; else dev_login_rc=$?; fi
+  sh "$BEAM" login --api-url http://localhost:4000 --api-key sk-test 2>&1)"; then dev_login_rc=0; else dev_login_rc=$?; fi
 [ "$dev_login_rc" -eq 3 ] && ok "explicit local development keeps fake auth failure" || bad "unexpected local-dev login exit $dev_login_rc"
 grep -q 'http://localhost:4000/v2/user/me' "$FAKE/curl-local" && ok "explicit local development keeps loopback API" || bad "explicit local development did not preserve loopback API"
 printf '%s' "$DEV_LOGIN" | grep -q 'Ignoring inherited Beam localhost' && bad "local-development mode was incorrectly ignored" || ok "explicit local development avoids production fallback warning"
@@ -216,7 +216,7 @@ printf '%s' "$OUT4" | grep -q '"isError": *true' && ok "flagged as an error" || 
 printf '%s' "$OUT4" | grep -q 'beam login' && ok "enriched with the fix" || bad "not actionable"
 
 group "workspace is never guessed"
-LOGIN="$(sandbox BEAM_API_KEY="$KEY" sh "$BEAM" login 2>/dev/null)"
+LOGIN="$(sandbox BEAM_WORKSPACE_URL=https://app.beam.ai/workspace BEAM_API_KEY="$KEY" sh "$BEAM" login 2>/dev/null)"
 WSN="$(printf '%s' "$LOGIN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["workspaceCount"])' 2>/dev/null)"
 WSID="$(printf '%s' "$LOGIN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["workspaceId"])' 2>/dev/null)"
 if [ -n "$WSN" ] && [ "$WSN" -gt 1 ]; then

@@ -26,6 +26,11 @@ printf '\n=== universal supervisor runtime ===\n'
 [ -s beam/skills/setup/SKILL.md ] || fail "missing setup skill"
 grep -q 'only public runtime entry point' beam/skills/beam/SKILL.md || fail "Beam Run is not the only public runtime entry"
 grep -q 'mapped CLI fallback' beam/skills/beam/SKILL.md || fail "completion fallback missing"
+grep -q 'Never mix a CLI checkout with MCP work' beam/skills/beam/SKILL.md || fail "Codex session isolation rule missing"
+grep -q 'In Codex, use the mapped CLI command' beam/skills/beam/SKILL.md || fail "Codex operation path is not task-scoped"
+grep -q 'mandatory confirmation boundary' beam/skills/beam/SKILL.md || fail "checkout success boundary missing"
+grep -q 'Never omit, compress, reword, or combine' beam/skills/beam/SKILL.md || fail "checkout success block is not mandatory"
+grep -q 'This confirmation is mandatory' beam/skills/setup/SKILL.md || fail "first-time setup success block is not mandatory"
 grep -q 'Do \*\*not\*\* load the raw Copilot' beam/skills/beam/SKILL.md || fail "runtime still depends on source snapshots"
 grep -q 'For a read-only operation, say that no changes will be made' beam/skills/beam/SKILL.md || fail "read-only activity boundary missing"
 grep -q 'name the exact entity and resulting state' beam/skills/beam/SKILL.md || fail "write-result activity contract missing"
@@ -59,8 +64,9 @@ if HOME="$tmp" BEAM_CONFIG_DIR="$tmp/config" sh "$BEAM" learning optimize agent-
 ok "auth and destructive confirmation gates are enforced"
 
 printf '\n=== deterministic fallback requests ===\n'
-mkdir -p "$tmp/bin" "$tmp/config"
-printf 'BEAM_API_KEY=sk-test\nBEAM_WORKSPACE_ID=workspace-1\n' > "$tmp/config/credentials"
+mkdir -p "$tmp/bin" "$tmp/config/instances" "$tmp/config/sessions"
+printf 'BEAM_INSTANCE_ID=app\nBEAM_INSTANCE_NAME=Beam App\nBEAM_API_URL=https://api.beamstudio.ai\nBEAM_MCP_URL=https://api.beamstudio.ai/mcp\nBEAM_API_KEY=sk-test\nBEAM_WORKSPACE_ID=workspace-1\nBEAM_WORKSPACE_NAME=Test Workspace\n' > "$tmp/config/instances/app"
+printf 'BEAM_INSTANCE_ID=app\nBEAM_WORKSPACE_ID=workspace-1\nBEAM_WORKSPACE_NAME=Test Workspace\nBEAM_SESSION_LOCKED=1\n' > "$tmp/config/sessions/supervisor"
 cat > "$tmp/bin/curl" <<'SH'
 #!/bin/sh
 body="$(sed -n '1,$p')"
@@ -114,7 +120,7 @@ fi
 SH
 chmod +x "$tmp/bin/curl"
 
-fallback_env="HOME=$tmp BEAM_CONFIG_DIR=$tmp/config PATH=$tmp/bin:$PATH BEAM_TEST_CAPTURE=$tmp/body"
+fallback_env="HOME=$tmp BEAM_CONFIG_DIR=$tmp/config BEAM_SESSION_ID=supervisor PATH=$tmp/bin:$PATH BEAM_TEST_CAPTURE=$tmp/body"
 # shellcheck disable=SC2086
 mcp="$(env $fallback_env sh "$BEAM" mcp check --tool task_create)" || fail "healthy MCP tool check failed"
 printf '%s' "$mcp" | grep -q '"available":true' || fail "MCP tool availability missing"
@@ -122,13 +128,17 @@ if env $fallback_env sh "$BEAM" mcp check --tool absent_tool >/dev/null 2>&1; th
 [ "$rc" -eq 2 ] || fail "missing MCP tool should select fallback with exit 2"
 ok "MCP health distinguishes healthy, available, and missing-tool states"
 
-if single_workspace_login="$(env $fallback_env BEAM_API_KEY=sk-test sh "$BEAM" login </dev/null 2>&1)"; then :; else fail "single-workspace login failed"; fi
+if single_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/single-config" BEAM_WORKSPACE_URL=https://app.beam.ai/workspace-1 BEAM_API_KEY=sk-test sh "$BEAM" login </dev/null 2>&1)"; then :; else fail "single-workspace login failed"; fi
 printf '%s' "$single_workspace_login" | grep -q '"workspaceId":"workspace-1"' || fail "sole workspace was not selected"
-printf '%s' "$single_workspace_login" | grep -q 'Workspace selected: Test Workspace' || fail "sole workspace selection was not named"
-multiple_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/multiple-config" BEAM_API_KEY=sk-test BEAM_TEST_WORKSPACE_MODE=multiple sh "$BEAM" login </dev/null 2>&1)" || fail "multiple-workspace login failed"
+printf '%s' "$single_workspace_login" | grep -q '🚀 Beam session ready' || fail "sole workspace selection omitted success"
+printf '%s' "$single_workspace_login" | grep -q '✅ Instance: Beam App' || fail "sole workspace selection omitted instance"
+printf '%s' "$single_workspace_login" | grep -q '✅ Workspace: Test Workspace' || fail "sole workspace selection omitted workspace"
+printf '%s' "$single_workspace_login" | grep -q '🔒 Locked for this session' || fail "sole workspace selection omitted lock"
+multiple_workspace_login="$(env $fallback_env BEAM_CONFIG_DIR="$tmp/multiple-config" BEAM_WORKSPACE_URL=https://app.beam.ai/workspace-1 BEAM_API_KEY=sk-test BEAM_TEST_WORKSPACE_MODE=multiple sh "$BEAM" login </dev/null 2>&1)" || fail "multiple-workspace login failed"
 printf '%s' "$multiple_workspace_login" | grep -q '"workspaceId":null,"workspaceCount":2' || fail "multiple workspaces should remain unselected"
-printf '%s' "$multiple_workspace_login" | grep -q 'You have 2 available workspaces' || fail "multiple-workspace prompt omitted the workspace count"
-printf '%s' "$multiple_workspace_login" | grep -q 'short, searchable list' || fail "multiple-workspace prompt omitted list guidance"
+printf '%s' "$multiple_workspace_login" | grep -q 'Beam session setup' || fail "multiple-workspace login omitted structured setup"
+printf '%s' "$multiple_workspace_login" | grep -q 'Create: beam workspace create' || fail "multiple-workspace login omitted workspace creation"
+printf '%s' "$multiple_workspace_login" | grep -q 'beam checkout app' || fail "multiple-workspace prompt omitted selection guidance"
 ok "onboarding selects a sole workspace and prompts before choosing among many"
 
 env $fallback_env sh "$BEAM" tasks create agent-1 'do the work' >/dev/null || fail "live task fallback failed"

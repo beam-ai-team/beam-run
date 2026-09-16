@@ -5,7 +5,12 @@ description: Beam setup — a guided, near-zero-prompt install. Run when the use
 
 # Beam setup (guided)
 
-Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, enters their API key in their own terminal, and chooses a workspace only when their account has more than one. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
+Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, pastes a normal Beam workspace URL, enters their API key in their own terminal, then selects or creates a workspace. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
+
+Setup is a user-facing initialization flow, not a narration of agent mechanics.
+Never add an explanation, file link, or citation for a setup question. Keep skill,
+tool, and fallback mechanics out of the user-facing reply. Show one compact
+checklist and one clear next action at a time.
 
 **Two rules that must hold:**
 - **Never** ask the user to paste an API key into chat or pass it as `--api-key <key>`. They enter it in `beam login`'s masked terminal prompt.
@@ -28,37 +33,57 @@ It installs `beam`, puts it on PATH (and your shell rc), and, in an interactive 
 
 ### 3 · Sign in
 
-> "Create a key at **app.beam.ai → Personal settings → API Keys**, then run `beam login` in your terminal and paste it when it asks (it stays hidden as you type). Tell me when it says you're signed in."
+> "Open Beam and copy any URL from your workspace. Then run `beam login`; paste the workspace URL first and your API key when asked (the key stays hidden). Tell me when it says the session is locked."
 
 ```bash
 beam login
 ```
 
-Wait for confirmation — do **not** take the key yourself. The command validates and stores the key, resolves an existing or unambiguous workspace when possible, and registers MCP. Then re-run `beam setup`; it verifies the connection.
+Wait for confirmation — do **not** take the key yourself. The command derives
+Beam App, Beam Enterprise, or Beam `{Region}` from the workspace URL, verifies
+the key only against that instance, and asks the user to select or create a
+workspace. If the instance already has a key, it changes nothing; use `beam
+login --replace` only when the user intends to replace it. Then re-run `beam
+setup` to verify the connection.
 
 `beam login` registers the MCP connection itself — including on the Claude desktop app,
 which has no `claude` CLI. Only if it prints **"Could not auto-register"** do you relay the
-manual fallback: add a remote HTTP server named `beam`, url `https://api.beamstudio.ai/mcp`,
-header `Authorization: Bearer <their key>`.
+manual local-command fallback printed by the CLI. Never put the key in host configuration.
 
-Workspace choice happens in the coding-agent conversation, not the browser. Resolve it in this order:
+Instance and workspace choice happen per coding-agent conversation:
 
-1. Use an explicit workspace ID/name or Beam URL in the user's request.
-2. Otherwise use a still-accessible default returned by `beam workspace`.
-3. If the account has exactly one workspace, `beam login` remembers it automatically.
-4. If multiple workspaces remain possible, say: "You have **N** available workspaces. Which one would you like to use? I can show a short, searchable list." Wait for their answer, then remember the chosen workspace with `beam workspace <id>`.
+1. If only one instance is saved, use it and select a workspace.
+2. If multiple instances are saved, let the user choose one or add another.
+3. Let the user choose an existing workspace or create one in the selected instance.
+4. State the selected instance and workspace before work begins. Checkout locks
+   immediately; use a new conversation to work elsewhere.
 
 Do not list every workspace automatically: accounts can have thousands. If the user asks to see them, use `beam workspace list <search>` to narrow by name or ID; the CLI shows a bounded set of matches.
 
-If an agent or resource is missing, do not search or switch silently. Name the current workspace and ask whether they want to switch:
+If an agent or resource is missing, do not search or switch silently. Name the
+current context and offer to continue in a new conversation:
 
 ```bash
-beam workspace list <search>   # e.g. beam workspace list acme
-beam workspace <id>
+beam instance list
+beam checkout <instance> [workspace]
 ```
 
 ### 4 · Confirm
-Once a workspace is selected, call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
+Once a workspace is selected, first send the exact four-line checklist printed by
+Beam as its own user-facing message. This confirmation is mandatory and must not
+be compressed, reworded, combined with agent results, or skipped:
+
+```text
+🚀 Beam session ready
+✅ Instance: {instance name}
+✅ Workspace: {workspace name}
+🔒 Locked for this session
+```
+
+Then run `beam agents list` in Codex; on other hosts, call `listAgents` or use the
+CLI. On success, tell them plainly what they can now do — list agents, run tasks,
+monitor progress, pull analytics — in plain English. No need to explain the
+transport; the plumbing stays invisible.
 
 ## Presenting it — make it feel like onboarding
 **Rule: `beam setup` already prints the onboarding message — a success line, an emoji checklist, and next steps. Show *that* to the user. Never rewrite it into a "what I did" table, a build/status report, or a summary of the steps you performed.** Report the user's remaining steps, not your own actions.
@@ -71,11 +96,11 @@ Render it as a warm chat message with **emoji** — never a raw diagnostic dump.
 ⬜ Sign in
 
 **Next steps:**
-🔑 1. Create a key at [app.beam.ai → Personal settings → API Keys](https://app.beam.ai), then run:
+🔑 1. Copy a URL from your Beam workspace and create an API key there, then run:
 ```bash
 beam login
 ```
-🚀 2. If Beam selected a workspace automatically, ask "list my Beam agents." If you have multiple workspaces, choose one first — Beam can show a short, searchable list.
+🚀 2. Select or create a workspace when prompted, then ask "list my Beam agents."
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
 
@@ -88,5 +113,12 @@ When fully connected and a tool call has succeeded, **celebrate** — 🎉 — a
 - **Anything unclear** — `beam doctor` re-runs every check with a plain-language fix for each red.
 
 ## Notes
-- API keys are global and do not select or scope a workspace. A later user choice is remembered locally as the default. CLI auth uses `x-api-key`; MCP uses `Authorization: Bearer`. `beam` handles both.
+- A workspace URL routes the key to exactly one instance. Regional hosts use
+  `app.{region}.beam.ai`, from which Beam Run derives
+  `api.{region}.beamstudio.ai`; no static region registry is used. Connections
+  are stored locally. Users upgrading from the old single-instance connection
+  reconnect once. A conversation uses exactly one locked instance/workspace;
+  hosts with conversation-scoped MCP processes share that context with the CLI.
+- Codex Beam work stays on the CLI after checkout because that path is scoped to
+  the current task. Do not mix it with the shared Beam MCP process.
 - A few Beam MCP tools are temporarily broken server-side (`getCurrentUser`, `getTaskDetails`, `getToolOutputSchema`, `getToolOptimizationStatus`) — use the matching Beam Run CLI fallback after setup completes.

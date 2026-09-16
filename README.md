@@ -41,8 +41,10 @@ Start with the smallest action that fits the job:
 Beam Run now exposes one public supervisor skill across every host. It loads only
 the compact policy card needed for the request, while retaining the Beam Copilot
 baseline as a pinned audit source rather than re-reading raw prompts at runtime.
-MCP remains the preferred transport. Every registered operation has a CLI
-fallback, so a missing or malformed MCP tool does not abandon the requested work.
+MCP remains the preferred transport on hosts that scope it to a conversation.
+Codex stays on the CLI after checkout because its commands carry the current task
+ID; this keeps parallel conversations isolated. Every registered operation has a
+CLI mapping, so a missing or malformed MCP tool does not abandon the requested work.
 
 The CLI still owns setup, sign-in, workspace selection, diagnostics, and the
 stdio bridge. It also provides deterministic fallback commands for tasks,
@@ -53,8 +55,10 @@ external software.
 Learning Hub commands cover the documented issue, feedback, job, tuner, and
 accuracy APIs. Use `beam learning` to access them; the public contract is
 available at [Beam API docs](https://api.beamstudio.ai/public-docs).
-For an enterprise deployment, set `BEAM_API_URL` to its API origin before
-running the CLI; it preserves the same API-key and workspace-header transport.
+`beam login` asks for a familiar Beam workspace URL before the key, derives Beam
+App, Beam Enterprise, or Beam `{Region}`, and saves that connection locally. Each
+conversation checks out and locks one instance and workspace; parallel
+conversations can use different contexts without sharing active state.
 
 ## Set up
 

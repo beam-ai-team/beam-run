@@ -14,17 +14,47 @@ This file is the only public runtime entry point. Do **not** load the raw Copilo
 TypeScript snapshots or the legacy specialist skills during an ordinary request.
 They are source/audit material, not runtime context.
 
-## One small policy card, not a skill chain
+## Start with the session
 
-1. Resolve the workspace from an explicit request or URL, then remembered default,
-   then sole membership. Never silently scan or switch all workspaces.
+1. Initialize the conversation before scoped work. In Codex, run `beam checkout`
+   through the terminal and use the CLI mappings for the rest of that conversation.
+   Do not call `beam_session_status`, `beam_checkout`, or another Beam MCP tool in
+   Codex: its MCP process can be shared across conversations, while the CLI is
+   scoped by the current Codex task ID. Never mix a CLI checkout with MCP work in
+   the same Codex conversation. On other hosts, use `beam_session_status` or
+   `beam checkout`. Relay only the user-facing checklist and its next question.
+   Do not add an explanation, file link, or citation for why the question is asked.
+   Keep skill, tool, and fallback mechanics out of the user-facing reply.
+   - No saved instance: show the returned setup checklist and guide `beam login`.
+   - One saved instance: show it and relay the workspace question from status.
+   - Multiple saved instances: run `beam checkout` without choosing for the user.
+     Beam presents the instance selector and includes “Add another.”
+   - Offer “Create new workspace” when asking for a workspace. Never dump the
+     workspace list; ask for an exact name or use a narrow search when needed.
+   - A successful checkout has a mandatory confirmation boundary. Before any agent
+     lookup or other Beam operation, send this exact four-line block as its own
+     user-facing message, using the names returned by checkout:
+
+     ```text
+     🚀 Beam session ready
+     ✅ Instance: {instance name}
+     ✅ Workspace: {workspace name}
+     🔒 Locked for this session
+     ```
+
+     Never omit, compress, reword, or combine this block with agent results. After
+     sending it, immediately continue the user's original request.
+   For a choice screen, use the status question as the reply, without a policy
+   explanation or source citation.
+   Use at most one user-facing activity line while checking status:
+   “Preparing your Beam session — no data will be changed.”
 2. Classify the requested outcome with `../../runtime/routes.md`.
 3. Read only the matching `../../runtime/domains/<domain>.md` and
    `../../runtime/operations/<domain>.md`. Reuse a card already loaded for the
    current conversation unless the request changes domain or the context was compacted.
-4. Prefer the listed MCP tool. If it is absent, malformed, has a known defect, or
-   has a transport error, use the mapped CLI fallback with the same workspace and
-   entity IDs.
+4. In Codex, use the mapped CLI command so the selected instance and workspace stay
+   tied to the current conversation. On other hosts, prefer the listed MCP tool and
+   use the mapped CLI fallback if it is absent, malformed, or has a transport error.
 5. Verify the result required by the operations card. After an ambiguous write,
    re-read current state before considering any retry.
 
@@ -55,6 +85,9 @@ other external effect.
   operation. Name the user outcome and scope, not the mechanism. Group related
   MCP or CLI calls beneath that message; never narrate each command, fallback,
   policy-card read, route selection, prompt, or file.
+- Treat initialization as a product flow, not a diagnostic exchange. Show one
+  compact checklist and one clear question at a time; summarize tool output and
+  never expose raw workspace rows or internal identifiers unless the user asks.
 - For a read-only operation, say that no changes will be made. For a write,
   test, publish, consent request, or other external effect, name the target and
   intended effect before starting. After it finishes, state the result; for a
@@ -69,7 +102,11 @@ other external effect.
 - Lead with the result and summarize raw output. Use a table only when it makes
   comparison clearer.
 - A missing resource can mean the wrong workspace. Name the current workspace and
-  offer a focused workspace selection; do not scan all workspaces silently.
+  explain that a different workspace requires a new conversation; do not scan or
+  switch the current conversation silently.
+- Once scoped Beam work begins, the conversation's instance and workspace are
+  locked. If the user wants another context, start a new conversation and use
+  `beam checkout <instance> [workspace]` there. Parallel conversations remain isolated.
 - Keep live tasks and draft tests separate. Resolve active versus draft graph
   before creation; a relevant draft test uses `beam tasks test`, while a normal
   live run uses the live task path.

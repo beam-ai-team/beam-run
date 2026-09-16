@@ -1,7 +1,7 @@
 #!/bin/sh
 # Smoke test for the beam CLI — read-only (never creates tasks).
-# Local:  BEAM_API_KEY='<key>' sh test/smoke.sh      (or run with no key for offline checks)
-# CI:     provides BEAM_API_KEY via secrets; falls back to offline checks when absent.
+# Local:  BEAM_WORKSPACE_URL='<url>' BEAM_API_KEY='<key>' sh test/smoke.sh
+# CI:     provides both values via secrets; falls back to offline checks when absent.
 set -eu
 
 BEAM="${BEAM_BIN:-$(cd "$(dirname "$0")/.." && pwd)/beam/bin/beam}"
@@ -48,6 +48,7 @@ if [ -z "${BEAM_API_KEY:-}" ]; then
   echo; echo "Offline smoke PASSED. Set BEAM_API_KEY to exercise the authenticated path."
   exit 0
 fi
+[ -n "${BEAM_WORKSPACE_URL:-}" ] || fail "BEAM_WORKSPACE_URL is required with BEAM_API_KEY"
 
 # Authenticated path — key comes from the environment, never argv.
 say "login (env key)";      "$BEAM" login >/dev/null || fail "login"

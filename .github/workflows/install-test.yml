@@ -42,6 +42,9 @@ jobs:
           BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
         run: sh test/e2e.sh
 
+      - name: session checkout safety
+        run: sh test/session-checkout.sh
+
       # agent-builder CLI: path resolution, credential sourcing, error contract.
       # All deploys are --dry-run, so no agent is ever created.
       - name: e2e agent-builder (offline unless BEAM_API_KEY secret is set)
