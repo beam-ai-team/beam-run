@@ -382,6 +382,13 @@ print_workspace_resolution() {
   fi
 }
 
+print_session_ready() {
+  printf '\n🚀 Beam session ready\n' >&2
+  printf '✅ Instance: %s\n' "$1" >&2
+  printf '✅ Workspace: %s\n' "$2" >&2
+  printf '🔒 Locked for this session\n' >&2
+}
+
 can_prompt() { [ -t 0 ] || [ "${BEAM_TEST_INTERACTIVE:-}" = "1" ]; }
 
 create_workspace_for_selection() {
@@ -870,6 +877,7 @@ cmd_checkout() {
         "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" \
         "$(if [ -n "$ws" ]; then json_quote "$ws"; else printf null; fi)" \
         "$(if [ -n "$ws_name" ]; then json_quote "$ws_name"; else printf null; fi)" "$locked"
+      print_session_ready "$ACTIVE_INSTANCE_NAME" "${ws_name:-$ws}"
       return 0
     fi
     if [ -n "$ACTIVE_INSTANCE_ID" ]; then
@@ -952,8 +960,7 @@ cmd_checkout() {
   printf '{"ok":true,"instanceId":"%s","instanceName":"%s","workspaceId":"%s","workspaceName":%s,"locked":%s}\n' \
     "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$workspace" "$(if [ -n "$workspace_name" ]; then json_quote "$workspace_name"; else printf null; fi)" \
     true
-  printf 'Checked out %s / %s for this session ✅\n' "$ACTIVE_INSTANCE_NAME" "${workspace_name:-$workspace}" >&2
-  printf 'This session is locked to this instance and workspace.\n' >&2
+  print_session_ready "$ACTIVE_INSTANCE_NAME" "${workspace_name:-$workspace}"
 }
 
 cmd_help() {
@@ -1118,8 +1125,7 @@ cmd_login() {
     printf 'This session remains on %s / %s.\n' "$current_name" "${current_workspace:-not selected}" >&2
     printf 'To use %s, start a new session and run: beam checkout %s [workspace]\n' "$DETECTED_INSTANCE_NAME" "$DETECTED_INSTANCE_ID" >&2
   elif [ -n "$SELECTED_WORKSPACE_ID" ]; then
-    printf 'Checked out %s / %s ✅\n' "$DETECTED_INSTANCE_NAME" "${SELECTED_WORKSPACE_NAME:-$SELECTED_WORKSPACE_ID}" >&2
-    printf 'This session is locked to this instance and workspace.\n' >&2
+    print_session_ready "$DETECTED_INSTANCE_NAME" "${SELECTED_WORKSPACE_NAME:-$SELECTED_WORKSPACE_ID}"
   else
     printf '\n🚀 Beam session setup\n' >&2
     printf '✅ Instance: %s\n' "$DETECTED_INSTANCE_NAME" >&2

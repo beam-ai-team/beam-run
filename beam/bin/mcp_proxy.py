@@ -229,7 +229,7 @@ def context_text(context):
     workspace = context.get("workspace_name") or context.get("workspace_id")
     if workspace and context.get("locked"):
         return (
-            "✅ Beam session ready\n"
+            "🚀 Beam session ready\n"
             "✅ Instance: %s\n"
             "✅ Workspace: %s\n"
             "🔒 Locked for this session"

@@ -31,8 +31,19 @@ They are source/audit material, not runtime context.
      Beam presents the instance selector and includes “Add another.”
    - Offer “Create new workspace” when asking for a workspace. Never dump the
      workspace list; ask for an exact name or use a narrow search when needed.
-   - Once checkout succeeds, show the ready checklist with the selected instance,
-     workspace, and session lock, then immediately continue the original request.
+   - A successful checkout has a mandatory confirmation boundary. Before any agent
+     lookup or other Beam operation, send this exact four-line block as its own
+     user-facing message, using the names returned by checkout:
+
+     ```text
+     🚀 Beam session ready
+     ✅ Instance: {instance name}
+     ✅ Workspace: {workspace name}
+     🔒 Locked for this session
+     ```
+
+     Never omit, compress, reword, or combine this block with agent results. After
+     sending it, immediately continue the user's original request.
    For a choice screen, use the status question as the reply, without a policy
    explanation or source citation.
    Use at most one user-facing activity line while checking status:

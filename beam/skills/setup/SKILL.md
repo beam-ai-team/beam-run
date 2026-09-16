@@ -69,10 +69,21 @@ beam checkout <instance> [workspace]
 ```
 
 ### 4 · Confirm
-Once a workspace is selected, run `beam agents list` in Codex; on other hosts,
-call `listAgents` or use the CLI. On success, tell them plainly what they can now
-do — list agents, run tasks, monitor progress, pull analytics — in plain English.
-No need to explain the transport; the plumbing stays invisible.
+Once a workspace is selected, first send the exact four-line checklist printed by
+Beam as its own user-facing message. This confirmation is mandatory and must not
+be compressed, reworded, combined with agent results, or skipped:
+
+```text
+🚀 Beam session ready
+✅ Instance: {instance name}
+✅ Workspace: {workspace name}
+🔒 Locked for this session
+```
+
+Then run `beam agents list` in Codex; on other hosts, call `listAgents` or use the
+CLI. On success, tell them plainly what they can now do — list agents, run tasks,
+monitor progress, pull analytics — in plain English. No need to explain the
+transport; the plumbing stays invisible.
 
 ## Presenting it — make it feel like onboarding
 **Rule: `beam setup` already prints the onboarding message — a success line, an emoji checklist, and next steps. Show *that* to the user. Never rewrite it into a "what I did" table, a build/status report, or a summary of the steps you performed.** Report the user's remaining steps, not your own actions.

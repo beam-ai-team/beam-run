@@ -115,14 +115,18 @@ ok "new, returning, and multi-instance sessions receive one structured setup flo
 
 printf '\n=== isolated session checkouts ===\n'
 run BEAM_SESSION_ID=session-a sh "$BEAM" checkout enterprise >/dev/null 2>&1 || fail "enterprise checkout"
-run BEAM_SESSION_ID=session-b sh "$BEAM" checkout app Alpha >/dev/null 2>&1 || fail "Beam App checkout"
+session_b_ready="$(run BEAM_SESSION_ID=session-b sh "$BEAM" checkout app Alpha 2>&1)" || fail "Beam App checkout"
+printf '%s' "$session_b_ready" | grep -q '🚀 Beam session ready' || fail "successful checkout omitted ready heading"
+printf '%s' "$session_b_ready" | grep -q '✅ Instance: Beam App' || fail "successful checkout omitted instance"
+printf '%s' "$session_b_ready" | grep -q '✅ Workspace: Alpha' || fail "successful checkout omitted workspace"
+printf '%s' "$session_b_ready" | grep -q '🔒 Locked for this session' || fail "successful checkout omitted lock"
 a="$(run BEAM_SESSION_ID=session-a sh "$BEAM" checkout)"
 b="$(run BEAM_SESSION_ID=session-b sh "$BEAM" checkout)"
 printf '%s' "$a" | grep -q '"instanceId":"enterprise"' || fail "session A lost enterprise"
 printf '%s' "$b" | grep -q '"workspaceId":"prod-a"' || fail "session B lost production workspace"
 if missing="$(run BEAM_SESSION_ID=session-c sh "$BEAM" agents list 2>&1)"; then rc=0; else rc=$?; fi
 if [ "$rc" -ne 2 ] || ! printf '%s' "$missing" | grep -q checkout_required; then fail "new multi-instance session did not require checkout"; fi
-ok "parallel sessions retain independent instance and workspace context"
+ok "parallel sessions retain context and confirm successful checkout"
 
 run BEAM_SESSION_ID= CODEX_THREAD_ID=codex-task sh "$BEAM" checkout app Alpha >/dev/null 2>&1 || fail "Codex task checkout"
 [ -f "$tmp/config/sessions/codex-task" ] || fail "Codex task id did not scope the checkout"

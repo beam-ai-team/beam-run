@@ -95,7 +95,11 @@ with tempfile.TemporaryDirectory(prefix="beam-response-") as tmp:
 
     selected, choice = beam.choose_checkout({"instance": "Beam App", "workspace": "Alpha"})
     assert choice is None and selected["locked"]
-    assert_copy(beam.context_text(beam.load_context()), "🔒 Locked for this session")
+    ready = beam.context_text(beam.load_context())
+    assert_copy(ready, "🚀 Beam session ready")
+    assert_copy(ready, "✅ Instance: Beam App")
+    assert_copy(ready, "✅ Workspace: Alpha")
+    assert_copy(ready, "🔒 Locked for this session")
     selected, choice = beam.choose_checkout({"instance": "Beam Enterprise", "workspace": "Alpha"})
     assert selected is None
     assert_copy(choice, "Start a new session")
