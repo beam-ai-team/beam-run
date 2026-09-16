@@ -51,7 +51,13 @@ with tempfile.TemporaryDirectory(prefix="beam-response-") as tmp:
     profile("enterprise", "Beam Enterprise", "enterprise-key")
     assert_copy(beam.context_text(beam.load_context()), "Which instance would you like to use?")
     assert_copy(beam.context_text(beam.load_context()), "+ Add another")
+    assert "required" not in beam.CHECKOUT_TOOL["inputSchema"]
     print("ok  multiple instances: instance choice before workspace")
+
+    selected, choice = beam.choose_checkout({})
+    assert selected is None and "Which instance would you like to use?" in choice
+    assert not (root / "sessions" / "test").exists()
+    print("ok  fresh multi-instance session: no instance is assumed or locked")
 
     beam.request_json = lambda url, key: {"workspaces": [
         {"id": "w-a", "name": "Alpha"}, {"id": "w-b", "name": "Beta"}

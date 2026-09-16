@@ -22,8 +22,8 @@ They are source/audit material, not runtime context.
    Keep skill, tool, and fallback mechanics out of the user-facing reply.
    - No saved instance: show the returned setup checklist and guide `beam login`.
    - One saved instance: show it and relay the workspace question from status.
-   - Multiple saved instances: ask for the instance first, then the workspace.
-     Include “Add another” as an instance option.
+   - Multiple saved instances: call `beam_checkout` without choosing for the user.
+     Beam presents the instance and workspace selectors and includes “Add another.”
    - Offer “Create new workspace” when asking for a workspace. Never dump the
      workspace list; ask for an exact name or use a narrow search when needed.
    - Once checkout succeeds, show the ready checklist with the selected instance,

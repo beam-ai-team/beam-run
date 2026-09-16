@@ -182,14 +182,13 @@ STATUS_TOOL = {
 }
 CHECKOUT_TOOL = {
     "name": "beam_checkout",
-    "description": "Choose and lock one saved Beam instance and workspace for this session. A suggested previous workspace must be selected explicitly by the user.",
+    "description": "Choose and lock one Beam instance and workspace for this session. In a fresh multi-instance session, call with no arguments: Beam asks the user directly and ignores guessed selections.",
     "inputSchema": {
         "type": "object",
         "properties": {
             "instance": {"type": "string", "description": "Saved instance id or exact name."},
             "workspace": {"type": "string", "description": "Workspace id or exact name."},
         },
-        "required": ["instance"],
     },
 }
 SETUP_TOOL = {
