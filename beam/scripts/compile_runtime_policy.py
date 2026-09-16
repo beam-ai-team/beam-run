@@ -165,7 +165,7 @@ def render_operations(domain: str, operations: list[dict[str, str]]) -> str:
     lines = [
         f"# Beam Run operations — {domain}",
         "",
-        "Generated from `beam/contracts/operations.yaml`. Prefer MCP; on an unavailable or malformed tool, use the mapped CLI command. Reconcile an ambiguous write before retrying.",
+        "Generated from `beam/contracts/operations.yaml`. Follow the host transport selected during initialization: Codex uses the task-scoped CLI; other hosts prefer MCP and fall back to the mapped CLI command. Reconcile an ambiguous write before retrying.",
         "",
         "| Operation | Safety | MCP | CLI fallback | Confirmation | Verify |",
         "| --- | --- | --- | --- | --- | --- |",

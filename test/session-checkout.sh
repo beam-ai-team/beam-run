@@ -124,6 +124,12 @@ if missing="$(run BEAM_SESSION_ID=session-c sh "$BEAM" agents list 2>&1)"; then 
 if [ "$rc" -ne 2 ] || ! printf '%s' "$missing" | grep -q checkout_required; then fail "new multi-instance session did not require checkout"; fi
 ok "parallel sessions retain independent instance and workspace context"
 
+run BEAM_SESSION_ID= CODEX_THREAD_ID=codex-task sh "$BEAM" checkout app Alpha >/dev/null 2>&1 || fail "Codex task checkout"
+[ -f "$tmp/config/sessions/codex-task" ] || fail "Codex task id did not scope the checkout"
+codex_task="$(run BEAM_SESSION_ID= CODEX_THREAD_ID=codex-task sh "$BEAM" checkout)"
+printf '%s' "$codex_task" | grep -q '"workspaceId":"prod-a"' || fail "Codex task lost its checkout"
+ok "Codex terminal commands use the current task id"
+
 run BEAM_SESSION_ID=session-b BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp BEAM_API_KEY=enterprise-key BEAM_WORKSPACE_ID=ent-a sh "$BEAM" agents list >/dev/null || fail "saved checkout ignored inherited overrides"
 grep -q 'api.beamstudio.ai.*prod-a.*prod-key' "$tmp/requests" || fail "environment values overrode the saved checkout"
 ok "saved checkout controls endpoint, key, and workspace"

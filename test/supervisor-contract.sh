@@ -26,6 +26,8 @@ printf '\n=== universal supervisor runtime ===\n'
 [ -s beam/skills/setup/SKILL.md ] || fail "missing setup skill"
 grep -q 'only public runtime entry point' beam/skills/beam/SKILL.md || fail "Beam Run is not the only public runtime entry"
 grep -q 'mapped CLI fallback' beam/skills/beam/SKILL.md || fail "completion fallback missing"
+grep -q 'Never mix a CLI checkout with MCP work' beam/skills/beam/SKILL.md || fail "Codex session isolation rule missing"
+grep -q 'In Codex, use the mapped CLI command' beam/skills/beam/SKILL.md || fail "Codex operation path is not task-scoped"
 grep -q 'Do \*\*not\*\* load the raw Copilot' beam/skills/beam/SKILL.md || fail "runtime still depends on source snapshots"
 grep -q 'For a read-only operation, say that no changes will be made' beam/skills/beam/SKILL.md || fail "read-only activity boundary missing"
 grep -q 'name the exact entity and resulting state' beam/skills/beam/SKILL.md || fail "write-result activity contract missing"

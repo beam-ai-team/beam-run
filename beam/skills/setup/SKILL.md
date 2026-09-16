@@ -69,7 +69,10 @@ beam checkout <instance> [workspace]
 ```
 
 ### 4 · Confirm
-Once a workspace is selected, call `listAgents` (or ask the user to say "list my Beam agents"). On success, tell them plainly what they can now do — list agents, run tasks, monitor progress, pull analytics — in plain English. No need to explain MCP vs CLI; the plumbing stays invisible.
+Once a workspace is selected, run `beam agents list` in Codex; on other hosts,
+call `listAgents` or use the CLI. On success, tell them plainly what they can now
+do — list agents, run tasks, monitor progress, pull analytics — in plain English.
+No need to explain the transport; the plumbing stays invisible.
 
 ## Presenting it — make it feel like onboarding
 **Rule: `beam setup` already prints the onboarding message — a success line, an emoji checklist, and next steps. Show *that* to the user. Never rewrite it into a "what I did" table, a build/status report, or a summary of the steps you performed.** Report the user's remaining steps, not your own actions.
@@ -104,5 +107,7 @@ When fully connected and a tool call has succeeded, **celebrate** — 🎉 — a
   `api.{region}.beamstudio.ai`; no static region registry is used. Connections
   are stored locally. Users upgrading from the old single-instance connection
   reconnect once. A conversation uses exactly one locked instance/workspace;
-  the CLI and MCP bridge share that context.
+  hosts with conversation-scoped MCP processes share that context with the CLI.
+- Codex Beam work stays on the CLI after checkout because that path is scoped to
+  the current task. Do not mix it with the shared Beam MCP process.
 - A few Beam MCP tools are temporarily broken server-side (`getCurrentUser`, `getTaskDetails`, `getToolOutputSchema`, `getToolOptimizationStatus`) — use the matching Beam Run CLI fallback after setup completes.

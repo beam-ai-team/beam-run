@@ -41,8 +41,10 @@ Start with the smallest action that fits the job:
 Beam Run now exposes one public supervisor skill across every host. It loads only
 the compact policy card needed for the request, while retaining the Beam Copilot
 baseline as a pinned audit source rather than re-reading raw prompts at runtime.
-MCP remains the preferred transport. Every registered operation has a CLI
-fallback, so a missing or malformed MCP tool does not abandon the requested work.
+MCP remains the preferred transport on hosts that scope it to a conversation.
+Codex stays on the CLI after checkout because its commands carry the current task
+ID; this keeps parallel conversations isolated. Every registered operation has a
+CLI mapping, so a missing or malformed MCP tool does not abandon the requested work.
 
 The CLI still owns setup, sign-in, workspace selection, diagnostics, and the
 stdio bridge. It also provides deterministic fallback commands for tasks,
