@@ -36,6 +36,32 @@ beam agent-builder validate
 ```
 → `{"valid": true, "baseUrl": "..."}` or `{"valid": false, "error": "..."}`.
 
+### `models`
+The workspace's live model catalog: every accepted token, which one is the
+default, and the credits each costs per node run. Read it before choosing a
+model; a token that is not listed is not valid for this workspace.
+```bash
+beam agent-builder models
+```
+→ `{"models": [{modelValue, modelName, isDefault, creditsCost, supportsReasoning, isPremium}], "default": "…", "total": N}`,
+default first, then cheapest first. `deploy`, `create` and `add-node` report
+`defaultModel`, `defaultModelSource` (`catalog` or `fallback`) and
+`modelWarnings` for any token the catalog does not list, on a node's `model`,
+its `fallback_models`, and a condition node's `llmModel` and `fallbackModels`;
+readiness carries the same `modelWarnings` for the saved graph. Warnings never
+block a publish.
+
+### `docs [<query>] [--page <url>] [--limit N] [--max-chars N]`
+Search the live product docs and read a page. Needs no credentials. The index
+is `docs.beam.ai/llms.txt`; the page body is the Markdown the docs site
+publishes beside every page. The top match is fetched when it leads clearly;
+`--page` reads a specific one. `BEAM_DOCS_URL` overrides the docs host.
+```bash
+beam agent-builder docs "loop node"
+beam agent-builder docs --page https://docs.beam.ai/03-running-operations/task-management/automation-modes/automation-modes
+```
+→ `{"matches": [{title, url, description, score}], "page": {url, chars, truncated, text}}`.
+
 ### `search-tools <keyword> [--wait-only] [--managed-only]`
 Search integration tools. `--managed-only` drops prompt-only `custom_gpt_tool`s
 and keeps every real `beam_tool` (managed integrations and Beam built-ins like

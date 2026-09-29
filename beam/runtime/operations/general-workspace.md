@@ -5,5 +5,6 @@ Generated from `beam/contracts/operations.yaml`. Follow the host transport selec
 | Operation | Safety | MCP | CLI fallback | Confirmation | Verify |
 | --- | --- | --- | --- | --- | --- |
 | user.current | read | getCurrentUser | `beam whoami` | none | not-required |
+| docs.search | read | null | `beam docs <query> [--page url]` | none | not-required |
 | workspace.create | external-effect | null | `beam workspace create <name> [--domain domain] [--icon-src url]` | explicit-workspace-create-intent | user.current |
 | agent.list | read | listAgents | `beam agents list` | none | not-required |

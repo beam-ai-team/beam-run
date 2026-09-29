@@ -310,6 +310,76 @@ assert not module._webhook_readiness_report(agent_id, {"triggered": False}, entr
                                             "https://api.beamstudio.ai")["ready"]
 PY
 
+group "live docs and model catalog (offline)"
+# `docs` needs no Beam credentials and reads the index the docs site publishes.
+# The fixture stands in for docs.beam.ai so this stays deterministic offline.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs "loop node" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && ok "docs works without credentials" || bad "docs failed offline (rc=$rc): $OUT"
+printf '%s' "$OUT" | grep -q '"title": "Loop Nodes"' && ok "docs matches the loop-node page" || bad "docs missed the loop-node page"
+printf '%s' "$OUT" | grep -q 'iterationCount or linkedVariableId' && ok "docs returns the page body" || bad "docs did not fetch the page"
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs 2>/dev/null)"; rc=$?
+[ "$rc" -eq 2 ] && [ "$(printf '%s' "$OUT" | code_of)" = "validation_error" ] \
+  && ok "docs without a query is a validation error" || bad "docs without a query: rc=$rc"
+# `models` is a workspace read: no key -> auth_error naming beam login, never a guess.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  "$BEAM" agent-builder models 2>/dev/null)"; rc=$?
+[ "$rc" -eq 3 ] && [ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] \
+  && ok "models without credentials is an auth error" || bad "models without credentials: rc=$rc"
+# An offline dry-run cannot read the catalog, so it names the fallback and says so.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  "$BEAM" agent-builder deploy "$SPECS/linear-blog-emailer.json" --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q '"defaultModelSource": "fallback"' && ok "offline dry-run reports the fallback default" || bad "no defaultModelSource on dry-run"
+printf '%s' "$OUT" | grep -q '"modelWarnings": \[\]' && ok "offline dry-run carries no catalog warnings" || bad "unexpected model warnings offline"
+# The vendored references carry no model table: the catalog is the source.
+grep -q "BEDROCK_CLAUDE_SONNET_4\b" "$ROOT/beam/internal/agent-builder/references/node-authoring.md" \
+  && bad "node-authoring still carries a frozen model table" || ok "node-authoring points at the live catalog"
+grep -q "Query, don't remember" "$ROOT/beam/internal/agent-builder/SKILL.md" \
+  && ok "skill requires models/docs before authoring" || bad "skill invariant missing"
+
+group "docs skips the checkout gate; fallback and condition models are checked"
+# Two saved instances and no active checkout: workspace reads must ask for a
+# checkout, but the public docs must still be readable (review: saqib-beam).
+mkdir -p "$WORK/two/instances"
+printf 'BEAM_INSTANCE_ID=one\nBEAM_INSTANCE_NAME=One\n' > "$WORK/two/instances/one"
+printf 'BEAM_INSTANCE_ID=two\nBEAM_INSTANCE_NAME=Two\n' > "$WORK/two/instances/two"
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/two" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs "loop node" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$OUT" | grep -q '"title": "Loop Nodes"' \
+  && ok "agent-builder docs works with two instances and no checkout" || bad "agent-builder docs still gated on checkout (rc=$rc)"
+# The shell gate reports on stderr in the CLI's {"error":{"code":...}} shape.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/two" "$BEAM" agent-builder models 2>&1 >/dev/null)"; rc=$?
+[ "$rc" -eq 2 ] && printf '%s' "$OUT" | grep -q '"code":"checkout_required"' \
+  && ok "agent-builder models still requires a checkout" || bad "models bypassed the checkout gate (rc=$rc): $OUT"
+# The catalog check must cover primary, fallback, and condition-node models,
+# in a spec and in a saved graph. Stub the catalog so this runs offline.
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" <<'PY' \
+  && ok "spec and live checks cover fallback and condition models" \
+  || bad "fallback or condition models escape the catalog check"
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("beampy", sys.argv[1])
+m = importlib.util.module_from_spec(spec); sys.argv = ["beam.py"]; spec.loader.exec_module(m)
+m._MODEL_CATALOG["models"] = [{"modelValue": "GEMINI_3_FLASH", "isDefault": True, "creditsCost": 1},
+                              {"modelValue": "GPT4_1_MINI", "isDefault": False, "creditsCost": 1}]
+spec_nodes = {"nodes": [
+    {"key": "write", "model": "NOPE_1", "fallback_models": ["GPT4_1_MINI", "NOPE_2"]},
+    {"key": "route", "node_type": "conditionNode",
+     "node_configurations": {"conditionType": "llm_based", "llmModel": "NOPE_3", "fallbackModels": "GEMINI_3_FLASH,NOPE_4"}},
+    {"key": "ok", "model": "GEMINI_3_FLASH"},
+]}
+w = m.model_warnings_for(m._spec_models(spec_nodes))
+assert len(w) == 4, w
+assert any("fallback model NOPE_2" in x for x in w), w
+assert any("condition model NOPE_3" in x for x in w), w
+assert any("condition fallback model NOPE_4" in x for x in w), w
+live = [{"objective": "Write", "toolConfiguration": {"preferredModel": "GEMINI_3_FLASH", "fallbackModels": "NOPE_5"}},
+        {"objective": "Route", "nodeType": "conditionNode",
+         "nodeConfigurations": {"conditionType": "llm_based", "llmModel": "NOPE_6", "fallbackModels": None}}]
+w2 = m.model_warnings_for([x for n in live for x in m._live_node_models(n)])
+assert len(w2) == 2 and "NOPE_5" in w2[0] and "NOPE_6" in w2[1], w2
+PY
+
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY for the authenticated checks.\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] || exit 1
@@ -330,6 +400,32 @@ OUT="$(env BEAM_API_KEY=sk-definitely-invalid \
 [ "$rc" -ne 0 ] && ok "bad key exits non-zero ($rc)" || bad "still exits 0 on a bad key"
 [ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] && ok "code=auth_error" || bad "wrong code"
 printf '%s' "$OUT" | grep -q '"ok": false' && ok "ok:false" || bad "still reports ok:true"
+
+group "authenticated: live model catalog and docs"
+OUT="$("$BEAM" agent-builder models 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && ok "models lists the catalog" || bad "models failed: $OUT"
+N="$(printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for m in d["models"] if m["isDefault"]))' 2>/dev/null)"
+[ "$N" = "1" ] && ok "exactly one default model" || bad "expected one default, got '$N'"
+printf '%s' "$OUT" | grep -q '"creditsCost"' && ok "credits per run are reported" || bad "no creditsCost"
+OUT="$("$BEAM" agent-builder deploy "$SPECS/linear-blog-emailer.json" --agent-id 00000000-0000-0000-0000-000000000000 --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q '"defaultModelSource": "catalog"' && ok "authenticated dry-run takes the default from the catalog" \
+  || ok "authenticated dry-run on a missing agent fails before the model report (expected on a foreign id)"
+OUT="$("$BEAM" agent-builder docs "automation modes" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$OUT" | grep -q 'automation-modes' && ok "docs finds the live automation-modes page" || bad "live docs lookup failed (rc=$rc)"
+OUT="$("$BEAM" agent-builder models 2>/dev/null)"
+python3 - "$SPECS/condition-ticket-router.json" "$WORK/bad-fallback.json" <<'PY'
+import json, sys
+spec = json.load(open(sys.argv[1]))
+cond = next(n for n in spec["nodes"] if n.get("node_type") == "conditionNode")
+cond.setdefault("node_configurations", {"conditionType": "llm_based", "llmModel": "GPT40", "fallbackModels": None})
+cond["node_configurations"]["llmModel"] = "NOT_A_MODEL_A"
+gpt = next(n for n in spec["nodes"] if n.get("node_type", "executionNode") == "executionNode" and not n.get("is_entry"))
+gpt["fallback_models"] = ["NOT_A_MODEL_B"]
+json.dump(spec, open(sys.argv[2], "w"))
+PY
+OUT="$("$BEAM" agent-builder deploy "$WORK/bad-fallback.json" --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q 'fallback model NOT_A_MODEL_B' && ok "dry-run warns on an unknown fallback model" || bad "no fallback-model warning: $OUT"
+printf '%s' "$OUT" | grep -q 'condition model NOT_A_MODEL_A' && ok "dry-run warns on an unknown condition-node model" || bad "no condition-model warning"
 
 group "authenticated: system-action tools are reachable"
 # These are real platform tools; they attach as integrations, not as plain nodes.

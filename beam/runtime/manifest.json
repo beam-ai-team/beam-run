@@ -15,11 +15,11 @@
     "runtime/domains/templates.md": "1400d519ab2b99bd1260ab4f05e0eb91819e67e7f75cdea381bd4820587d0324",
     "runtime/domains/views.md": "7660c974681b9dab78f6abc969d0bf2149443b55e53c9601ac8e00f06248eda9",
     "runtime/operations/agent-analytics.md": "fc1caea4be4494fe11eb980f3b56d297e962fee93b99e23777b720014a40ac33",
-    "runtime/operations/agent-builder.md": "3c97d5f3e00ad862e41960300a892008be0554a34abcb559039a292f96f7368f",
+    "runtime/operations/agent-builder.md": "0f5e7c59e8a49b4324bb4cb458817843e4e9c6af603deb29c04335a1cb6b3858",
     "runtime/operations/agent-config.md": "a8980ff4b90ffee1e553f93e400b9ef1832b8e706a04fbba77304a8498180373",
     "runtime/operations/agent-flow.md": "86646a5bd11babfa1f9907394932c3c4a6a1677d2c2543b9453f96ff68800b25",
     "runtime/operations/agent-tasks.md": "58a86cd015fe89ef6856000e4f77db48f62a388598bda5fdb9e764b43aa905df",
-    "runtime/operations/general-workspace.md": "ac7c8b47d242f0af7952cf57d8d8a844dc3f7d4b058e2d28e9c0fb5c50c5b5d5",
+    "runtime/operations/general-workspace.md": "b308ffdf94189f1017547ab5569246d62d51fa024761fc3071a60bb1b3be991e",
     "runtime/operations/global-tasks.md": "9bb93a135b3544ec71498ca37f94c865d09672f8a6921cea9469c718b1a255cc",
     "runtime/operations/inbox.md": "fe0861ee05fdd587ffd72f46787ec29dce252ca94184b1a979c77ecd9a812d15",
     "runtime/operations/integrations.md": "ebb87fd3afeb09794536bc634a30db7ddcd919f335e58d56d1744cf8fcb5752b",
@@ -29,7 +29,7 @@
     "runtime/routes.md": "54d6c09898ce822446312fffaea151126634614985e2d6a9e6913b0dfb777f37"
   },
   "sources": {
-    "contracts/operations.yaml": "de83d91077a3c37b57bb1ec9accdbc3b4d256c89ad30dda9597810ef1c701c1b",
+    "contracts/operations.yaml": "68389f26d6bd6600a9c38b34ffb3145aacb65f3fd64d9ade46a4287c60821fe6",
     "references/copilot-baseline/builder/prompt.ts": "935f8b929a5b17e9a592c186062abf1004662fdffb2e3747d89195e7c68c771a",
     "references/copilot-baseline/domain/routing-table.ts": "d959d13bddea23077208586b7a4efe581569492d9d9dd16462e73fa02c572f62",
     "references/copilot-baseline/general-agent/prompt.ts": "6d24de39e1a4d641a34aab60a10e76c0e6a1ded7bf1f2cf3f4b0fa73c86ead44",

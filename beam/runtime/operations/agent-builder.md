@@ -5,6 +5,7 @@ Generated from `beam/contracts/operations.yaml`. Follow the host transport selec
 | Operation | Safety | MCP | CLI fallback | Confirmation | Verify |
 | --- | --- | --- | --- | --- | --- |
 | graph.readiness | read | null | `beam agent-builder readiness <agentId>` | none | not-required |
+| model.catalog | read | null | `beam agent-builder models` | none | not-required |
 | graph.deploy | reversible-write | null | `beam agent-builder deploy <specFile>` | none | graph.readiness |
 | graph.publish | external-effect | null | `beam agent-builder publish <graphId> --agent-id <agentId>` | explicit-publish-intent | graph.get |
 | graph.update-prompt | reversible-write | null | `beam agent-builder update-node-prompt <agentId> <nodeId> <promptFile>` | none | graph.readiness |

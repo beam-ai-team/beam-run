@@ -1008,6 +1008,8 @@ Usage:
   beam views <cmd>           inspect records or export a saved view
   beam learning <cmd>        inspect issues, feedback, jobs, and optimization
   beam agent-builder <cmd>   bundled agent builder (design/build/patch graphs)
+  beam models                live model catalog of the workspace (default, credits per run)
+  beam docs <query>          search the live Beam docs (docs.beam.ai) and read a page; no sign-in
   beam mcp check [--tool n]  verify MCP auth and optionally a tool's availability
   beam mcp                   local session-aware MCP bridge
   beam uninstall
@@ -2820,8 +2822,16 @@ main() {
         *) die "validation_error" "usage: beam learning <issues|list-issues|issue|feedbacks|feedback-summary|update-feedback|issue-jobs|job|job-activity|trend|tools|tool|config|set-config|submit-feedback|submit-task-feedback|merge|optimize|discard|approve-job|reject-job|reoptimize-job|cancel-job|run-job|resume>" 2 ;;
       esac ;;
     agent-builder)
-      case "${1:-}" in -h|--help) ;; *) prepare_scoped_session ;; esac
+      # `docs` reads the public docs and needs no instance or workspace, so it
+      # must not be gated on a checkout (the `beam docs` form is not either).
+      case "${1:-}" in -h|--help|docs) ;; *) prepare_scoped_session ;; esac
       cmd_agent_builder "$@" ;;
+    models)
+      prepare_scoped_session
+      cmd_agent_builder models "$@" ;;
+    docs)
+      # Public docs need no Beam session; the builder script fetches them directly.
+      cmd_agent_builder docs "$@" ;;
     mcp)
       if [ "${1:-}" = "check" ]; then shift; cmd_mcp_check "$@"; else cmd_mcp; fi ;;
     register) cmd_register ;;
