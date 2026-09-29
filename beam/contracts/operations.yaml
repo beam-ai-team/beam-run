@@ -16,6 +16,13 @@ operations:
     mcp: getCurrentUser
     cli: beam whoami
     status: ready
+  docs.search:
+    specialist: general-workspace
+    safety: read
+    workspaceRequired: false
+    mcp: null
+    cli: beam docs <query> [--page url]
+    status: ready
   workspace.create:
     specialist: general-workspace
     safety: external-effect
@@ -157,6 +164,12 @@ operations:
     safety: read
     mcp: null
     cli: beam agent-builder readiness <agentId>
+    status: ready
+  model.catalog:
+    specialist: agent-builder
+    safety: read
+    mcp: null
+    cli: beam agent-builder models
     status: ready
   graph.deploy:
     specialist: agent-builder

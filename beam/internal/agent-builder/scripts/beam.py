@@ -42,6 +42,8 @@ QUICK START
 --------------------------------------------------------------------------
   python3 beam.py validate                         # check credentials
   python3 beam.py search-tools gmail               # find integration tools
+  python3 beam.py models                           # live model catalog + default
+  python3 beam.py docs "loop node"                 # search the live docs, read the page
   python3 beam.py deploy spec.json                 # create agent (DRAFT)
   python3 beam.py deploy spec.json --agent-id ID   # update existing agent
   python3 beam.py deploy spec.json --publish       # create + go live
@@ -95,7 +97,16 @@ try:  # Python 3.9+; keep the CLI usable on its documented Python 3.8 floor.
 except ImportError:  # pragma: no cover - exercised only on Python 3.8
     ZoneInfo = None
 
-DEFAULT_NODE_MODEL = "BEDROCK_CLAUDE_SONNET_4"
+# Offline fallback only. The live default comes from the workspace's model
+# catalog (GET /custom-tool/preferred-models, the entry flagged ``isDefault``),
+# resolved once per run by ``resolve_default_model``; node builders read
+# ``default_node_model()``. Keep this constant in step with the catalog's
+# current default so an offline dry-run shows the same token.
+DEFAULT_NODE_MODEL = "GEMINI_3_FLASH"
+_DEFAULT_MODEL = {"value": None, "source": "fallback", "note": None}
+_MODEL_CATALOG = {"models": None}
+_MODEL_CHECK = {"warnings": []}
+DOCS_BASE_URL = os.environ.get("BEAM_DOCS_URL", "https://docs.beam.ai").rstrip("/")
 HTTP_TIMEOUT = 120
 MAX_PARALLEL = 8
 
@@ -928,7 +939,18 @@ def evaluate_agent_readiness(api, agent_id):
     nodes = data.get("nodes", []) or []
     details = _parallel(
         lambda n: api.get(f'/agent-graphs/{agent_id}/nodes/{n["id"]}'), nodes)
-    return _readiness_report(details, data.get("graphId"))
+    report = _readiness_report(details, data.get("graphId"))
+    # Advisory only: a model token the workspace catalog does not list is
+    # reported here but never blocks a publish, because catalogs differ per
+    # tenant.
+    try:
+        fetch_model_catalog(api)
+        used = [(n.get("objective") or n.get("id"),
+                 (n.get("toolConfiguration") or {}).get("preferredModel")) for n in details]
+        report["modelWarnings"] = model_warnings_for(used)
+    except BeamError:
+        report["modelWarnings"] = []
+    return report
 
 
 def _require_publish_ready(api, agent_id, graph_id=None):
@@ -1172,7 +1194,7 @@ def build_payload(spec, integ_outputs=None):
             "iconSrc": None,
             "description": ns.get("tool_description", ""),
             "prompt": ns.get("prompt", ""),
-            "preferredModel": ns.get("model", DEFAULT_NODE_MODEL),
+            "preferredModel": (ns.get("model") or default_node_model()),
             "fallbackModels": _coerce_fallback_models(ns.get("fallback_models")),
             "accuracyScore": None,
             "requiresConsent": False,
@@ -1496,7 +1518,7 @@ def build_payload_update(spec, existing_graph_resp, integ_outputs=None):
                 "iconSrc": None,
                 "description": ns.get("tool_description", ""),
                 "prompt": ns.get("prompt", ""),
-                "preferredModel": ns.get("model", DEFAULT_NODE_MODEL),
+                "preferredModel": (ns.get("model") or default_node_model()),
                 "fallbackModels": _coerce_fallback_models(ns.get("fallback_models")),
                 "accuracyScore": None,
                 "requiresConsent": False,
@@ -1684,6 +1706,194 @@ def do_verify(api, agent_id, node_list=None):
 # Commands - read / inspect
 # ===========================================================================
 
+
+# ===========================================================================
+# Live knowledge: the workspace model catalog and the product docs
+# ===========================================================================
+
+def fetch_model_catalog(api):
+    """GET /custom-tool/preferred-models, normalised and cached for this run.
+
+    The catalog is the only source of truth for which model tokens a workspace
+    accepts, which one is the default, and what each costs per node run. The
+    vendored references deliberately carry no model table any more.
+    """
+    if _MODEL_CATALOG["models"] is None:
+        data = api.get("/custom-tool/preferred-models")
+        raw = data if isinstance(data, list) else (data.get("data") or data.get("models") or [])
+        models = []
+        for m in raw or []:
+            value = m.get("modelValue") or m.get("value")
+            if not value:
+                continue
+            models.append({
+                "modelValue": value,
+                "modelName": m.get("modelName") or m.get("name") or value,
+                "isDefault": bool(m.get("isDefault")),
+                "creditsCost": m.get("creditsCost"),
+                "supportsReasoning": bool(m.get("supportsReasoning")),
+                "isPremium": bool(m.get("isPremium")),
+            })
+        models.sort(key=lambda m: (not m["isDefault"],
+                                   m["creditsCost"] if isinstance(m["creditsCost"], (int, float)) else 999,
+                                   m["modelValue"]))
+        _MODEL_CATALOG["models"] = models
+    return _MODEL_CATALOG["models"]
+
+
+def resolve_default_model(api):
+    """Set this run's default node model from the catalog; fall back quietly.
+
+    Called before any payload is built. An offline dry-run (no credentials)
+    keeps the fallback constant and says so in ``defaultModelSource``.
+    """
+    if _DEFAULT_MODEL["value"]:
+        return _DEFAULT_MODEL
+    default = None
+    if getattr(api, "api_key", ""):
+        try:
+            default = next((m["modelValue"] for m in fetch_model_catalog(api) if m["isDefault"]), None)
+            if not default:
+                _DEFAULT_MODEL["note"] = "the model catalog names no default; using the offline fallback"
+        except BeamError as exc:
+            _DEFAULT_MODEL["note"] = f"model catalog unavailable ({exc.code}); using the offline fallback"
+    else:
+        _DEFAULT_MODEL["note"] = "offline: the live default is read from the catalog when credentials resolve"
+    if default:
+        _DEFAULT_MODEL.update(value=default, source="catalog", note=None)
+    else:
+        _DEFAULT_MODEL.update(value=DEFAULT_NODE_MODEL, source="fallback")
+    return _DEFAULT_MODEL
+
+
+def default_node_model():
+    return _DEFAULT_MODEL["value"] or DEFAULT_NODE_MODEL
+
+
+def model_warnings_for(models_in_use):
+    """Name the models in use that the workspace catalog does not list.
+
+    A warning, never a failure: catalogs differ per tenant and a token missing
+    here may be valid elsewhere. Empty when the catalog was not fetched.
+    """
+    models = _MODEL_CATALOG["models"]
+    if not models:
+        return []
+    known = {m["modelValue"] for m in models}
+    return [f"Node '{key}' uses model {value}, which is not in this workspace's "
+            f"model catalog (run: beam agent-builder models)."
+            for key, value in models_in_use if value and value not in known]
+
+
+def _spec_models(spec):
+    return [(n.get("key"), n.get("model")) for n in (spec.get("nodes") or []) if n.get("model")]
+
+
+def _prepare_models(api, spec):
+    """Resolve the default and check the spec's explicit models, once per run."""
+    resolve_default_model(api)
+    _MODEL_CHECK["warnings"] = model_warnings_for(_spec_models(spec))
+
+
+def _model_report():
+    return {"defaultModel": default_node_model(),
+            "defaultModelSource": _DEFAULT_MODEL["source"],
+            **({"defaultModelNote": _DEFAULT_MODEL["note"]} if _DEFAULT_MODEL["note"] else {}),
+            "modelWarnings": list(_MODEL_CHECK["warnings"])}
+
+
+def cmd_models(api, args):
+    """List the workspace's live model catalog."""
+    models = fetch_model_catalog(api)
+    default = next((m["modelValue"] for m in models if m["isDefault"]), None)
+    return {"models": models, "default": default, "total": len(models),
+            "source": api.base + "/custom-tool/preferred-models",
+            "hint": ("Pick the cheapest listed model that does the node's task; creditsCost is "
+                     "per node run. A node without an explicit model gets 'default'. A token "
+                     "that is not in this list is not valid for this workspace.")}
+
+
+def _fetch_text(url, timeout=HTTP_TIMEOUT):
+    """GET a public text resource (no Beam credentials)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "beam-run/agent-builder"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        raise BeamError(f"GET {url} failed ({exc.code}).", code="api_error",
+                        next_step="Check the page against the index: beam agent-builder docs <query>.")
+    except urllib.error.URLError as exc:
+        raise BeamError(f"GET {url} failed: cannot reach the docs ({exc.reason}).",
+                        code="network_error",
+                        next_step="Check your connection (and BEAM_DOCS_URL if set), then retry.")
+    except (TimeoutError, OSError) as exc:
+        raise BeamError(f"GET {url} failed: {exc}", code="network_error", next_step="Retry.")
+
+
+_DOCS_LINE = re.compile(r"^-\s*\[(?P<title>[^\]]+)\]\((?P<url>[^)]+)\)(?::\s*(?P<desc>.*))?$")
+
+
+def _docs_index():
+    """Parse llms.txt into [{title, url, description}]."""
+    text = _fetch_text(DOCS_BASE_URL + "/llms.txt")
+    pages = []
+    for line in text.splitlines():
+        m = _DOCS_LINE.match(line.strip())
+        if m:
+            url = m.group("url").strip()
+            if not url.startswith(("http://", "https://", "file://")):
+                url = DOCS_BASE_URL + "/" + url.lstrip("/")
+            pages.append({"title": m.group("title").strip(), "url": url,
+                          "description": (m.group("desc") or "").strip()})
+    if not pages:
+        raise BeamError(f"{DOCS_BASE_URL}/llms.txt returned no page entries.", code="api_error",
+                        next_step="Check BEAM_DOCS_URL, or open https://docs.beam.ai/llms.txt in a browser.")
+    return pages
+
+
+def cmd_docs(api, args):
+    """Search the live product docs and read one page.
+
+    Needs no Beam credentials. The index is llms.txt; page bodies are the
+    per-page Markdown the docs site publishes beside every page.
+    """
+    query = (args.query or "").strip()
+    page_ref = (getattr(args, "page", None) or "").strip()
+    if not query and not page_ref:
+        raise BeamError("Give a query, or --page <url>.", code="validation_error",
+                        next_step='Example: beam agent-builder docs "loop node"')
+    pages = _docs_index()
+    matches = []
+    if query:
+        terms = [t for t in re.split(r"[^a-z0-9]+", query.lower()) if len(t) > 1]
+        for page in pages:
+            title, desc, url = page["title"].lower(), page["description"].lower(), page["url"].lower()
+            score = sum((3 if t in title else 0) + (2 if t in url else 0) + (1 if t in desc else 0)
+                        for t in terms)
+            if score:
+                matches.append({**page, "score": score})
+        matches.sort(key=lambda m: (-m["score"], m["title"]))
+        matches = matches[: max(1, args.limit)]
+    result = {"index": DOCS_BASE_URL + "/llms.txt", "query": query or None,
+              "pageCount": len(pages), "matches": matches}
+    target = None
+    if page_ref:
+        target = (page_ref if page_ref.startswith(("http://", "https://", "file://"))
+                  else DOCS_BASE_URL + "/" + page_ref.lstrip("/"))
+    elif matches and (len(matches) == 1 or matches[0]["score"] > matches[1]["score"]):
+        target = matches[0]["url"]
+    if target:
+        url = target if target.endswith(".md") else target.rstrip("/") + ".md"
+        text = _fetch_text(url)
+        limit = max(500, args.max_chars)
+        result["page"] = {"url": url, "chars": len(text), "truncated": len(text) > limit,
+                          "text": text[:limit]}
+    result["hint"] = ("Matches come from the live docs index. The top page is fetched when it "
+                      "leads clearly; pass --page <url> to read a specific one and --max-chars "
+                      "to read more of it.")
+    return result
+
+
 def cmd_validate(api, args):
     # Must FAIL loudly: this previously returned {"valid": false} wrapped in
     # {"ok": true} with exit 0, so an agent branching on $? treated bad
@@ -1847,6 +2057,7 @@ def cmd_readiness(api, args):
 def cmd_create(api, args):
     spec = _read_json_file(args.spec_file, "Spec file")
     _validate_spec(spec)
+    _prepare_models(api, spec)
     if args.agent_id:
         existing = api.get(f"/agent-graphs/{args.agent_id}")
         payload = build_payload_update(spec, existing)
@@ -1874,6 +2085,7 @@ def cmd_deploy(api, args):
     """Full pipeline: create/update -> attach integrations -> relink -> verify -> publish."""
     spec = _read_json_file(args.spec_file, "Spec file")
     _validate_spec(spec)
+    _prepare_models(api, spec)
     integrations = spec.get("integrations", []) or []
     # Output-param names each integration declares - lets a downstream node
     # `link` to an integration output (resolved by the relink step post-attach).
@@ -1989,8 +2201,8 @@ def cmd_deploy(api, args):
             clean_params.append(p)
         objective = next((sn["objective"] for sn in spec["nodes"]
                           if sn["key"] == node_key), "")
-        node_model = next((sn.get("model", DEFAULT_NODE_MODEL) for sn in spec["nodes"]
-                           if sn["key"] == node_key), DEFAULT_NODE_MODEL)
+        node_model = next(((sn.get("model") or default_node_model()) for sn in spec["nodes"]
+                           if sn["key"] == node_key), default_node_model())
         node_payload = {
             "id": node_id, "objective": objective,
             "isAttachmentDataPulledIn": True, "evaluationCriteria": [],
@@ -2348,6 +2560,7 @@ def cmd_update_metadata(api, args):
 
 def cmd_add_node(api, args):
     ns = _read_json_file(args.node_file, "Node file")
+    _prepare_models(api, {"nodes": [ns]})
     integration = (_read_json_file(args.integration_file, "Integration file")
                    if args.integration_file else None)
     existing = api.get(f"/agent-graphs/{args.agent_id}")
@@ -2402,7 +2615,7 @@ def cmd_add_node(api, args):
             "id": new_tc_id, "toolFunctionName": fn,
             "toolName": ns.get("tool_name") or ns.get("name"), "iconSrc": None,
             "description": ns.get("tool_description", ""), "prompt": ns.get("prompt", ""),
-            "preferredModel": ns.get("model", DEFAULT_NODE_MODEL),
+            "preferredModel": (ns.get("model") or default_node_model()),
             "fallbackModels": _coerce_fallback_models(ns.get("fallback_models")), "accuracyScore": None,
             "requiresConsent": False, "isMemoryTool": False,
             "memoryLookupInstruction": "", "isBackgroundTool": False,
@@ -3029,6 +3242,18 @@ def build_parser():
 
     s = sub.add_parser("validate", help="Check that credentials reach the Beam API.")
 
+    s = sub.add_parser("models", help="List the workspace's live model catalog: tokens, the "
+                                       "default, credits per run. Read it before setting a model.")
+
+    s = sub.add_parser("docs", help="Search the live Beam docs (llms.txt) and read a page. "
+                                     "Needs no credentials.")
+    s.add_argument("query", nargs="?", default="",
+                   help="Words matched against page titles, URLs and descriptions.")
+    s.add_argument("--page", help="Docs page URL (or path under the docs site) to read in full.")
+    s.add_argument("--limit", type=int, default=8, help="Max matches to return (default 8).")
+    s.add_argument("--max-chars", type=int, default=12000,
+                   help="Max page characters to return (default 12000).")
+
     s = sub.add_parser("search-tools", help="Search integration tools by keyword.")
     s.add_argument("keyword")
     s.add_argument("--wait-only", action="store_true",
@@ -3225,6 +3450,8 @@ def cmd_test_node(api, args):
 COMMANDS = {
     "validate": cmd_validate,
     "search-tools": cmd_search_tools,
+    "models": cmd_models,
+    "docs": cmd_docs,
     "search-agents": cmd_search_agents,
     "get-nodes": cmd_get_nodes,
     "get-node": cmd_get_node,
@@ -3272,10 +3499,24 @@ def main(argv=None):
         # credentials.  An update dry-run (`--agent-id`) must first read the
         # current graph in order to merge and verify the proposed patch, so it
         # requires the normal authenticated client.
-        offline = (args.command == "deploy" and getattr(args, "dry_run", False)
-                   and not getattr(args, "agent_id", None))
-        api = Api("", "", DEFAULT_API_URL) if offline else Api(*resolve_creds())
+        offline = (args.command == "docs"
+                   or (args.command == "deploy" and getattr(args, "dry_run", False)
+                       and not getattr(args, "agent_id", None)))
+        if offline:
+            # A new-agent dry-run builds locally, but when credentials resolve it
+            # still reads the workspace model catalog so the summary names the
+            # real default instead of the offline fallback.
+            api = Api("", "", DEFAULT_API_URL)
+            if args.command != "docs":
+                try:
+                    api = Api(*resolve_creds())
+                except BeamError:
+                    pass
+        else:
+            api = Api(*resolve_creds())
         result = handler(api, args)
+        if args.command in ("deploy", "create", "add-node"):
+            result.update(_model_report())
         # A draft must surface its complete readiness state immediately after
         # every graph mutation. This does not prevent saving a draft—the
         # publish gate below does that—but it makes missing required fields

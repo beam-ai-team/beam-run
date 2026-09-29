@@ -14,7 +14,7 @@
       "name": "Write Blog Post",
       "objective": "Write a short blog post from the given topic",
       "tool_name": "Write Blog Post",
-      "model": "BEDROCK_CLAUDE_SONNET_4",
+      "model": "BEDROCK_CLAUDE_SONNET_4_5",
       "prompt": "## Role:\nYou are a senior content writer who produces clear, engaging blog posts.\n\n## Task:\nWrite a short blog post based on the provided topic.\n\n## Context:\n```\n{topic}\n```\n\n## Rules:\n1. Length: 300-500 words.\n2. Output two fields: blog_title (a punchy title) and blog_body (the full post as plain text).\n3. Use short paragraphs and a friendly, professional tone.\n4. Do not invent statistics, quotes, or sources.",
       "input_params": [
         { "name": "topic", "description": "The blog topic provided by the user", "type": "string", "fill_type": "ai_fill", "position": 0 }

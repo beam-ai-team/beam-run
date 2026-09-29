@@ -144,85 +144,62 @@ Output: department = account, urgency = low
 
 ## Model selection
 
-Set each node's `model` field to one of the identifiers below.
+Set each node's `model` field to a token from the **workspace's live model
+catalog**, never from memory:
+
+```bash
+beam agent-builder models
+```
+
+The catalog is the only source of truth for three things: which tokens this
+workspace accepts, which one is the **default** (a node without an explicit
+`model` gets it), and what each model costs in **credits per node run**
+(`creditsCost`). It changes between releases and between tenants, which is why
+this file carries no model table. `deploy`, `create` and `add-node` report the
+`defaultModel` they used and a `modelWarnings` list for any explicit token the
+catalog does not list; treat a warning as a wrong token, not as a platform
+error.
 
 **Cost is a real constraint — pick the cheapest model that does the node's task
-reliably.** Start at the lowest capability tier and only move up if the task
-genuinely needs more. A simple extraction or a routing decision must not run on
-a frontier model just because one is available; every node runs on every task.
+reliably.** Start at the lowest `creditsCost` that can do the job and only move
+up if the task genuinely needs more. A simple extraction or a routing decision
+must not run on a frontier model just because one is listed; every node runs on
+every task.
 
-### Available models by provider
+### Reading the catalog
 
-**OpenAI**
-
-| Model | Best for | Cost | Speed |
-|-------|----------|------|-------|
-| `GPT4_1` | Strong general-purpose, structured output | medium | fast |
-| `GPT40` | Multimodal (image/audio), general tasks | medium | fast |
-| `GPT40_MINI` | Light tasks — extraction, formatting | low | very fast |
-| `GPT4_1_MINI` | Light tasks — extraction, formatting, classification | low | very fast |
-| `GPT5` | Most capable OpenAI — complex reasoning | high | moderate |
-| `GPT5_MINI` | Good reasoning at lower cost than GPT5 | medium | fast |
-| `GPT5_NANO` | Fast reasoning, lightweight tasks | low | very fast |
-| `GPT5_2` | Latest GPT5 variant — improved reasoning | high | moderate |
-
-**Anthropic (Bedrock)**
-
-| Model | Best for | Cost | Speed |
-|-------|----------|------|-------|
-| `BEDROCK_CLAUDE_SONNET_4` | **Default** — most tasks, good quality/speed balance | medium | fast |
-| `BEDROCK_CLAUDE_SONNET_4_5` | Complex generation, nuanced writing | high | fast |
-| `BEDROCK_CLAUDE_OPUS_4_5` | Hardest tasks — deep reasoning, multi-step logic | highest | slow |
-| `BEDROCK_CLAUDE_3_7_SONNET` | Reliable fallback if Sonnet 4 is unavailable | medium | fast |
-
-**Google Gemini**
-
-| Model | Best for | Cost | Speed |
-|-------|----------|------|-------|
-| `GEMINI_25_PRO` | Strong reasoning, long context (1M tokens) | medium | fast |
-| `GEMINI_25_FLASH` | Fast reasoning, cost-effective | low | very fast |
-| `GEMINI_25_FLASH_LITE` | Ultra-light, high throughput | lowest | fastest |
-| `GEMINI_3_1_PRO` | Long context (1M tokens), complex analysis | medium | fast |
-| `GEMINI_3_FLASH` | Fast general tasks, good cost efficiency | low | very fast |
-| `GEMINI_3_1_FLASH_LITE` | Ultra-light tasks, highest throughput | lowest | fastest |
-
-**Other**
-
-| Model | Provider | Best for | Cost | Speed |
-|-------|----------|----------|------|-------|
-| `DEEP_SEEK` | DeepSeek | Coding tasks, technical analysis | low | fast |
-| `COMPOUND_BETA` | Groq | Compound AI with tool use, agentic workflows | low | very fast |
-| `GPT_OSS_120B` | Groq | Large open-source model via Groq inference | low | very fast |
-| `GPT_OSS_20B` | Groq | Small open-source model, fast inference | lowest | fastest |
+| Field | Use it for |
+|-------|------------|
+| `modelValue` | The exact token to write into `model` |
+| `isDefault` | What a node gets when `model` is omitted; the sensible standard choice |
+| `creditsCost` | Credits per node run at that model; the cost line of every projection |
+| `supportsReasoning` | Needed only for genuinely multi-step reasoning; costs more |
+| `isPremium` | Frontier tier; reserve for the hardest generation or analysis |
 
 ### By task complexity
 
-| Task | Pick one of |
-|------|-------------|
-| **Simple** — extraction, formatting, classification | `GPT5_NANO`, `GEMINI_25_FLASH_LITE`, `GEMINI_3_1_FLASH_LITE`, `GPT_OSS_20B`, `GPT40_MINI`, `GPT4_1_MINI`, `GEMINI_3_FLASH` |
-| **Standard** — summarization, rewriting, data processing | `GPT4_1`, `GPT40`, `GPT5_MINI`, `BEDROCK_CLAUDE_SONNET_4`, `GEMINI_25_FLASH`, `GEMINI_3_1_PRO`, `DEEP_SEEK` |
-| **Complex** — creative writing, nuanced analysis, multi-step logic | `GPT5`, `GPT5_2`, `BEDROCK_CLAUDE_SONNET_4`, `BEDROCK_CLAUDE_SONNET_4_5`, `GEMINI_25_PRO`, `GEMINI_3_1_PRO` |
-| **Hardest** — deep reasoning, research, long-form generation | `GPT5`, `GPT5_2`, `BEDROCK_CLAUDE_OPUS_4_5` |
-| **Long context** — documents over ~100k tokens | `GEMINI_25_PRO`, `GEMINI_3_1_PRO` |
-| **Condition nodes** (`llm_based` routing) | `GPT40`, `GPT40_MINI`, `GPT4_1_MINI`, `GEMINI_3_FLASH`, `GEMINI_3_1_FLASH_LITE` |
+| Task | Pick |
+|------|------|
+| **Simple** — extraction, formatting, classification, integration and condition nodes | The cheapest listed model (1 credit where available) |
+| **Standard** — summarization, rewriting, data processing | The catalog default, or the cheapest non-premium model that handles the length |
+| **Complex** — nuanced writing, multi-step logic, large structured objects | A `supportsReasoning` or `isPremium` model, with a stated reason |
+| **Long context** — documents over ~100k tokens | A long-context model from the catalog (the Gemini Pro line at the time of writing; confirm in the catalog) |
 
 ### Selection rules
 
-1. **Cheapest model that does the job — this is the primary rule.** Start at the
-   lowest tier in the table above that can do the node's task reliably; only
-   escalate if the task genuinely needs more capability. If a `low`-cost model
-   produces the same result as a `high`-cost one, use the cheap one.
-2. **Match capability to complexity.** A `lowest`-tier model fails at nuanced
-   writing; a frontier model on simple formatting just wastes money.
-3. **`BEDROCK_CLAUDE_SONNET_4` is the default _only_** when a task is genuinely
-   "standard" and you are unsure — not a blanket choice for every node.
+1. **Cheapest model that does the job — this is the primary rule.** If a cheaper
+   model produces the same result, use the cheaper one.
+2. **Match capability to complexity.** The cheapest tier fails at nuanced
+   writing; a premium model on simple formatting wastes money.
+3. **The default is for genuinely standard work when unsure**, not a blanket
+   choice for every node.
 4. **Integration and condition nodes are cheap by nature.** They extract
-   parameters or route — they do not generate. Use a `simple`-tier model
-   (`GPT4_1_MINI`, `GEMINI_3_FLASH`). Never use an integration
-   tool's legacy `preferredModel`.
-5. **Escalate only with a clear reason.** Reserve `high`/`highest`-cost models
-   (`BEDROCK_CLAUDE_OPUS_4_5`, `GPT5`, `GPT5_2`) for genuinely hard reasoning or
-   long-form generation — the node's task should plainly justify the cost.
+   parameters or route — they do not generate. Give them the cheapest listed
+   model. Never use an integration tool's legacy `preferredModel`.
+5. **Escalate only with a clear reason.** Reserve premium and reasoning models
+   for work whose task plainly justifies the cost.
+6. **Object-assembling nodes still need headroom.** A large JSON object
+   truncates on the cheapest tier; use a mid-tier model and cap value lengths.
 
 ---
 
@@ -238,20 +215,18 @@ Do not require a cost projection merely to obtain flow approval.
 | Pro (standard) | $0.10 |
 | Enterprise | $0.049 |
 
-### Estimated credits per node run
+Plan rates have no live source; these are as of September 2026. Confirm with the account owner before quoting.
 
-Credits consumed depend on prompt size + output size at the node's model tier. Use these estimates per node run:
+### Credits per node run
 
-| Node tier | Typical use | Est. credits/run |
-|-----------|-------------|-----------------|
-| `lowest` / `simple` — Flash Lite, GPT5 Nano, OSS 20B | Extraction, classification, formatting | 1–2 |
-| `low` / `simple` — Gemini Flash, GPT4_1_Mini | Light reasoning, short output | 2–4 |
-| `medium` / `standard` — Claude Sonnet 4, GPT4_1, Gemini Pro | Summarisation, rewriting, data processing | 4–8 |
-| `high` / `complex` — Claude Sonnet 4.5, GPT5, Gemini 2.5 Pro | Creative writing, nuanced analysis | 8–15 |
-| `highest` — Claude Opus 4.5, GPT5_2 | Deep reasoning, long-form generation | 15–30 |
-| Integration node | No LLM call | 0–1 |
-| CodeExecutor node | Deterministic JS | 0–1 |
-| Condition node (`llm_based`) | Short evaluation prompt | 1–2 |
+Take `creditsCost` from `beam agent-builder models` for every LLM node: it is the
+charge per run at that model. Nodes without an LLM call are near-free:
+
+| Node | Est. credits/run |
+|------|-----------------|
+| LLM node (custom GPT, `llm_based` condition) | the model's `creditsCost` |
+| Integration node | 0–1 |
+| CodeExecutor node | 0–1 |
 
 ### Projection formula
 

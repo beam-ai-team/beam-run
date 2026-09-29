@@ -109,8 +109,12 @@ proposal, a draft update, a blocker, a test result, or a publish result.
 These checks are mandatory but should not become visible ceremony:
 
 1. Keep new and updated agents as drafts unless the user clearly asks to publish.
-2. Search tools before adding every integration node; never invent a
-   `toolFunctionName`.
+2. Query, don't remember. Search tools before adding every integration node;
+   never invent a `toolFunctionName`. Run `models` before setting or discussing
+   a node's model or its cost: the workspace catalog is the only valid list and
+   names the default. Run `docs <query>` before authoring against a platform
+   feature whose semantics you are not certain of (loops, automation modes,
+   publishing, triggers, evaluation): the live docs outrank any vendored note.
 3. Prefer managed integrations: `nango_cloud`, then `pipedream`. Ask before
    choosing a custom fallback.
 4. Run lint and a dry-run before every full deploy. Every graph mutation returns
@@ -189,7 +193,8 @@ before submitting further cases.
 | Presenting or revising a flow | `references/conversation-flow.md` |
 | Writing a spec | `references/spec-format.md` |
 | Choosing a node or graph shape | `patterns/tool-taxonomy.md`, `patterns/flow-patterns.md` |
-| Selecting models or estimating cost | `references/node-authoring.md` |
+| Selecting models or estimating cost | `beam agent-builder models`, then `references/node-authoring.md` |
+| Checking how a platform feature works today | `beam agent-builder docs <query>` |
 | Adding integrations or triggers | `references/integrations.md`, `references/triggers.md` |
 | Testing or investigating a result | `references/validation.md`, `references/troubleshooting.md` |
 | Deploying | `templates/lint-checklist.md`, `assets/example-specs/` |

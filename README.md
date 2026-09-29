@@ -91,7 +91,7 @@ Then follow the instructions in that document for your agent environment.
 - Copilot baseline and parity: [`beam/references/copilot-baseline/README.md`](./beam/references/copilot-baseline/README.md)
 - Supervisor product contract: [`specs/supervisor-product-contract.md`](./specs/supervisor-product-contract.md)
 - Supervisor testing plan: [`specs/supervisor-testing-plan.md`](./specs/supervisor-testing-plan.md)
-- Beam product / Academy: https://docs.beam.ai
+- Beam product / Academy: https://docs.beam.ai — `beam docs <query>` searches it and reads a page from the terminal; `beam models` lists the workspace's live model catalog
 - MCP connection reference: https://docs.beam.ai/08-reference/api/mcp-connection/mcp-connection
 - API base: `https://api.beamstudio.ai`
 - Auth: API key from Beam → Personal settings → API Keys (`x-api-key` for CLI; Bearer for MCP)

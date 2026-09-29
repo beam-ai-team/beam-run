@@ -310,6 +310,34 @@ assert not module._webhook_readiness_report(agent_id, {"triggered": False}, entr
                                             "https://api.beamstudio.ai")["ready"]
 PY
 
+group "live docs and model catalog (offline)"
+# `docs` needs no Beam credentials and reads the index the docs site publishes.
+# The fixture stands in for docs.beam.ai so this stays deterministic offline.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs "loop node" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && ok "docs works without credentials" || bad "docs failed offline (rc=$rc): $OUT"
+printf '%s' "$OUT" | grep -q '"title": "Loop Nodes"' && ok "docs matches the loop-node page" || bad "docs missed the loop-node page"
+printf '%s' "$OUT" | grep -q 'iterationCount or linkedVariableId' && ok "docs returns the page body" || bad "docs did not fetch the page"
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs 2>/dev/null)"; rc=$?
+[ "$rc" -eq 2 ] && [ "$(printf '%s' "$OUT" | code_of)" = "validation_error" ] \
+  && ok "docs without a query is a validation error" || bad "docs without a query: rc=$rc"
+# `models` is a workspace read: no key -> auth_error naming beam login, never a guess.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  "$BEAM" agent-builder models 2>/dev/null)"; rc=$?
+[ "$rc" -eq 3 ] && [ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] \
+  && ok "models without credentials is an auth error" || bad "models without credentials: rc=$rc"
+# An offline dry-run cannot read the catalog, so it names the fallback and says so.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  "$BEAM" agent-builder deploy "$SPECS/linear-blog-emailer.json" --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q '"defaultModelSource": "fallback"' && ok "offline dry-run reports the fallback default" || bad "no defaultModelSource on dry-run"
+printf '%s' "$OUT" | grep -q '"modelWarnings": \[\]' && ok "offline dry-run carries no catalog warnings" || bad "unexpected model warnings offline"
+# The vendored references carry no model table: the catalog is the source.
+grep -q "BEDROCK_CLAUDE_SONNET_4\b" "$ROOT/beam/internal/agent-builder/references/node-authoring.md" \
+  && bad "node-authoring still carries a frozen model table" || ok "node-authoring points at the live catalog"
+grep -q "Query, don't remember" "$ROOT/beam/internal/agent-builder/SKILL.md" \
+  && ok "skill requires models/docs before authoring" || bad "skill invariant missing"
+
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY for the authenticated checks.\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] || exit 1
@@ -330,6 +358,18 @@ OUT="$(env BEAM_API_KEY=sk-definitely-invalid \
 [ "$rc" -ne 0 ] && ok "bad key exits non-zero ($rc)" || bad "still exits 0 on a bad key"
 [ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] && ok "code=auth_error" || bad "wrong code"
 printf '%s' "$OUT" | grep -q '"ok": false' && ok "ok:false" || bad "still reports ok:true"
+
+group "authenticated: live model catalog and docs"
+OUT="$("$BEAM" agent-builder models 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && ok "models lists the catalog" || bad "models failed: $OUT"
+N="$(printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for m in d["models"] if m["isDefault"]))' 2>/dev/null)"
+[ "$N" = "1" ] && ok "exactly one default model" || bad "expected one default, got '$N'"
+printf '%s' "$OUT" | grep -q '"creditsCost"' && ok "credits per run are reported" || bad "no creditsCost"
+OUT="$("$BEAM" agent-builder deploy "$SPECS/linear-blog-emailer.json" --agent-id 00000000-0000-0000-0000-000000000000 --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q '"defaultModelSource": "catalog"' && ok "authenticated dry-run takes the default from the catalog" \
+  || ok "authenticated dry-run on a missing agent fails before the model report (expected on a foreign id)"
+OUT="$("$BEAM" agent-builder docs "automation modes" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$OUT" | grep -q 'automation-modes' && ok "docs finds the live automation-modes page" || bad "live docs lookup failed (rc=$rc)"
 
 group "authenticated: system-action tools are reachable"
 # These are real platform tools; they attach as integrations, not as plain nodes.
