@@ -945,8 +945,7 @@ def evaluate_agent_readiness(api, agent_id):
     # tenant.
     try:
         fetch_model_catalog(api)
-        used = [(n.get("objective") or n.get("id"),
-                 (n.get("toolConfiguration") or {}).get("preferredModel")) for n in details]
+        used = [m for n in details for m in _live_node_models(n)]
         report["modelWarnings"] = model_warnings_for(used)
     except BeamError:
         report["modelWarnings"] = []
@@ -1770,23 +1769,66 @@ def default_node_model():
     return _DEFAULT_MODEL["value"] or DEFAULT_NODE_MODEL
 
 
-def model_warnings_for(models_in_use):
-    """Name the models in use that the workspace catalog does not list.
+def _split_models(value):
+    """Fallback models arrive as a list, a comma-separated string, or None."""
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [v.strip() for v in str(value).split(",") if v.strip()]
 
-    A warning, never a failure: catalogs differ per tenant and a token missing
-    here may be valid elsewhere. Empty when the catalog was not fetched.
+
+def model_warnings_for(models_in_use):
+    """Name the model tokens in use that the workspace catalog does not list.
+
+    ``models_in_use`` is a list of (node, field, token) covering a node's
+    primary model, each fallback model, and a condition node's routing model
+    and its fallbacks. A warning, never a failure: catalogs differ per tenant
+    and a token missing here may be valid elsewhere. Empty when the catalog
+    was not fetched.
     """
     models = _MODEL_CATALOG["models"]
     if not models:
         return []
     known = {m["modelValue"] for m in models}
-    return [f"Node '{key}' uses model {value}, which is not in this workspace's "
+    return [f"Node '{node}' {field} {token}, which is not in this workspace's "
             f"model catalog (run: beam agent-builder models)."
-            for key, value in models_in_use if value and value not in known]
+            for node, field, token in models_in_use if token and token not in known]
 
 
 def _spec_models(spec):
-    return [(n.get("key"), n.get("model")) for n in (spec.get("nodes") or []) if n.get("model")]
+    """Every model token a spec names: (node key, field, token)."""
+    found = []
+    for n in spec.get("nodes") or []:
+        key = n.get("key")
+        if n.get("model"):
+            found.append((key, "uses model", n["model"]))
+        for fb in _split_models(n.get("fallback_models")):
+            found.append((key, "uses fallback model", fb))
+        cfg = n.get("node_configurations") or {}
+        if n.get("node_type") == "conditionNode" or cfg.get("conditionType"):
+            if cfg.get("llmModel"):
+                found.append((key, "routes with condition model", cfg["llmModel"]))
+            for fb in _split_models(cfg.get("fallbackModels")):
+                found.append((key, "uses condition fallback model", fb))
+    return found
+
+
+def _live_node_models(node):
+    """Every model token a saved node carries: (node name, field, token)."""
+    name = node.get("objective") or node.get("id")
+    tc = node.get("toolConfiguration") or {}
+    cfg = node.get("nodeConfigurations") or {}
+    found = []
+    if tc.get("preferredModel"):
+        found.append((name, "uses model", tc["preferredModel"]))
+    for fb in _split_models(tc.get("fallbackModels")):
+        found.append((name, "uses fallback model", fb))
+    if cfg.get("llmModel"):
+        found.append((name, "routes with condition model", cfg["llmModel"]))
+    for fb in _split_models(cfg.get("fallbackModels")):
+        found.append((name, "uses condition fallback model", fb))
+    return found
 
 
 def _prepare_models(api, spec):

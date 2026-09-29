@@ -156,9 +156,10 @@ workspace accepts, which one is the **default** (a node without an explicit
 `model` gets it), and what each model costs in **credits per node run**
 (`creditsCost`). It changes between releases and between tenants, which is why
 this file carries no model table. `deploy`, `create` and `add-node` report the
-`defaultModel` they used and a `modelWarnings` list for any explicit token the
-catalog does not list; treat a warning as a wrong token, not as a platform
-error.
+`defaultModel` they used and a `modelWarnings` list for any token the catalog
+does not list, whether it sits in `model`, `fallback_models`, or a condition
+node's `llmModel` and `fallbackModels`; treat a warning as a wrong token, not as
+a platform error.
 
 **Cost is a real constraint — pick the cheapest model that does the node's task
 reliably.** Start at the lowest `creditsCost` that can do the job and only move

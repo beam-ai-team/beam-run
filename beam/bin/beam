@@ -2822,7 +2822,9 @@ main() {
         *) die "validation_error" "usage: beam learning <issues|list-issues|issue|feedbacks|feedback-summary|update-feedback|issue-jobs|job|job-activity|trend|tools|tool|config|set-config|submit-feedback|submit-task-feedback|merge|optimize|discard|approve-job|reject-job|reoptimize-job|cancel-job|run-job|resume>" 2 ;;
       esac ;;
     agent-builder)
-      case "${1:-}" in -h|--help) ;; *) prepare_scoped_session ;; esac
+      # `docs` reads the public docs and needs no instance or workspace, so it
+      # must not be gated on a checkout (the `beam docs` form is not either).
+      case "${1:-}" in -h|--help|docs) ;; *) prepare_scoped_session ;; esac
       cmd_agent_builder "$@" ;;
     models)
       prepare_scoped_session

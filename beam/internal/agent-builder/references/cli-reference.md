@@ -46,8 +46,10 @@ beam agent-builder models
 → `{"models": [{modelValue, modelName, isDefault, creditsCost, supportsReasoning, isPremium}], "default": "…", "total": N}`,
 default first, then cheapest first. `deploy`, `create` and `add-node` report
 `defaultModel`, `defaultModelSource` (`catalog` or `fallback`) and
-`modelWarnings` for any explicit model the catalog does not list; readiness
-carries the same `modelWarnings`. Warnings never block a publish.
+`modelWarnings` for any token the catalog does not list, on a node's `model`,
+its `fallback_models`, and a condition node's `llmModel` and `fallbackModels`;
+readiness carries the same `modelWarnings` for the saved graph. Warnings never
+block a publish.
 
 ### `docs [<query>] [--page <url>] [--limit N] [--max-chars N]`
 Search the live product docs and read a page. Needs no credentials. The index
