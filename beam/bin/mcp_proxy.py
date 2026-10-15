@@ -333,7 +333,7 @@ def handle_local(msg, context):
     if method == "initialize":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {
             "protocolVersion": PROTOCOL, "capabilities": {"tools": {"listChanged": True}},
-            "serverInfo": {"name": "beam local", "version": "0.6.0"},
+            "serverInfo": {"name": "beam local", "version": "0.7.0"},
             "instructions": context_text(context),
         }}
     if method == "ping":

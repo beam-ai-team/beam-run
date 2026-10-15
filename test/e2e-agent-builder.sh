@@ -45,7 +45,7 @@ grep -rq "python3 scripts/beam.py" "$ROOT/beam/internal/agent-builder" \
   && bad "docs still use the unresolvable relative path" || ok "no relative-path invocations left in docs"
 
 group "conversational flow approval"
-SKILL="$ROOT/beam/internal/agent-builder/SKILL.md"
+SKILL="$ROOT/beam/playbooks/build-a-new-agent.md"
 FLOW="$ROOT/beam/internal/agent-builder/references/conversation-flow.md"
 grep -q "A Mermaid diagram" "$SKILL" && ok "new flows require a Mermaid proposal" || bad "no Mermaid proposal rule"
 grep -q "list of the integrations" "$SKILL" && ok "new flows name integrations" || bad "no integration-list rule"
@@ -215,6 +215,12 @@ prompt_node["toolConfiguration"]["inputParams"] = []
 report = module._readiness_report(broken)
 assert not report["ready"]
 assert any(f["name"] == "gpt_has_input_variable" for f in report["failures"])
+
+# Beam saves the entry node with an empty GPTAction tool; that is not a defect.
+saved = copy.deepcopy(nodes)
+entry = next(n for n in saved if n.get("isEntryNode"))
+entry["toolConfiguration"] = {"toolFunctionName": "GPTAction_Entry", "prompt": "", "inputParams": [], "outputParams": []}
+assert module._readiness_report(saved)["ready"], module._readiness_report(saved)["failures"]
 PY
 
 group "MCP attachment preserves complete prompt-node configuration"
@@ -335,7 +341,7 @@ printf '%s' "$OUT" | grep -q '"modelWarnings": \[\]' && ok "offline dry-run carr
 # The vendored references carry no model table: the catalog is the source.
 grep -q "BEDROCK_CLAUDE_SONNET_4\b" "$ROOT/beam/internal/agent-builder/references/node-authoring.md" \
   && bad "node-authoring still carries a frozen model table" || ok "node-authoring points at the live catalog"
-grep -q "Query, don't remember" "$ROOT/beam/internal/agent-builder/SKILL.md" \
+grep -q "Query, don't remember" "$ROOT/beam/playbooks/build-a-new-agent.md" \
   && ok "skill requires models/docs before authoring" || bad "skill invariant missing"
 
 group "docs skips the checkout gate; fallback and condition models are checked"

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Offline contract checks for the Copilot-aligned supervisor and fallbacks.
+# Offline contract checks for the Beam Run agent and its CLI fallbacks.
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,33 +9,20 @@ ok() { printf '  ok   %s\n' "$1"; }
 
 cd "$ROOT"
 
-printf '\n=== canonical Copilot baseline ===\n'
-if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 -c beam/references/copilot-baseline/SHA256SUMS >/dev/null || fail "Copilot snapshot drifted"
-elif command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c beam/references/copilot-baseline/SHA256SUMS >/dev/null || fail "Copilot snapshot drifted"
-else
-  fail "no SHA-256 checker available"
-fi
-ok "snapshot hashes match the recorded Beam Copilot source"
-grep -q '40fdd5687a7a4e9122c27d8b175235107c096a58' beam/references/copilot-baseline/README.md || fail "source commit missing"
-ok "source commit is recorded"
-
-printf '\n=== universal supervisor runtime ===\n'
-[ -s beam/skills/beam/SKILL.md ] || fail "missing universal Beam Run skill"
+printf '\n=== Beam Run agent ===\n'
+[ -s beam/skills/beam/SKILL.md ] || fail "missing Beam Run agent brief"
 [ -s beam/skills/setup/SKILL.md ] || fail "missing setup skill"
-grep -q 'only public runtime entry point' beam/skills/beam/SKILL.md || fail "Beam Run is not the only public runtime entry"
-grep -q 'mapped CLI fallback' beam/skills/beam/SKILL.md || fail "completion fallback missing"
+grep -q 'run its CLI fallback with the same' beam/skills/beam/SKILL.md || fail "completion fallback missing"
+grep -q 're-read current state' beam/skills/beam/SKILL.md || fail "ambiguous-write reconciliation missing"
 grep -q 'Never mix a CLI checkout with MCP work' beam/skills/beam/SKILL.md || fail "Codex session isolation rule missing"
 grep -q 'In Codex, use the mapped CLI command' beam/skills/beam/SKILL.md || fail "Codex operation path is not task-scoped"
 grep -q 'mandatory confirmation boundary' beam/skills/beam/SKILL.md || fail "checkout success boundary missing"
 grep -q 'Never omit, compress, reword, or combine' beam/skills/beam/SKILL.md || fail "checkout success block is not mandatory"
 grep -q 'This confirmation is mandatory' beam/skills/setup/SKILL.md || fail "first-time setup success block is not mandatory"
-grep -q 'Do \*\*not\*\* load the raw Copilot' beam/skills/beam/SKILL.md || fail "runtime still depends on source snapshots"
 grep -q 'For a read-only operation, say that no changes will be made' beam/skills/beam/SKILL.md || fail "read-only activity boundary missing"
-grep -q 'name the exact entity and resulting state' beam/skills/beam/SKILL.md || fail "write-result activity contract missing"
-[ -s beam/runtime/routes.md ] || fail "missing generated route index"
-ok "universal supervisor and runtime gates are present"
+grep -q 'the exact entity and resulting state' beam/skills/beam/SKILL.md || fail "write-result activity contract missing"
+[ "$(find beam/playbooks -name '*.md' | wc -l | tr -d ' ')" -eq 16 ] || fail "expected 16 playbooks"
+ok "agent brief and playbooks are present"
 
 printf '\n=== operation and fallback contracts ===\n'
 grep -q 'surfaceOrder: \[mcp, cli\]' beam/contracts/operations.yaml || fail "MCP-first order missing"
@@ -121,6 +108,22 @@ SH
 chmod +x "$tmp/bin/curl"
 
 fallback_env="HOME=$tmp BEAM_CONFIG_DIR=$tmp/config BEAM_SESSION_ID=supervisor PATH=$tmp/bin:$PATH BEAM_TEST_CAPTURE=$tmp/body"
+for flags in '' '--confirm wrong-job' '--confirmed true'; do
+  # shellcheck disable=SC2086
+  if env $fallback_env sh "$BEAM" learning approve-job job-1 $flags >"$tmp/approval" 2>&1; then rc=0; else rc=$?; fi
+  [ "$rc" -eq 2 ] || fail "Learning Hub approval accepted missing, wrong or MCP-style confirmation"
+  [ ! -e "$tmp/body" ] || fail "unapproved Learning Hub action reached the API"
+done
+# shellcheck disable=SC2086
+env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" learning approve-job job-1 --confirm job-1 >/dev/null || fail "approved Learning Hub job failed"
+grep -q '/tool/optimize/jobs/job-1/approve' "$tmp/url" || fail "approval targeted the wrong job"
+# shellcheck disable=SC2086
+env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" learning optimize agent-1 issue-1 --confirm issue-1 >/dev/null || fail "approved optimization failed"
+grep -q '/tool/optimize/issues/issue-1/optimize?agentId=agent-1' "$tmp/url" || fail "optimization targeted the wrong issue"
+grep -q '"workspaceId":"workspace-1"' "$tmp/body" || fail "optimization omitted the checked-out workspace"
+grep -q '"userId":"user-1"' "$tmp/body" || fail "optimization omitted the current user"
+ok "Learning Hub CLI rejects MCP confirmation syntax and executes approved targets"
+
 # shellcheck disable=SC2086
 mcp="$(env $fallback_env sh "$BEAM" mcp check --tool task_create)" || fail "healthy MCP tool check failed"
 printf '%s' "$mcp" | grep -q '"available":true' || fail "MCP tool availability missing"
@@ -179,7 +182,7 @@ printf '%s' "$raw_identity" | grep -q 'memberships' || fail "raw whoami did not 
 ok "whoami is compact by default and explicit about raw access"
 
 env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" analytics get agent-1 >/dev/null || fail "analytics fallback failed"
-grep -q '/agent-tasks/analytics?agentId=agent-1&startDate=2026-01-02&endDate=' "$tmp/url" || fail "analytics fallback did not use the Copilot date range and public route"
-ok "analytics fallback uses the Copilot date default and public route"
+grep -q '/agent-tasks/analytics?agentId=agent-1&startDate=2026-01-02&endDate=' "$tmp/url" || fail "analytics fallback did not use the whole-history date range and public route"
+ok "analytics fallback defaults to the agent's whole history and uses the public route"
 
 printf '\nSupervisor contract checks PASSED.\n'

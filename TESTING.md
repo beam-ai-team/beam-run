@@ -1,6 +1,6 @@
 # Testing Beam Run locally (dev)
 
-`v0.6.0`. API-key login derives the instance from a Beam workspace URL, then
+`v0.7.0`. API-key login derives the instance from a Beam workspace URL, then
 selects and locks one workspace for the session. See
 [`specs/api-key-login.md`](specs/api-key-login.md).
 
@@ -11,25 +11,43 @@ Point the local launcher at this working copy:
 
 ```sh
 ln -sfn "$(pwd)/beam/bin/beam" "$HOME/.local/bin/beam"
-beam --version    # -> beam 0.6.0
+beam --version    # -> beam 0.7.0
 ```
 
 ## 2. Smoke test (read-only — never creates tasks)
 ```sh
 sh test/smoke.sh                       # offline checks
-sh test/runtime-policy-contract.sh      # generated policy cards and high-risk guardrails
+sh test/playbook-contract.sh            # brief, playbooks and action list agree; safety stops intact
+python3 beam/scripts/check_playbooks.py --write   # refresh each playbook's Actions table after editing operations.yaml
 sh test/cross-host-contract.sh          # same public skill surface on every host
 sh test/activity-ux-contract.sh         # grouped, user-facing operation narration
 sh test/supervisor-contract.sh          # CLI fallback and safety contracts
-sh test/copilot-source-drift.sh         # byte-for-byte comparison when Copilot checkout exists
 BEAM_WORKSPACE_URL='<url>' BEAM_API_KEY='<your key>' sh test/smoke.sh
 ```
 
 The complete module-by-module review is in
 [`specs/supervisor-testing-plan.md`](specs/supervisor-testing-plan.md). It covers
 the normal MCP path, forced CLI fallback, ambiguous-write reconciliation,
-confirmation gates, context continuity, and response quality. The universal
-runtime adds generated-card and cross-host contract checks before any manual test.
+confirmation gates, context continuity, and response quality.
+
+### Playbook evals
+
+`test/evals/playbook-evals.json` holds 30 realistic requests covering all 16
+playbooks, multi-step work, safety traps and a non-Beam request. Each records the
+actions a correct plan must include, must never do, and must stop before.
+
+1. Give each request (with its `situation`) to a coding agent with this plugin
+   loaded, using the eval file's `runner_prompt` (Beam stays disconnected; the agent
+   writes down the plan it would carry out). Collect the JSON objects into one array.
+2. Score it:
+
+   ```sh
+   python3 test/evals/score_playbook_evals.py plans.json
+   ```
+
+   Use `--no-playbooks` to score a version that predates playbooks. The summary
+   counts missing steps, wrong turns, unsafe actions (no stop where one is
+   required), unneeded questions, and ordering mistakes.
 
 ### Activity UX review — each supported host
 

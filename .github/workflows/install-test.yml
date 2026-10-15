@@ -18,7 +18,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck beam/bin/beam test/smoke.sh test/e2e.sh test/e2e-agent-builder.sh
+          shellcheck beam/bin/beam test/smoke.sh test/e2e.sh test/e2e-agent-builder.sh test/playbook-contract.sh
 
   smoke:
     needs: lint
@@ -28,6 +28,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # The agent brief, playbooks and action list must agree: every action is
+      # covered and every action that needs the user's OK is a stop point.
+      - name: playbook contract
+        run: sh test/playbook-contract.sh && sh test/cross-host-contract.sh && sh test/activity-ux-contract.sh && sh test/supervisor-contract.sh
+
       - name: smoke (offline unless BEAM_API_KEY secret is set)
         env:
           BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}

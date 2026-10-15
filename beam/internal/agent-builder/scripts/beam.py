@@ -856,7 +856,10 @@ def _readiness_report(nodes, graph_id=None):
 
         # Custom GPT nodes have a stricter, documented contract. Their prompt
         # must declare every input so the runtime can inject it predictably.
-        is_custom_gpt = str(tc.get("toolFunctionName") or "").startswith("GPTAction_")
+        # Beam saves the entry node with a GPTAction tool but no prompt or
+        # params; it only receives the task input, so the contract skips it.
+        is_custom_gpt = (str(tc.get("toolFunctionName") or "").startswith("GPTAction_")
+                         and not is_entry)
         if is_custom_gpt:
             prompt = str(tc.get("prompt") or "")
             check("gpt_prompt_present", bool(prompt.strip()),

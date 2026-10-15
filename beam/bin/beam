@@ -90,7 +90,7 @@ ACTIVE_INSTANCE_ID=""
 ACTIVE_INSTANCE_NAME=""
 
 session_id() {
-  raw="${BEAM_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-${CLAUDE_SESSION_ID:-${CURSOR_SESSION_ID:-shell-$PPID}}}}}"
+  raw="${BEAM_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-${CURSOR_SESSION_ID:-shell-$PPID}}}}}}"
   printf '%s' "$raw" | tr -c 'A-Za-z0-9._-' '_'
 }
 
@@ -1408,6 +1408,12 @@ cmd_agent_builder() {
   builder="$(script_dir)/../internal/agent-builder/scripts/beam.py"
   [ -f "$builder" ] || die "internal_error" "bundled agent builder not found ($builder) — reinstall the plugin, then run: beam setup" 1
   if [ $# -eq 0 ]; then set -- --help; fi
+  # The builder only reads the legacy single-instance credentials file, so hand it
+  # the checked-out instance's key, workspace and API, as `agents deploy` does.
+  key="$(read_key 2>/dev/null || true)"
+  ws="$(read_workspace 2>/dev/null || true)"
+  if [ -n "$key" ]; then export BEAM_API_KEY="$key" BEAM_API_URL="$API_BASE"; fi
+  if [ -n "$ws" ]; then export BEAM_WORKSPACE_ID="$ws"; fi
   exec python3 "$builder" "$@"
 }
 

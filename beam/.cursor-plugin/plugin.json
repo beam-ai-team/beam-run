@@ -1,6 +1,6 @@
 {
   "name": "beam",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Universally operate Beam from Cursor",
   "author": { "name": "Beam AI" },
   "logo": "assets/beam-logo.jpg",
