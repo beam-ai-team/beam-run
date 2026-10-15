@@ -23,6 +23,8 @@
 ## Steps
 
 1. Run `graph.validate`, then read `graph.nodes` and the affected `graph.node`.
+   Query, don't remember: check `model.catalog` before changing a model, and
+   `docs.search` before relying on how a feature works.
 2. Pick the smallest action that does the job:
    - prompt or tone: `graph.update-prompt`
    - inputs or outputs: `graph.update-params`
@@ -36,8 +38,10 @@
    - webhook: `graph.create-webhook` / `graph.delete-webhook`
    - a broad restructure only: `graph.deploy` with `--agent-id`, including every
      step to keep
-3. Check every link with `graph.verify-links`, and re-read the changed step with
-   `graph.node`.
+3. Check the result with `graph.readiness` (it includes links) and re-read the
+   changed step with `graph.node`. After a trigger change, run
+   `graph.trigger-readiness`; after creating a webhook, `graph.webhook-readiness`.
+   Do not call a trigger or webhook working until its check passes.
 4. If the change rewrote the graph (add or remove a step, full redeploy), re-read
    `graph.nodes` and re-create any trigger it removed, with the user's OK.
 
@@ -56,7 +60,7 @@
 
 ## Done when
 
-- `graph.verify-links` passes, the changed step reads back as intended, and the user
+- `graph.readiness` passes, the changed step reads back as intended, and the user
   is told exactly what changed and that the agent is still a draft.
 - Offer `test-a-draft.md` when the change affects behaviour.
 
@@ -66,7 +70,8 @@
   the user that step will fail at run time until they connect it
   (`connect-or-fix-an-integration.md`).
 - The change landed on the wrong step: re-read and correct with the same small action.
-- Links broke: fix them before reporting; if they cannot be fixed, say which step.
+- Readiness fails or links broke: fix them before reporting; if they cannot be
+  fixed, say which step and why.
 - Detailed rules: `../internal/agent-builder/references/node-authoring.md`,
   `../internal/agent-builder/references/integrations.md`,
   `../internal/agent-builder/references/triggers.md`,

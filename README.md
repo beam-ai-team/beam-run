@@ -39,13 +39,15 @@ Start with the smallest action that fits the job:
 | Your application, service, or webhook needs Beam | **Public API** |
 
 Beam Run is one agent with playbooks. The single public `beam` skill is the
-agent's brief: its standing rules (workspace, safety, grounding, how it reports
-progress) and a list of 16 playbooks. Each playbook covers one situation — such as
-"find out what happened", "clear what's waiting on me" or "build a new agent" —
-with what to check first, the steps, where to stop and ask, and how to prove the job
-is done. Every step names an action from one shared action list, which holds how
-each action runs, its CLI fallback, and whether it needs the user's OK. MCP remains
-the preferred transport; every action has a CLI fallback, so a missing or malformed
+agent's brief: how to start a Beam session, its standing rules (safety, grounding,
+how it reports progress) and a list of 16 playbooks. Each playbook covers one
+situation — such as "find out what happened", "clear what's waiting on me" or
+"build a new agent" — with what to check first, the steps, where to stop and ask,
+and how to prove the job is done. Every step names an action from one shared action
+list, which holds how each action runs, its CLI mapping, and whether it needs the
+user's OK. MCP remains the preferred transport on hosts that scope it to a
+conversation. Codex stays on the CLI after checkout because its commands carry the
+current task ID; this keeps parallel conversations isolated. A missing or malformed
 MCP tool does not abandon the requested work.
 
 The CLI still owns setup, sign-in, workspace selection, diagnostics, and the
@@ -53,6 +55,14 @@ stdio bridge. It also provides deterministic fallback commands for tasks,
 inbox, integrations, templates, analytics, Views, Learning Hub, agent settings,
 and Flow operations. The Public API remains the surface for embedding Beam in
 external software.
+
+Learning Hub commands cover the documented issue, feedback, job, tuner, and
+accuracy APIs. Use `beam learning` to access them; the public contract is
+available at [Beam API docs](https://api.beamstudio.ai/public-docs).
+`beam login` asks for a familiar Beam workspace URL before the key, derives Beam
+App, Beam Enterprise, or Beam `{Region}`, and saves that connection locally. Each
+conversation checks out and locks one instance and workspace; parallel
+conversations can use different contexts without sharing active state.
 
 ## Set up
 
@@ -88,7 +98,7 @@ Then follow the instructions in that document for your agent environment.
 - Saved Copilot copy (change warning only): [`beam/references/copilot-baseline/README.md`](./beam/references/copilot-baseline/README.md)
 - Supervisor product contract: [`specs/supervisor-product-contract.md`](./specs/supervisor-product-contract.md)
 - Supervisor testing plan: [`specs/supervisor-testing-plan.md`](./specs/supervisor-testing-plan.md)
-- Beam product / Academy: https://docs.beam.ai
+- Beam product / Academy: https://docs.beam.ai — `beam docs <query>` searches it and reads a page from the terminal; `beam models` lists the workspace's live model catalog
 - MCP connection reference: https://docs.beam.ai/08-reference/api/mcp-connection/mcp-connection
 - API base: `https://api.beamstudio.ai`
 - Auth: API key from Beam → Personal settings → API Keys (`x-api-key` for CLI; Bearer for MCP)

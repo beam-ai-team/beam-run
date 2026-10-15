@@ -4,24 +4,28 @@
 
 - "Who am I signed in as?", "which workspace am I in?", "what agents do I have?",
   "switch to the Acme workspace", "create a workspace called Ops".
+- "How does a loop node work?", "what does publishing do?": questions about how a
+  Beam feature works.
 - Any broad question about the workspace that no other playbook owns.
 - Not for one agent's runs (find out what happened) or one agent's setup
   (explain how an agent works).
 
 ## What you need first
 
-- Nothing beyond a signed-in CLI. The workspace comes from the request, a Beam URL,
-  the remembered default, or the user's only workspace.
+- A session checkout (see the brief). The instance and workspace it picks are locked
+  for this conversation.
 
 ## Steps
 
 1. Read the signed-in user and current workspace with `user.current`.
-2. If the user names another workspace, resolve it with `beam workspace list <name>`
-   and set it with `beam workspace <id>`. Never switch on a guess.
+2. If the user wants another workspace, explain that it needs a new conversation,
+   started with `beam checkout <instance> [workspace]`. Never switch this one.
 3. List agents with `agent.list` when the question is about agents. Group or filter
    by what was asked; report the total.
 4. To create a workspace, run `workspace.create` with the exact name (and domain or
    icon if given). It does not change the current workspace.
+5. For how a Beam feature works, search the live docs with `docs.search` and answer
+   from the page it returns.
 
 ## Stop and ask
 

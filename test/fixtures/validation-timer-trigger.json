@@ -2,6 +2,7 @@
   "agentId": "5badf9b2-c833-4be9-9966-aed3c18264d1",
   "agentGraphNodeId": "d4af6aec-43c6-4d1c-ac81-589e4ed35690",
   "title": "Disposable CLI validation timer",
+  "prompt": "Generate the disposable validation report.",
   "configuration": {
     "beamAction": "Timer",
     "integrationIdentifier": "timer",
@@ -10,6 +11,7 @@
   },
   "userDefinedFrequency": "hour",
   "userDefinedFrequencyValue": 24,
+  "userDefinedFrequencyDateTime": "1788418800000",
   "timezone": "Asia/Karachi",
   "onlyOnce": false
 }

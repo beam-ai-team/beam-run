@@ -21,23 +21,26 @@
 
 1. Run `graph.validate`. Check for a similar agent with `graph.search-agents` when a
    duplicate is plausible.
-2. Search every named integration with `graph.search-tools` and confirm its
+2. Query, don't remember. Search every named integration with `graph.search-tools` and confirm its
    `toolFunctionName`, required inputs, provider and consent behaviour. Never invent
    a tool. Check the workspace has it connected with `integration.connected`.
 3. Design the flow: execution steps for processing, a condition step for exclusive
    routing, a waiting step for delayed work, a loop for a collection. Beam runs
-   steps one after another; each non-condition step has one outgoing link. Prefer
-   the cheapest model that does the job reliably.
+   steps one after another: the entry step has one outgoing link, other
+   non-condition steps at most one (a final action can have none). Pick models only
+   from `model.catalog`, preferring the cheapest that does the job reliably. Check
+   `docs.search` before relying on how a feature works (loops, automation modes,
+   publishing, triggers, evaluation).
 4. Show the flow proposal and wait for approval (see "Stop and ask").
 5. After approval, write the spec using `../internal/agent-builder/references/spec-format.md`,
    `../internal/agent-builder/references/node-authoring.md`, the closest example in
    `../internal/agent-builder/assets/example-specs/`, and check it against
    `../internal/agent-builder/templates/lint-checklist.md`.
 6. Dry-run, then create the draft with `graph.deploy` (no `--publish`).
-7. Check every link with `graph.verify-links`.
+7. Check the draft with `graph.readiness` and fix every failure.
 8. Add a trigger or webhook only if the user asked for one, and only after the graph
-   is settled: `graph.trigger-actions`, then `graph.create-trigger`, or
-   `graph.create-webhook`.
+   is settled: `graph.trigger-actions`, then `graph.create-trigger` and
+   `graph.trigger-readiness`, or `graph.create-webhook` and `graph.webhook-readiness`.
 
 ## Stop and ask
 
@@ -56,7 +59,7 @@
 
 ## Done when
 
-- `graph.verify-links` passes, the agent exists as a draft, and the user is told its
+- `graph.readiness` passes, the agent exists as a draft, and the user is told its
   name, that it is a draft, and what they can do next (test it, change it, publish).
 - Test only if the user asks, or to diagnose a failed check.
 
@@ -66,7 +69,7 @@
   then resume.
 - An integration is not connected: build the draft anyway if the user agrees, and
   offer `connect-or-fix-an-integration.md`.
-- Dry-run or link check fails: fix the spec and retry once; then report the exact
+- Dry-run or readiness check fails: fix the spec and retry once; then report the exact
   problem. Guides: `../internal/agent-builder/references/troubleshooting.md`,
   `../internal/agent-builder/patterns/flow-patterns.md`.
 - Response shapes for proposals, blockers and results:

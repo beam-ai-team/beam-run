@@ -1,6 +1,6 @@
 # Pre-Deploy Lint Checklist
 
-Run all 9 rules against the spec before deploying. Fix every failure. Do not skip any rule.
+Run all 10 rules against the spec before deploying. Fix every failure. Do not skip any rule.
 
 Rules 1–6 are mechanical — scan the spec programmatically or carefully. Rules 7–9 are structural — check each node type.
 
@@ -106,11 +106,27 @@ catch-all.
 
 ---
 
-## Rule 9 — Each non-condition node has exactly one outgoing edge
+## Rule 9 — Nodes do not fork implicitly
 
-Every `executionNode`, `waitingNode`, and `loopingNode` must have exactly one outgoing edge. Multiple outgoing edges on a non-condition node are not supported — Beam has no fork-join.
+Every `executionNode`, `waitingNode`, and `loopingNode` must have at most one
+outgoing edge. A terminal action may have no edge; multiple outgoing edges on a
+non-condition node are not supported — Beam has no fork-join. The entry node
+must have exactly one outgoing edge.
 
 **Fix:** insert a `conditionNode` to handle any routing. Remove duplicate edges.
+
+---
+
+## Rule 10 — Custom GPT prompts declare their inputs
+
+Every Custom GPT node must have a non-empty prompt with `## Role:`, `## Task:`,
+`## Context:`, and `## Rules:` sections; at least one declared input param; and
+one `{param_name}` placeholder for every declared input. Every placeholder must
+match a declared input. It must also declare at least one typed output param.
+
+**Fix:** add the missing input/output param or correct the prompt placeholder.
+Run `beam agent-builder readiness AGENT_ID` after the mutation to check the
+saved graph that will actually be published.
 
 ---
 

@@ -36,6 +36,32 @@ beam agent-builder validate
 ```
 → `{"valid": true, "baseUrl": "..."}` or `{"valid": false, "error": "..."}`.
 
+### `models`
+The workspace's live model catalog: every accepted token, which one is the
+default, and the credits each costs per node run. Read it before choosing a
+model; a token that is not listed is not valid for this workspace.
+```bash
+beam agent-builder models
+```
+→ `{"models": [{modelValue, modelName, isDefault, creditsCost, supportsReasoning, isPremium}], "default": "…", "total": N}`,
+default first, then cheapest first. `deploy`, `create` and `add-node` report
+`defaultModel`, `defaultModelSource` (`catalog` or `fallback`) and
+`modelWarnings` for any token the catalog does not list, on a node's `model`,
+its `fallback_models`, and a condition node's `llmModel` and `fallbackModels`;
+readiness carries the same `modelWarnings` for the saved graph. Warnings never
+block a publish.
+
+### `docs [<query>] [--page <url>] [--limit N] [--max-chars N]`
+Search the live product docs and read a page. Needs no credentials. The index
+is `docs.beam.ai/llms.txt`; the page body is the Markdown the docs site
+publishes beside every page. The top match is fetched when it leads clearly;
+`--page` reads a specific one. `BEAM_DOCS_URL` overrides the docs host.
+```bash
+beam agent-builder docs "loop node"
+beam agent-builder docs --page https://docs.beam.ai/03-running-operations/task-management/automation-modes/automation-modes
+```
+→ `{"matches": [{title, url, description, score}], "page": {url, chars, truncated, text}}`.
+
 ### `search-tools <keyword> [--wait-only] [--managed-only]`
 Search integration tools. `--managed-only` drops prompt-only `custom_gpt_tool`s
 and keeps every real `beam_tool` (managed integrations and Beam built-ins like
@@ -84,6 +110,20 @@ beam agent-builder verify-links AGENT_ID
 ```
 → `{"allOk": true/false, "links": [{status, nodeName, paramName, linkId}]}`.
 
+### `readiness <agentId>`
+Evaluate the saved draft against the deterministic requirements for publication:
+node objectives, graph routing, tool configuration, input/output parameter
+completeness, linked sources, Custom GPT prompt structure and variables, and
+attached MCP tools.
+```bash
+beam agent-builder readiness AGENT_ID
+```
+→ `{"ready": true/false, "summary", "criteria": [...], "failures": [...]}`.
+
+Every graph mutation returns this report. A draft may be saved while it is
+incomplete, but `publish` and every `--publish` path refuse to publish until
+`ready` is `true`.
+
 ---
 
 ## Create & deploy
@@ -91,7 +131,9 @@ beam agent-builder verify-links AGENT_ID
 ### `deploy <specFile> [--agent-id ID] [--publish] [--dry-run]`
 The main command. Creates or updates the agent, attaches every integration in
 the spec, re-links downstream params, and verifies — in one call. **Deploys as
-a draft** unless `--publish` is given.
+a draft** unless `--publish` is given. `--publish` runs `readiness` after all
+nodes and integrations are saved, and blocks publication if any required field
+or graph contract is incomplete.
 ```bash
 beam agent-builder deploy spec.json                  # create, draft
 beam agent-builder deploy spec.json --agent-id ID    # update existing
@@ -114,11 +156,12 @@ beam agent-builder create spec.json
 ```
 → `{"agentId", "agentName", "draftGraphId", "activeGraphId"}`.
 
-### `publish <graphId>`
+### `publish <graphId> --agent-id <agentId>`
 Publish a draft graph — makes the agent live. Only run this when the user
-explicitly asked to publish.
+explicitly asked to publish. The agent ID is required so the CLI can evaluate
+the current draft before performing the live action.
 ```bash
-beam agent-builder publish GRAPH_ID
+beam agent-builder publish GRAPH_ID --agent-id AGENT_ID
 ```
 
 ---
@@ -133,6 +176,19 @@ sets the prompt, updates it, and **re-reads to confirm it persisted** — it fai
 loudly rather than reporting a false success. Returns `verified: true`.
 ```bash
 beam agent-builder update-node-prompt AGENT_ID NODE_ID new-prompt.md
+```
+
+### `attach-mcp-tools <agentId> <nodeId> <attachmentsFile>`
+Attach one or more MCP tools to an existing tool node. This command fetches and
+preserves the full node configuration before updating its MCP attachments, so it
+does not drop the prompt, input/output parameters, or links.
+```bash
+beam agent-builder attach-mcp-tools AGENT_ID NODE_ID mcp-tools.json
+```
+
+`mcp-tools.json` is a JSON array:
+```json
+[{"integrationId":"…","integrationProviderId":"…","tools":[{"toolId":"…","isActive":true}]}]
 ```
 
 ### `update-node-consent <agentId> <nodeId> <true|false>`
@@ -151,12 +207,12 @@ objects (camelCase: `paramName`, `fillType`, `dataType`, …).
 beam agent-builder update-node-params AGENT_ID NODE_ID --input-params-file ip.json
 ```
 
-### `update-edge <edgeId> [--condition TEXT] [--condition-groups-file F]`
+### `update-edge <edgeId> --agent-id <agentId> [--condition TEXT] [--condition-groups-file F]`
 Update an edge. `--condition` sets an `llm_based` condition (`""` =
 unconditional); `--condition-groups-file` sets `rule_based` groups. Get edge IDs
 from `get-node` (`childEdges[].id`).
 ```bash
-beam agent-builder update-edge EDGE_ID --condition "score is above 80"
+beam agent-builder update-edge EDGE_ID --agent-id AGENT_ID --condition "score is above 80"
 ```
 
 ### `update-metadata <agentId> [--name] [--description] [--personality] [--restrictions] [--prompts-file F] [--publish]`
@@ -217,7 +273,16 @@ beam agent-builder create-trigger trigger.json
 List an agent's triggers.
 
 ### `update-trigger <triggerId> <triggerFile>`
-Update a trigger from a JSON file (only the fields present are changed).
+Update a trigger from a JSON file (only the fields present are changed). The
+saved payload is automatically re-read and returned as `triggerReadiness`.
+
+### `validate-trigger <agentId> <entryNodeId> [--trigger-id ID]`
+Validate the saved trigger against Beam's type-specific runtime contract. This
+is read-only and returns `ready`, every criterion, failures, and warnings.
+`create-trigger` and `update-trigger` run this validation automatically.
+```bash
+beam agent-builder validate-trigger AGENT_ID ENTRY_NODE_ID
+```
 
 ### `delete-trigger <triggerId>`
 Delete a trigger.
@@ -231,6 +296,13 @@ JSON to (`<BEAM_API_URL>/<agentId>/webhook`).
 
 ### `get-webhook <agentId>`
 Get an agent's existing webhook (returns `webhookUrl`).
+
+### `validate-webhook <agentId> [--entry-node-id ID]`
+Validate that the webhook is persisted, enabled, HTTPS-scoped to the agent, and
+(when provided) attached to the actual graph entry node.
+```bash
+beam agent-builder validate-webhook AGENT_ID --entry-node-id ENTRY_NODE_ID
+```
 
 ### `delete-webhook <agentId>`
 Remove an agent's webhook.

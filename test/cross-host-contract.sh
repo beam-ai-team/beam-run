@@ -36,6 +36,14 @@ if manifests["cursor"].get("skills") != ["./skills"]:
 if "skills" in manifests["claude"]:
     raise SystemExit("FAIL: Claude should use its standard shared skills directory discovery")
 print("  ok   every host resolves the shared public skills directory")
+
+portable_mcp = json.loads((root / "mcp.json").read_text())
+if portable_mcp.get("$schema") != "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json":
+    raise SystemExit("FAIL: portable MCP config has no supported schema")
+server = portable_mcp.get("mcpServers", {}).get("beam", {})
+if server.get("type") != "stdio" or server.get("command") != "./bin/beam" or server.get("args") != ["mcp"]:
+    raise SystemExit("FAIL: portable MCP config does not launch the bundled Beam bridge")
+print("  ok   portable MCP config loads the bundled local bridge")
 PY
 
 public_skills="$(find beam/skills -mindepth 2 -maxdepth 2 -name SKILL.md | sort)"

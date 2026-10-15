@@ -2,6 +2,45 @@
 
 Test or diagnose whenever the user asks; never make either a required phase.
 
+## Draft readiness after every change
+
+`verify-links` only checks linked parameter IDs. After every graph mutation,
+the builder also runs the deterministic `readiness` evaluation and includes it
+in the command result. It checks the fields and contracts that make a graph
+safe to publish: objectives, edges, tool configuration, parameter names/types
+and values, Custom GPT prompt structure and declared variables, and active MCP
+tool attachments.
+
+```bash
+beam agent-builder readiness AGENT_ID
+```
+
+Treat `ready: false` as a draft defect to fix before task testing or publishing.
+The CLI will save an incomplete draft so it can be repaired, but it blocks every
+publish path until the report passes. This is intentionally separate from a
+node's `evaluationCriteria`, which evaluates model response quality rather than
+schema and graph correctness.
+
+## Trigger readiness after every save
+
+Graph readiness does not validate a timer, integration trigger, or webhook.
+`create-trigger` and `update-trigger` therefore return a separate
+`triggerReadiness` report after reading the payload back from Beam; webhook
+creation returns `webhookReadiness`. Do not say a trigger is configured until
+`verificationPassed` is true.
+
+```bash
+beam agent-builder validate-trigger AGENT_ID ENTRY_NODE_ID
+beam agent-builder validate-webhook AGENT_ID --entry-node-id ENTRY_NODE_ID
+```
+
+Timer validation requires a non-empty prompt and concrete start/next-execution
+timestamps. Integration validation additionally verifies that the saved action
+and provider match the workspace's dynamic `trigger-actions` catalog. Webhook
+validation verifies a persisted, enabled endpoint and its optional entry-node
+binding. A draft trigger can be configuration-ready but inactive until publish;
+that state is a warning, not a passing live deployment.
+
 ## Test a requested scenario
 
 Create only the cases the user asks for. When they ask for broad confidence,

@@ -196,6 +196,190 @@ condition = next(node for node in payload["nodes"] if node.get("nodeType") == "c
 assert condition["objective"] == "Route the ticket through the revised condition"
 PY
 
+group "publish-readiness catches missing prompt inputs before publish"
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$SPECS/condition-ticket-router.json" <<'PY' \
+  && ok "readiness accepts a complete graph and rejects a missing prompt input" \
+  || bad "readiness did not catch a missing prompt input"
+import copy, importlib.util, json, sys
+script, fixture = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("beam_builder", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+nodes = module.build_payload(json.load(open(fixture)))["nodes"]
+assert module._readiness_report(nodes)["ready"]
+
+broken = copy.deepcopy(nodes)
+prompt_node = next(n for n in broken
+                   if (n.get("toolConfiguration") or {}).get("toolFunctionName", "").startswith("GPTAction_"))
+prompt_node["toolConfiguration"]["inputParams"] = []
+report = module._readiness_report(broken)
+assert not report["ready"]
+assert any(f["name"] == "gpt_has_input_variable" for f in report["failures"])
+PY
+
+group "MCP attachment preserves complete prompt-node configuration"
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$WORK/mcp-tools.json" <<'PY' \
+  && ok "MCP attachment keeps the existing node configuration" \
+  || bad "MCP attachment dropped prompt-node configuration"
+import importlib.util, json, sys
+script, attachment_file = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("beam_builder", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+json.dump([{"integrationId": "0fa1723f-b865-4c81-b24b-837369b49db8",
+            "tools": [{"toolId": "70a8d9b2-f02f-4d8b-924f-1978f8caf76d", "isActive": True}]}],
+          open(attachment_file, "w"))
+
+class Api:
+    def __init__(self): self.payload = None
+    def get(self, path):
+        if path.endswith("/nodes/lite"): return {"graphId": "graph-1"}
+        return {"id": "node-1", "agentGraph": {"id": "graph-1"},
+                "toolConfiguration": {"prompt": "Keep this prompt", "inputParams": [{"paramName": "input"}]}}
+    def patch_with_body(self, path, body): self.payload = body; return {"id": "node-1"}
+
+args = type("Args", (), {"agent_id": "agent-1", "node_id": "node-1", "attachments_file": attachment_file})()
+api = Api()
+module.cmd_attach_mcp_tools(api, args)
+node = api.payload["node"]
+assert node["toolConfiguration"]["prompt"] == "Keep this prompt"
+assert node["agentGraphNodeMcpIntegrations"][0]["tools"][0]["isActive"] is True
+PY
+
+group "trigger readiness validates timer, integration, and webhook payloads"
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" <<'PY' \
+  && ok "trigger readiness catches type-specific payload defects" \
+  || bad "trigger readiness missed a timer, integration, or webhook defect"
+import copy, importlib.util, sys
+
+spec = importlib.util.spec_from_file_location("beam_builder", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+agent_id = "5badf9b2-c833-4be9-9966-aed3c18264d1"
+entry_id = "d4af6aec-43c6-4d1c-ac81-589e4ed35690"
+provider_id = "5a0438d4-1fc8-4a81-9bfc-b6f1cb33b79e"
+entry = {"id": entry_id, "isEntryNode": True}
+
+timer = {
+    "id": "b32501f4-2f06-4ec7-a167-ccb20ae590f6",
+    "agentId": agent_id, "agentGraphNodeId": entry_id,
+    "title": "Weekly report", "prompt": "Generate and post the weekly report.",
+    "configuration": {"beamAction": "Timer", "integrationIdentifier": "timer",
+                      "hasAttachment": False, "shouldTriggerOnReply": False},
+    "userDefinedFrequency": "week", "userDefinedFrequencyValue": 1,
+    "userDefinedFrequencyDateTime": "1788418800000",
+    "toBeExecutedAt": "1788418800000", "timezone": "Asia/Karachi",
+    "isDeactivated": False, "isActive": False,
+}
+assert module._trigger_readiness_report(timer, entry, saved=True)["ready"]
+broken_timer = copy.deepcopy(timer)
+broken_timer["prompt"] = ""
+assert not module._trigger_readiness_report(broken_timer, entry, saved=True)["ready"]
+broken_timer = copy.deepcopy(timer)
+broken_timer["toBeExecutedAt"] = "0"
+assert not module._trigger_readiness_report(broken_timer, entry, saved=True)["ready"]
+
+catalog = [{
+    "integration": "google-mail", "action": "GmailFetchEmails",
+    "configuration": {"filters": [{"key": "from", "conditions": ["is", "is_not"]}]},
+    "integrationData": {"provider": {"id": provider_id, "status": "active"}},
+}]
+integration = {
+    "id": "41a7060b-a46f-4b89-b69e-05a404ac7b75",
+    "agentId": agent_id, "agentGraphNodeId": entry_id,
+    "title": "New customer email", "prompt": "Process qualifying customer emails.",
+    "integrationProviderId": provider_id,
+    "configuration": {"beamAction": "GmailFetchEmails", "integrationIdentifier": "google-mail",
+                      "hasAttachment": False, "shouldTriggerOnReply": False,
+                      "filters": [{"operator": "AND", "conditions": [
+                          {"property": "from", "condition": "is", "value": "customer@example.com"}
+                      ]}]},
+    "isDeactivated": False, "isActive": True,
+}
+assert module._trigger_readiness_report(integration, entry, catalog, saved=True)["ready"]
+broken_integration = copy.deepcopy(integration)
+broken_integration["integrationProviderId"] = "7d7a2f54-8b64-463d-9a04-042fb58f6f04"
+assert not module._trigger_readiness_report(broken_integration, entry, catalog, saved=True)["ready"]
+
+webhook = {"triggered": True, "agentId": agent_id, "agentGraphNodeId": entry_id}
+assert module._webhook_readiness_report(agent_id, webhook, entry,
+                                        "https://api.beamstudio.ai")["ready"]
+assert not module._webhook_readiness_report(agent_id, {"triggered": False}, entry,
+                                            "https://api.beamstudio.ai")["ready"]
+PY
+
+group "live docs and model catalog (offline)"
+# `docs` needs no Beam credentials and reads the index the docs site publishes.
+# The fixture stands in for docs.beam.ai so this stays deterministic offline.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs "loop node" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && ok "docs works without credentials" || bad "docs failed offline (rc=$rc): $OUT"
+printf '%s' "$OUT" | grep -q '"title": "Loop Nodes"' && ok "docs matches the loop-node page" || bad "docs missed the loop-node page"
+printf '%s' "$OUT" | grep -q 'iterationCount or linkedVariableId' && ok "docs returns the page body" || bad "docs did not fetch the page"
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs 2>/dev/null)"; rc=$?
+[ "$rc" -eq 2 ] && [ "$(printf '%s' "$OUT" | code_of)" = "validation_error" ] \
+  && ok "docs without a query is a validation error" || bad "docs without a query: rc=$rc"
+# `models` is a workspace read: no key -> auth_error naming beam login, never a guess.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  "$BEAM" agent-builder models 2>/dev/null)"; rc=$?
+[ "$rc" -eq 3 ] && [ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] \
+  && ok "models without credentials is an auth error" || bad "models without credentials: rc=$rc"
+# An offline dry-run cannot read the catalog, so it names the fallback and says so.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/empty" \
+  "$BEAM" agent-builder deploy "$SPECS/linear-blog-emailer.json" --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q '"defaultModelSource": "fallback"' && ok "offline dry-run reports the fallback default" || bad "no defaultModelSource on dry-run"
+printf '%s' "$OUT" | grep -q '"modelWarnings": \[\]' && ok "offline dry-run carries no catalog warnings" || bad "unexpected model warnings offline"
+# The vendored references carry no model table: the catalog is the source.
+grep -q "BEDROCK_CLAUDE_SONNET_4\b" "$ROOT/beam/internal/agent-builder/references/node-authoring.md" \
+  && bad "node-authoring still carries a frozen model table" || ok "node-authoring points at the live catalog"
+grep -q "Query, don't remember" "$ROOT/beam/playbooks/build-a-new-agent.md" \
+  && ok "skill requires models/docs before authoring" || bad "skill invariant missing"
+
+group "docs skips the checkout gate; fallback and condition models are checked"
+# Two saved instances and no active checkout: workspace reads must ask for a
+# checkout, but the public docs must still be readable (review: saqib-beam).
+mkdir -p "$WORK/two/instances"
+printf 'BEAM_INSTANCE_ID=one\nBEAM_INSTANCE_NAME=One\n' > "$WORK/two/instances/one"
+printf 'BEAM_INSTANCE_ID=two\nBEAM_INSTANCE_NAME=Two\n' > "$WORK/two/instances/two"
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/two" \
+  BEAM_DOCS_URL="file://$ROOT/test/fixtures/docs" "$BEAM" agent-builder docs "loop node" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$OUT" | grep -q '"title": "Loop Nodes"' \
+  && ok "agent-builder docs works with two instances and no checkout" || bad "agent-builder docs still gated on checkout (rc=$rc)"
+# The shell gate reports on stderr in the CLI's {"error":{"code":...}} shape.
+OUT="$(env -u BEAM_API_KEY -u BEAM_WORKSPACE_ID BEAM_CONFIG_DIR="$WORK/two" "$BEAM" agent-builder models 2>&1 >/dev/null)"; rc=$?
+[ "$rc" -eq 2 ] && printf '%s' "$OUT" | grep -q '"code":"checkout_required"' \
+  && ok "agent-builder models still requires a checkout" || bad "models bypassed the checkout gate (rc=$rc): $OUT"
+# The catalog check must cover primary, fallback, and condition-node models,
+# in a spec and in a saved graph. Stub the catalog so this runs offline.
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" <<'PY' \
+  && ok "spec and live checks cover fallback and condition models" \
+  || bad "fallback or condition models escape the catalog check"
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("beampy", sys.argv[1])
+m = importlib.util.module_from_spec(spec); sys.argv = ["beam.py"]; spec.loader.exec_module(m)
+m._MODEL_CATALOG["models"] = [{"modelValue": "GEMINI_3_FLASH", "isDefault": True, "creditsCost": 1},
+                              {"modelValue": "GPT4_1_MINI", "isDefault": False, "creditsCost": 1}]
+spec_nodes = {"nodes": [
+    {"key": "write", "model": "NOPE_1", "fallback_models": ["GPT4_1_MINI", "NOPE_2"]},
+    {"key": "route", "node_type": "conditionNode",
+     "node_configurations": {"conditionType": "llm_based", "llmModel": "NOPE_3", "fallbackModels": "GEMINI_3_FLASH,NOPE_4"}},
+    {"key": "ok", "model": "GEMINI_3_FLASH"},
+]}
+w = m.model_warnings_for(m._spec_models(spec_nodes))
+assert len(w) == 4, w
+assert any("fallback model NOPE_2" in x for x in w), w
+assert any("condition model NOPE_3" in x for x in w), w
+assert any("condition fallback model NOPE_4" in x for x in w), w
+live = [{"objective": "Write", "toolConfiguration": {"preferredModel": "GEMINI_3_FLASH", "fallbackModels": "NOPE_5"}},
+        {"objective": "Route", "nodeType": "conditionNode",
+         "nodeConfigurations": {"conditionType": "llm_based", "llmModel": "NOPE_6", "fallbackModels": None}}]
+w2 = m.model_warnings_for([x for n in live for x in m._live_node_models(n)])
+assert len(w2) == 2 and "NOPE_5" in w2[0] and "NOPE_6" in w2[1], w2
+PY
+
 if [ -z "$KEY" ]; then
   printf '\n%s passed, %s failed (offline subset).\nSet BEAM_API_KEY for the authenticated checks.\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] || exit 1
@@ -216,6 +400,32 @@ OUT="$(env BEAM_API_KEY=sk-definitely-invalid \
 [ "$rc" -ne 0 ] && ok "bad key exits non-zero ($rc)" || bad "still exits 0 on a bad key"
 [ "$(printf '%s' "$OUT" | code_of)" = "auth_error" ] && ok "code=auth_error" || bad "wrong code"
 printf '%s' "$OUT" | grep -q '"ok": false' && ok "ok:false" || bad "still reports ok:true"
+
+group "authenticated: live model catalog and docs"
+OUT="$("$BEAM" agent-builder models 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && ok "models lists the catalog" || bad "models failed: $OUT"
+N="$(printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for m in d["models"] if m["isDefault"]))' 2>/dev/null)"
+[ "$N" = "1" ] && ok "exactly one default model" || bad "expected one default, got '$N'"
+printf '%s' "$OUT" | grep -q '"creditsCost"' && ok "credits per run are reported" || bad "no creditsCost"
+OUT="$("$BEAM" agent-builder deploy "$SPECS/linear-blog-emailer.json" --agent-id 00000000-0000-0000-0000-000000000000 --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q '"defaultModelSource": "catalog"' && ok "authenticated dry-run takes the default from the catalog" \
+  || ok "authenticated dry-run on a missing agent fails before the model report (expected on a foreign id)"
+OUT="$("$BEAM" agent-builder docs "automation modes" 2>/dev/null)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$OUT" | grep -q 'automation-modes' && ok "docs finds the live automation-modes page" || bad "live docs lookup failed (rc=$rc)"
+OUT="$("$BEAM" agent-builder models 2>/dev/null)"
+python3 - "$SPECS/condition-ticket-router.json" "$WORK/bad-fallback.json" <<'PY'
+import json, sys
+spec = json.load(open(sys.argv[1]))
+cond = next(n for n in spec["nodes"] if n.get("node_type") == "conditionNode")
+cond.setdefault("node_configurations", {"conditionType": "llm_based", "llmModel": "GPT40", "fallbackModels": None})
+cond["node_configurations"]["llmModel"] = "NOT_A_MODEL_A"
+gpt = next(n for n in spec["nodes"] if n.get("node_type", "executionNode") == "executionNode" and not n.get("is_entry"))
+gpt["fallback_models"] = ["NOT_A_MODEL_B"]
+json.dump(spec, open(sys.argv[2], "w"))
+PY
+OUT="$("$BEAM" agent-builder deploy "$WORK/bad-fallback.json" --dry-run --summary 2>/dev/null)"
+printf '%s' "$OUT" | grep -q 'fallback model NOT_A_MODEL_B' && ok "dry-run warns on an unknown fallback model" || bad "no fallback-model warning: $OUT"
+printf '%s' "$OUT" | grep -q 'condition model NOT_A_MODEL_A' && ok "dry-run warns on an unknown condition-node model" || bad "no condition-model warning"
 
 group "authenticated: system-action tools are reachable"
 # These are real platform tools; they attach as integrations, not as plain nodes.

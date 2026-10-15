@@ -16,15 +16,18 @@
 ## Steps
 
 1. Read, as asked:
-   - open issues by tab: `learning.issues`; one issue: `learning.issue`; its
-     feedback: `learning.feedbacks`; its jobs: `learning.issue-jobs`
+   - open issues by tab: `learning.issues`; issues for one tool:
+     `learning.list-issues`; one issue: `learning.issue`; its feedback:
+     `learning.feedbacks`; its jobs: `learning.issue-jobs`
+   - feedback for one step of a run: `learning.feedback-summary`
    - one job (status, score change, prompt before and after, failure reason):
-     `learning.job`
+     `learning.job`; what it did step by step: `learning.job-activity`
    - accuracy: `learning.trend`, then `learning.tools` for a per-tool ranking, and
      `learning.tool` for one tool
    - tuner settings: `learning.config`
 2. Send feedback (no confirmation): `learning.submit-feedback` for one step,
-   `learning.submit-task-feedback` for a whole run.
+   `learning.submit-task-feedback` for a whole run; correct earlier feedback with
+   `learning.update-feedback`.
 3. Act on issues and jobs:
    - optimise an issue: `learning.optimize`; merge: `learning.merge`;
      discard: `learning.discard`

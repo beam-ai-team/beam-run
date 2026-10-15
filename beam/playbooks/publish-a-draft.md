@@ -9,12 +9,12 @@
 ## What you need first
 
 - The agent and its `draftGraphId` from `agent.get`. If there is no draft, say so.
-- Healthy links on the draft.
+- A draft that passes its readiness check.
 
 ## Steps
 
 1. Read `agent.get` for the draft and live graph ids.
-2. Check links with `graph.verify-links`. Do not publish a draft with broken links.
+2. Check the draft with `graph.readiness`. Do not publish while any check fails.
 3. Publish with `graph.publish` using the draft graph id.
 4. Read back with `graph.get` and `agent.get`.
 
@@ -31,5 +31,5 @@
 
 ## If it goes wrong
 
-- Links fail: fix them with `change-an-agents-flow.md` first.
+- Readiness fails: fix it with `change-an-agents-flow.md` first.
 - Publish times out: re-read `agent.get` before trying again.

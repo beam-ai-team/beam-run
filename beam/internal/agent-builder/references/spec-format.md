@@ -58,7 +58,7 @@ values must be unique. Every edge `target` must be a node key in the same spec.
   "node_type": null,
   "x": 250,
   "y": 150,
-  "model": "BEDROCK_CLAUDE_SONNET_4",
+  "model": "BEDROCK_CLAUDE_SONNET_4_5",
   "tool_name": "Write Blog Post",
   "tool_description": "",
   "prompt": "## Role:\n...\n## Task:\n...\n## Context:\n```\n{topic}\n```\n## Rules:\n1. ...",
@@ -84,7 +84,7 @@ values must be unique. Every edge `target` must be a node key in the same spec.
 | `is_entry` | boolean | `true` on exactly one node — the entry point. |
 | `node_type` | string\|null | `null` → auto (`entryNode` if `is_entry`, else `executionNode`). Set explicitly to `"conditionNode"`, `"waitingNode"`, or `"loopingNode"`. |
 | `x`, `y` | number | Canvas position. Optional — by default the script auto-positions nodes by graph depth (one row per step, branches spread across) so they never overlap in the UI. Provide **both** to pin a node to a fixed spot. On a **loop body node** `x`/`y` are read relative to the loop container, not the canvas — leave them unset so auto-layout places the body inside the loop. |
-| `model` | string | LLM for this node. See `node-authoring.md`. Default `BEDROCK_CLAUDE_SONNET_4`. |
+| `model` | string | LLM for this node, a token from `beam agent-builder models`. Omit to take the workspace default. See `node-authoring.md`. |
 | `tool_name` | string | Display name of the node's custom tool. Defaults to `name`. |
 | `tool_description` | string | Optional one-line tool description. |
 | `prompt` | string | The node's LLM instruction. Custom nodes: use the 4-section markdown structure. Integration / waiting nodes: empty string `""`. |
@@ -112,7 +112,7 @@ Keep specs minimal. Include a field only when it differs from the default.
 | `is_entry` | `false` |
 | `node_type` | `null` (auto) |
 | `x`, `y` | auto-laid-out by graph depth (provide **both** to override) |
-| `model` | `BEDROCK_CLAUDE_SONNET_4` |
+| `model` | `BEDROCK_CLAUDE_SONNET_4_5` |
 | `tool_description` | `""` |
 | `on_error` | `"STOP"` |
 | `enable_retry` / `retry_count` / `retry_wait_ms` | `false` / `1` / `1000` |

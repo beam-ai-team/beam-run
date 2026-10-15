@@ -67,18 +67,21 @@ The available actions are **dynamic per workspace** — always discover them wit
 > `remove-node`, `update-metadata`) regenerates node ids and cascade-deletes the
 > trigger. Build and settle the graph first; add the trigger last.
 
-`create-trigger` takes one JSON file. Required: `agentId`, `agentGraphNodeId`
-(the entry node ID), `title`, `configuration`. `integrationProviderId` is
-required for an integration trigger (Gmail, Slack, …) — take it from the
-`trigger-actions` response — but a `Timer` (schedule) trigger has no provider,
-so omit it. An agent supports **one trigger at a time**; creating a second
-returns a 400, so delete the existing trigger first.
+`create-trigger` takes one JSON file. Required for every timer or integration
+trigger: `agentId`, `agentGraphNodeId` (the entry node ID), `title`, `prompt`,
+and `configuration`. The prompt is the concrete instruction delivered when the
+trigger fires; never leave it blank. `integrationProviderId` is required for an
+integration trigger (Gmail, Slack, …) — take it from the `trigger-actions`
+response — but a `Timer` (schedule) trigger has no provider, so omit it. An
+agent supports **one trigger at a time**; creating a second returns a 400, so
+delete the existing trigger first.
 
 ```json
 {
   "agentId": "AGENT_UUID",
   "agentGraphNodeId": "ENTRY_NODE_UUID",
   "title": "New Gmail Email",
+  "prompt": "Process the matching email according to this agent's workflow.",
   "integrationProviderId": "PROVIDER_UUID_FROM_TRIGGER_ACTIONS",
   "configuration": {
     "beamAction": "GmailFetchEmails",
@@ -106,6 +109,7 @@ To run on a recurring schedule with no integration event:
   "agentId": "AGENT_UUID",
   "agentGraphNodeId": "ENTRY_NODE_UUID",
   "title": "Daily Report",
+  "prompt": "Generate and post the scheduled report.",
   "configuration": {
     "beamAction": "Timer",
     "integrationIdentifier": "timer",
@@ -114,14 +118,17 @@ To run on a recurring schedule with no integration event:
   },
   "userDefinedFrequency": "hour",
   "userDefinedFrequencyValue": 24,
+  "userDefinedFrequencyDateTime": "1788418800000",
   "timezone": "America/New_York"
 }
 ```
 
 `userDefinedFrequency` is `minute`, `hour`, `week`, or `month`;
 `userDefinedFrequencyValue` is the multiplier (every 5 minutes →
-`"minute"`, `5`). For a one-time run, set `onlyOnce: true` and
-`userDefinedFrequencyDateTime` to the timestamp.
+`"minute"`, `5`). Every recurring Timer needs a concrete
+`userDefinedFrequencyDateTime` start instant, expressed as epoch milliseconds
+or ISO 8601 with an offset. For a one-time run, set `onlyOnce: true` and use
+that field for the moment it should fire.
 
 Beam's `Timer` has no weekday-only or cron mode — only `minute` / `hour` /
 `week` / `month` intervals. "Every weekday morning" can only be approximated
@@ -198,3 +205,29 @@ For `update-trigger`, the JSON file **must include `title`** (the API rejects an
 update without it) plus any of `agentId`, `prompt`, `configuration`, `timezone`,
 `userDefinedFrequency`, `userDefinedFrequencyValue`,
 `userDefinedFrequencyDateTime`, `isActive`, `onlyOnce` that you are changing.
+
+## Trigger readiness (mandatory)
+
+`create-trigger` and `update-trigger` automatically read the saved payload and
+return `triggerReadiness`. Treat `verificationPassed: false` as a failed
+configuration, not a successful schedule. You can run the same inspection at
+any time:
+
+```bash
+beam agent-builder validate-trigger AGENT_ID ENTRY_NODE_ID
+```
+
+The check verifies every trigger's agent, entry node, title, prompt, action,
+and configuration booleans. It then applies type-specific checks:
+
+- **Timer:** `Timer`/`timer` pairing, no provider, supported cadence, positive
+  interval, timezone, concrete start time, and a persisted, cadence-aligned
+  next execution time.
+- **Integration:** non-timer action, connected provider, action support from
+  `trigger-actions`, and supported filters when configured.
+- **Webhook:** use `validate-webhook` after creation; it verifies the persisted
+  endpoint, `triggered: true`, agent scope, HTTPS URL, and optional entry-node
+  binding.
+
+An inactive trigger on a draft graph is reported as a warning, not a payload
+failure: it will activate only when the graph is published.

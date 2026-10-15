@@ -25,7 +25,8 @@
    - tools and whether their integrations are connected: `agent.tools`, then
      `integration.is-connected` per tool
    - sub-agents: `agent.sub-agents`
-   - link health: `graph.verify-links`
+   - link health: `graph.verify-links`; whether it is ready to publish:
+     `graph.readiness`
    - recent changes: `agent.history`
 
 ## Stop and ask

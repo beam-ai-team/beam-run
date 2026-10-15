@@ -31,7 +31,7 @@ Nothing a user can do today goes away, and every safety stop stays.
 | --- | --- | --- |
 | Entry point | One public "Beam" skill that sorts requests into 12 screen areas | The same public "Beam" skill, rewritten as the agent's brief: who it is, its standing rules, and the list of playbooks |
 | Instructions | 12 screen instructions plus 12 action tables, generated automatically from Copilot's text | 16 playbooks, one per situation, written by hand |
-| Actions and safety | A list of 102 Beam actions, each with its backup route and whether it needs the user's OK; the flow-building actions were missing from it | 115 actions: the same list, plus the 13 flow-building actions (search tools, attach, triggers, webhooks and so on), plus the practical details for each action moved in from the screen instructions |
+| Actions and safety | A list of 102 Beam actions, each with its backup route and whether it needs the user's OK; the flow-building actions were missing from it | 124 actions: the same list, the 13 flow-building actions (search tools, attach, triggers, webhooks and so on), the 9 actions main added for docs, models, readiness checks and Learning Hub, and the practical details for each action moved in from the screen instructions |
 | Link to Copilot | Instructions are regenerated from a saved copy of Copilot and must match it word for word | The saved copy is kept only to warn us when Copilot's rules change; we decide what to carry over |
 | Old specialist skills | Kept in a hidden folder for reference | Deleted once the playbooks are live |
 | Setup and sign-in | Separate setup skill | Unchanged |
@@ -94,7 +94,7 @@ different in two playbooks.
 | Improve an agent from feedback | Learning Hub issues, feedback, improvement jobs, approve or reject | Learning Hub |
 | Work with Views | Saved Views, columns, records, export | Views |
 
-Every one of the 115 actions is used by at least one playbook. An automatic check enforces this.
+Every one of the 124 actions is used by at least one playbook. An automatic check enforces this.
 
 ## What stays the same
 

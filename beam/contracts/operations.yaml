@@ -18,6 +18,13 @@ operations:
     cli: beam whoami
     status: ready
     notes: "Gives the user id that Learning Hub writes need. Never invent a user id."
+  docs.search:
+    safety: read
+    workspaceRequired: false
+    mcp: null
+    cli: beam docs <query> [--page url]
+    status: ready
+    notes: "Check the live product docs before relying on how a feature works (loops, automation modes, publishing, triggers, evaluation); the live docs outrank any vendored note."
   workspace.create:
     safety: external-effect
     workspaceRequired: false
@@ -144,47 +151,59 @@ operations:
     mcp: getAgentGraph
     cli: beam agent-builder verify-links <agentId>
     status: ready
-    notes: "Run after every change; report any broken link by node."
+    notes: "Report any broken link by node. Changes are checked with graph.readiness, which includes links."
+  graph.readiness:
+    safety: read
+    mcp: null
+    cli: beam agent-builder readiness <agentId>
+    status: ready
+    notes: "Every graph change returns this report. Resolve every failure before testing or publishing."
+  model.catalog:
+    safety: read
+    mcp: null
+    cli: beam agent-builder models
+    status: ready
+    notes: "The only valid list of models for this workspace, including the default. Check it before setting or discussing a step's model or its cost."
   graph.deploy:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder deploy <specFile>
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
-    notes: "Lint and run with --dry-run --summary first. With --agent-id it rewrites the whole graph: include every node to keep; node ids change and an existing trigger is deleted. Stays a draft unless --publish is passed, which needs graph.publish's confirmation."
+    notes: "Lint and run with --dry-run --summary first. With --agent-id it rewrites the whole graph: include every node to keep; node ids change and an existing trigger is deleted. Stays a draft unless --publish is passed, which needs graph.publish's confirmation. Returns a readiness report; resolve every failure before testing or publishing."
   graph.publish:
     safety: external-effect
     confirmation: explicit-publish-intent
     mcp: null
-    cli: beam agent-builder publish <graphId>
+    cli: beam agent-builder publish <graphId> --agent-id <agentId>
     postRead: graph.get
     status: ready
-    notes: "Makes the draft live. Only on a clear request to publish or go live."
+    notes: "Makes the draft live. Only on a clear request to publish or go live, and only after graph.readiness passes."
   graph.update-prompt:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-prompt <agentId> <nodeId> <promptFile>
-    postRead: graph.node
+    postRead: graph.readiness
     status: ready
     notes: "Smallest change for prompt or tone edits."
   graph.update-params:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-params <agentId> <nodeId> ...
-    postRead: graph.node
+    postRead: graph.readiness
     status: ready
   graph.update-consent:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-consent <agentId> <nodeId> <true|false>
-    postRead: graph.node
+    postRead: graph.readiness
     status: ready
     notes: "A setting on an existing integration step, not a new step: the run asks for consent right before that tool runs."
   graph.add-node:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder add-node <agentId> <nodeFile> ...
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
     notes: "Rewrites the graph: node ids change and an existing trigger is deleted. Re-read nodes afterwards and re-create the trigger."
   graph.remove-node:
@@ -192,7 +211,7 @@ operations:
     confirmation: explicit
     mcp: null
     cli: beam agent-builder remove-node <agentId> <nodeId>
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
     notes: "Rewrites the graph: node ids change and an existing trigger is deleted. Re-read nodes afterwards."
   graph.test-node:
@@ -207,6 +226,12 @@ operations:
     cli: beam agent-builder get-triggers <agentId> <entryNodeId>
     status: ready
     notes: "Needs the entry node id from graph.nodes as well as the agent id."
+  graph.trigger-readiness:
+    safety: read
+    mcp: null
+    cli: beam agent-builder validate-trigger <agentId> <entryNodeId>
+    status: ready
+    notes: "Run after every timer or integration trigger create or update; do not call a trigger working until it passes."
   graph.webhook:
     safety: read
     mcp: getAgentGraph
@@ -234,20 +259,20 @@ operations:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder attach-tool <agentId> <graphId> <nodeId> <toolConfigFile>
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
   graph.update-node:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node <agentId> <graphId> <nodeFile>
-    postRead: graph.node
+    postRead: graph.readiness
     status: ready
     notes: "For a step's model or other configuration. Read the full node first and send it back whole."
   graph.update-edge:
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-edge <edgeId> [--condition TEXT]
-    postRead: graph.verify-links
+    postRead: graph.readiness
     status: ready
   graph.trigger-actions:
     safety: read
@@ -260,7 +285,7 @@ operations:
     confirmation: explicit
     mcp: null
     cli: beam agent-builder create-trigger <triggerFile>
-    postRead: graph.triggers
+    postRead: graph.trigger-readiness
     status: ready
     notes: "Once active, the agent starts runs on its own. One trigger per agent: delete the old one first. Add it last, after the graph is settled, because a graph rewrite deletes it."
   graph.update-trigger:
@@ -268,7 +293,7 @@ operations:
     confirmation: explicit
     mcp: null
     cli: beam agent-builder update-trigger <triggerId> <triggerFile>
-    postRead: graph.triggers
+    postRead: graph.trigger-readiness
     status: ready
   graph.toggle-trigger:
     safety: external-effect
@@ -290,7 +315,7 @@ operations:
     confirmation: explicit
     mcp: null
     cli: beam agent-builder create-webhook <agentId>
-    postRead: graph.webhook
+    postRead: graph.webhook-readiness
     status: ready
     notes: "Anyone with the URL can start runs; treat it as a secret."
   graph.delete-webhook:
@@ -300,6 +325,12 @@ operations:
     cli: beam agent-builder delete-webhook <agentId>
     postRead: graph.webhook
     status: ready
+  graph.webhook-readiness:
+    safety: read
+    mcp: null
+    cli: beam agent-builder validate-webhook <agentId> [--entry-node-id ID]
+    status: ready
+    notes: "Run after every webhook create; do not call a webhook working until it passes."
 
   task.list:
     safety: read
@@ -635,16 +666,39 @@ operations:
     cli: beam learning issue <agentId> <issueId>
     status: ready
     notes: "Name the tool and its bucket when reporting an issue."
+  learning.list-issues:
+    safety: read
+    mcp: lh_list_issues
+    cli: beam learning list-issues <agentId> [toolFunctionName] [sortBy]
+    status: ready
+    notes: "Issues for one tool, optionally sorted; use learning.issues for the tabbed overview."
   learning.feedbacks:
     safety: read
     mcp: lh_get_issue_feedbacks
     cli: beam learning feedbacks <agentId> <issueId>
+    status: ready
+  learning.feedback-summary:
+    safety: read
+    mcp: lh_get_feedback_node_summary
+    cli: beam learning feedback-summary <agentId> <taskNodeId>
+    status: ready
+    notes: "Feedback summary for one step of a run (taskNodeId from task.get)."
+  learning.update-feedback:
+    safety: reversible-write
+    mcp: lh_update_feedback
+    cli: beam learning update-feedback <feedbackId> <payloadFile>
     status: ready
   learning.issue-jobs:
     safety: read
     mcp: lh_get_issue_jobs
     cli: beam learning issue-jobs <agentId> <issueId>
     status: ready
+  learning.job-activity:
+    safety: read
+    mcp: lh_get_job_activity
+    cli: beam learning job-activity <agentId> <threadId>
+    status: ready
+    notes: "What a job did, step by step; use it to explain a failed or slow job."
   learning.trend:
     safety: read
     mcp: lh_get_accuracy_trend
@@ -654,12 +708,12 @@ operations:
   learning.tools:
     safety: read
     mcp: lh_get_learning_tools
-    cli: beam learning tools <agentId>
+    cli: beam learning tools <agentId> <startDate> <endDate> [nodesFilter]
     status: ready
   learning.tool:
     safety: read
     mcp: lh_get_tool_detail
-    cli: beam learning tool <agentId> <toolFunctionName>
+    cli: beam learning tool <agentId> <toolFunctionName> <startDate> <endDate> [nodesFilter]
     status: ready
   learning.config:
     safety: read

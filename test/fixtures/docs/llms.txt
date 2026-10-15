@@ -1,0 +1,5 @@
+# Beam Academy (test fixture)
+
+- [Welcome to Beam](https://docs.beam.ai/01-getting-started/welcome/welcome.md): Start in your Beam workspace.
+- [Loop Nodes](02-building-agents/advanced-patterns/loop-node/loop-node.md): Iterate over an array or run a fixed number of passes inside a flow.
+- [Automation Modes](https://docs.beam.ai/03-running-operations/task-management/automation-modes/automation-modes.md): Configure human-in-the-loop workflows with consent approvals.

@@ -1,2 +1,2 @@
-# Exact copy of Copilot source; its hashes must not change.
-beam/references/copilot-baseline/** -whitespace
+# This source snapshot intentionally preserves the upstream trailing blank line.
+beam/references/copilot-baseline/domain/routing-table.ts whitespace=-blank-at-eof
