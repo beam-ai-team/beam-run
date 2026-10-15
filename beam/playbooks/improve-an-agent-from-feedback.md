@@ -43,12 +43,20 @@
 - `learning.optimize`, `learning.merge`, `learning.discard`, `learning.approve-job`,
   `learning.reject-job`, `learning.reoptimize-job`, `learning.cancel-job`,
   `learning.run-job`, `learning.resume` and `learning.set-config` all use a
-  two-turn confirmation. First call it without
-  `confirmed`: it returns a message describing the impact. Send that message to the
-  user as is — do not soften it or add a second question. Only after a clear yes,
-  call the same action again with the same values and `confirmed: true`. Anything
-  other than a clear yes is not consent. This applies even when the user's first
-  message already named the action.
+  proposal followed by a clear yes before execution, even when the user's first
+  message already named the action. Anything else is not consent.
+- **CLI (always in Codex):** read the target, show the exact proposed change and
+  its impact, then wait. After approval, use the Actions table's command with
+  `--confirm` and its exact target id (or `merge` for merging). For example,
+  `beam learning approve-job <threadId> --confirm <threadId>`. Never pass
+  `confirmed` or `--confirmed` to the CLI. Calling without `--confirm` only returns
+  a local safety error; it does not generate a server-side proposal. A yes to an
+  unchanged proposal proceeds without another approval question.
+- **MCP on other hosts:** actions marked `always-two-turn` first run without
+  `confirmed`, returning a confirmation message. Relay that message without
+  softening the impact; after a clear yes, repeat the same arguments with
+  `confirmed: true`. For `learning.optimize` (marked `always`), show the issue and
+  credit cost, obtain approval, then call its mapped tool.
 - `learning.approve-job` changes the live prompt: show the before and after first.
 - `learning.optimize`, `learning.reoptimize-job`, `learning.run-job`,
   `learning.resume` cost credits.

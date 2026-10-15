@@ -31,7 +31,7 @@ jobs:
       # The agent brief, playbooks and action list must agree: every action is
       # covered and every action that needs the user's OK is a stop point.
       - name: playbook contract
-        run: sh test/playbook-contract.sh && sh test/cross-host-contract.sh && sh test/activity-ux-contract.sh
+        run: sh test/playbook-contract.sh && sh test/cross-host-contract.sh && sh test/activity-ux-contract.sh && sh test/supervisor-contract.sh
 
       - name: smoke (offline unless BEAM_API_KEY secret is set)
         env:

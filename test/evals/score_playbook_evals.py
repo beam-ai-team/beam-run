@@ -110,6 +110,10 @@ def score(case: dict, plan: dict, check_playbooks: bool) -> list[str]:
     for alternatives in case.get("required", []):
         if not any(a in actions for a in alternatives):
             problems.append(f"missing: {' or '.join(alternatives)}")
+    for action, command in case.get("required_commands", {}).items():
+        commands = [s.get("command") for s in plan.get("steps", []) if normalize(s.get("action")) == action]
+        if not commands or any(c != command for c in commands):
+            problems.append(f"wrong-command: {action} requires {command}")
     for action in case.get("forbidden", []):
         if action in actions:
             problems.append(f"wrong-turn: did {action}")

@@ -108,6 +108,22 @@ SH
 chmod +x "$tmp/bin/curl"
 
 fallback_env="HOME=$tmp BEAM_CONFIG_DIR=$tmp/config BEAM_SESSION_ID=supervisor PATH=$tmp/bin:$PATH BEAM_TEST_CAPTURE=$tmp/body"
+for flags in '' '--confirm wrong-job' '--confirmed true'; do
+  # shellcheck disable=SC2086
+  if env $fallback_env sh "$BEAM" learning approve-job job-1 $flags >"$tmp/approval" 2>&1; then rc=0; else rc=$?; fi
+  [ "$rc" -eq 2 ] || fail "Learning Hub approval accepted missing, wrong or MCP-style confirmation"
+  [ ! -e "$tmp/body" ] || fail "unapproved Learning Hub action reached the API"
+done
+# shellcheck disable=SC2086
+env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" learning approve-job job-1 --confirm job-1 >/dev/null || fail "approved Learning Hub job failed"
+grep -q '/tool/optimize/jobs/job-1/approve' "$tmp/url" || fail "approval targeted the wrong job"
+# shellcheck disable=SC2086
+env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" learning optimize agent-1 issue-1 --confirm issue-1 >/dev/null || fail "approved optimization failed"
+grep -q '/tool/optimize/issues/issue-1/optimize?agentId=agent-1' "$tmp/url" || fail "optimization targeted the wrong issue"
+grep -q '"workspaceId":"workspace-1"' "$tmp/body" || fail "optimization omitted the checked-out workspace"
+grep -q '"userId":"user-1"' "$tmp/body" || fail "optimization omitted the current user"
+ok "Learning Hub CLI rejects MCP confirmation syntax and executes approved targets"
+
 # shellcheck disable=SC2086
 mcp="$(env $fallback_env sh "$BEAM" mcp check --tool task_create)" || fail "healthy MCP tool check failed"
 printf '%s' "$mcp" | grep -q '"available":true' || fail "MCP tool availability missing"

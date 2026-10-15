@@ -29,6 +29,14 @@ class EvalChecks(unittest.TestCase):
         steps[-1]["stop_before"] = True
         self.assertEqual(scorer["score"](case, {"steps": steps}, False), [])
 
+    def test_learning_cli_requires_the_exact_confirmation_target(self):
+        command = "beam learning approve-job job-1 --confirm job-1"
+        case = {"playbooks": [], "required_commands": {"learning.approve-job": command}}
+        for invalid in (None, "beam learning approve-job job-1 --confirmed true",
+                        "beam learning approve-job job-1 --confirm wrong-job"):
+            self.assertTrue(scorer["score"](case, {"steps": [{"action": "learning.approve-job", "command": invalid}]}, False))
+        self.assertEqual(scorer["score"](case, {"steps": [{"action": "learning.approve-job", "command": command}]}, False), [])
+
     def test_generated_tables_include_transitive_reads(self):
         ops = generator["load_operations"]()
         ops["graph.get"]["postRead"] = "graph.nodes"

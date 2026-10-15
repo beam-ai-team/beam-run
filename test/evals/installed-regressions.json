@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "about": "Fresh installed-plugin regressions, including acceptance and refusal of a concrete publication proposal.",
-  "runner_prompt": "You are testing the Beam Run plugin checked out at {plugin_root}. Behave exactly like a coding agent that has this plugin installed and has just received the user request below. Load the public skill at {plugin_root}/beam/skills/beam/SKILL.md and follow it as you would for real, reading only the files it tells you to read for this request. Beam is NOT connected in this test: do not run any beam command or Beam MCP tool, and do not read test/ or specs/. Instead, assume every lookup succeeds and the facts in 'situation' are true, and write down the plan you would carry out. For each request return one JSON object: {\"id\": <id>, \"playbooks\": [playbook file names you followed, in order, without .md; empty if none], \"steps\": [{\"action\": <action id from the playbook Actions tables if one exists, otherwise the exact beam CLI command name such as 'beam agent-builder search-tools', or 'none'>, \"stop_before\": <true if you would stop and wait for the user's OK or answer before this step>, \"why\": <a few words>}], \"first_message\": <the first thing you would say to the user>, \"files_read\": [paths of the plugin files you opened for this request]}. Include every Beam read and write you would do, in order, including lookups that resolve ids. If you would stop and ask the user before an action, set stop_before true on that action's own step. If the request needs no Beam action, return an empty steps list. Return a JSON array of all objects and nothing else.",
+  "about": "Fresh installed-plugin regressions for publication, draft testing and Learning Hub CLI approval.",
+  "runner_prompt": "You are testing the Beam Run plugin checked out at {plugin_root}. Behave exactly like a coding agent that has this plugin installed and has just received the user request below. Load the public skill at {plugin_root}/beam/skills/beam/SKILL.md and follow it as you would for real, reading only the files it tells you to read for this request. Beam is NOT connected in this test: do not run any beam command or Beam MCP tool, and do not read test/ or specs/. Instead, assume every lookup succeeds and the facts in 'situation' are true, and write down the plan you would carry out. For each request return one JSON object: {\"id\": <id>, \"playbooks\": [playbook file names you followed, in order, without .md; empty if none], \"steps\": [{\"action\": <action id from the playbook Actions tables if one exists, otherwise the exact beam CLI command name such as 'beam agent-builder search-tools', or 'none'>, \"stop_before\": <true if you would stop and wait for the user's OK or answer before this step>, \"why\": <a few words>}], \"first_message\": <the first thing you would say to the user>, \"files_read\": [paths of the plugin files you opened for this request]}. Include every Beam read and write you would do, in order, including lookups that resolve ids. If you would stop and ask the user before an action, set stop_before true on that action's own step. If the request needs no Beam action, return an empty steps list. Return a JSON array of all objects and nothing else. For each Learning Hub step, also include a command field containing the exact mapped CLI command and flags you would execute, using the resolved ids in the situation. A proposal to the user is action none, not an executed command. Include future write steps after approval with stop_before true when approval is still needed.",
   "evals": [
     {
       "id": "multi-step-fix-loop",
@@ -134,6 +134,72 @@
         "graph.deploy",
         "task.create-live"
       ]
+    },
+    {
+      "id": "learning-cli-proposal",
+      "request": "Approve the completed Learning Hub job for Support Triage.",
+      "situation": "The session is checked out to Saqib\u2019s Workspace. Support Triage is agent-1. The latest completed job is job-1 and its prompt before and after are available. The exact live prompt change has not yet been shown to the user for confirmation.",
+      "playbooks": [
+        "improve-an-agent-from-feedback"
+      ],
+      "required": [
+        [
+          "learning.job"
+        ],
+        [
+          "learning.approve-job"
+        ]
+      ],
+      "must_stop_before": [
+        "learning.approve-job"
+      ],
+      "required_commands": {
+        "learning.approve-job": "beam learning approve-job job-1 --confirm job-1"
+      }
+    },
+    {
+      "id": "learning-cli-approved",
+      "request": "Yes, apply that prompt change.",
+      "situation": "The session is checked out to Saqib\u2019s Workspace. The previous assistant message showed the before and after prompt for completed job job-1 on Support Triage (agent-1), explained it changes the live tool prompt, and asked for approval. The user is answering that question. The job and proposed change are unchanged.",
+      "playbooks": [
+        "improve-an-agent-from-feedback"
+      ],
+      "required": [
+        [
+          "learning.job"
+        ],
+        [
+          "learning.approve-job"
+        ]
+      ],
+      "no_stop_before": [
+        "learning.approve-job"
+      ],
+      "required_commands": {
+        "learning.approve-job": "beam learning approve-job job-1 --confirm job-1"
+      }
+    },
+    {
+      "id": "learning-cli-optimize",
+      "request": "Run the tuner on this issue.",
+      "situation": "The session is checked out to Saqib\u2019s Workspace. Support Triage is agent-1 and the selected issue is issue-1. No proposal describing the issue and credit-consuming optimization has been approved.",
+      "playbooks": [
+        "improve-an-agent-from-feedback"
+      ],
+      "required": [
+        [
+          "learning.issue"
+        ],
+        [
+          "learning.optimize"
+        ]
+      ],
+      "must_stop_before": [
+        "learning.optimize"
+      ],
+      "required_commands": {
+        "learning.optimize": "beam learning optimize agent-1 issue-1 --confirm issue-1"
+      }
     }
   ]
 }
