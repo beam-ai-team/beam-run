@@ -21,16 +21,15 @@ ok "snapshot hashes match the recorded Beam Copilot source"
 grep -q '40fdd5687a7a4e9122c27d8b175235107c096a58' beam/references/copilot-baseline/README.md || fail "source commit missing"
 ok "source commit is recorded"
 
-printf '\n=== universal supervisor runtime ===\n'
-[ -s beam/skills/beam/SKILL.md ] || fail "missing universal Beam Run skill"
+printf '\n=== Beam Run agent ===\n'
+[ -s beam/skills/beam/SKILL.md ] || fail "missing Beam Run agent brief"
 [ -s beam/skills/setup/SKILL.md ] || fail "missing setup skill"
-grep -q 'only public runtime entry point' beam/skills/beam/SKILL.md || fail "Beam Run is not the only public runtime entry"
-grep -q 'mapped CLI fallback' beam/skills/beam/SKILL.md || fail "completion fallback missing"
-grep -q 'Do \*\*not\*\* load the raw Copilot' beam/skills/beam/SKILL.md || fail "runtime still depends on source snapshots"
+grep -q 'run its CLI fallback with the same' beam/skills/beam/SKILL.md || fail "completion fallback missing"
+grep -q 're-read current state' beam/skills/beam/SKILL.md || fail "ambiguous-write reconciliation missing"
 grep -q 'For a read-only operation, say that no changes will be made' beam/skills/beam/SKILL.md || fail "read-only activity boundary missing"
-grep -q 'name the exact entity and resulting state' beam/skills/beam/SKILL.md || fail "write-result activity contract missing"
-[ -s beam/runtime/routes.md ] || fail "missing generated route index"
-ok "universal supervisor and runtime gates are present"
+grep -q 'the exact entity and resulting state' beam/skills/beam/SKILL.md || fail "write-result activity contract missing"
+[ "$(find beam/playbooks -name '*.md' | wc -l | tr -d ' ')" -eq 16 ] || fail "expected 16 playbooks"
+ok "agent brief and playbooks are present"
 
 printf '\n=== operation and fallback contracts ===\n'
 grep -q 'surfaceOrder: \[mcp, cli\]' beam/contracts/operations.yaml || fail "MCP-first order missing"

@@ -38,11 +38,15 @@ Start with the smallest action that fits the job:
 | An agent's process needs to be created or changed | **Agent builder + CLI** to design, deploy, and explicitly publish its Flow |
 | Your application, service, or webhook needs Beam | **Public API** |
 
-Beam Run now exposes one public supervisor skill across every host. It loads only
-the compact policy card needed for the request, while retaining the Beam Copilot
-baseline as a pinned audit source rather than re-reading raw prompts at runtime.
-MCP remains the preferred transport. Every registered operation has a CLI
-fallback, so a missing or malformed MCP tool does not abandon the requested work.
+Beam Run is one agent with playbooks. The single public `beam` skill is the
+agent's brief: its standing rules (workspace, safety, grounding, how it reports
+progress) and a list of 16 playbooks. Each playbook covers one situation — such as
+"find out what happened", "clear what's waiting on me" or "build a new agent" —
+with what to check first, the steps, where to stop and ask, and how to prove the job
+is done. Every step names an action from one shared action list, which holds how
+each action runs, its CLI fallback, and whether it needs the user's OK. MCP remains
+the preferred transport; every action has a CLI fallback, so a missing or malformed
+MCP tool does not abandon the requested work.
 
 The CLI still owns setup, sign-in, workspace selection, diagnostics, and the
 stdio bridge. It also provides deterministic fallback commands for tasks,
@@ -77,8 +81,11 @@ Then follow the instructions in that document for your agent environment.
 
 ## Docs
 
-- Universal runtime: [`beam/runtime/routes.md`](./beam/runtime/routes.md)
-- Copilot baseline and parity: [`beam/references/copilot-baseline/README.md`](./beam/references/copilot-baseline/README.md)
+- Agent brief: [`beam/skills/beam/SKILL.md`](./beam/skills/beam/SKILL.md)
+- Playbooks: [`beam/playbooks/`](./beam/playbooks/)
+- Action list: [`beam/contracts/operations.yaml`](./beam/contracts/operations.yaml)
+- Architecture: [`specs/agent-playbook-architecture.md`](./specs/agent-playbook-architecture.md)
+- Saved Copilot copy (change warning only): [`beam/references/copilot-baseline/README.md`](./beam/references/copilot-baseline/README.md)
 - Supervisor product contract: [`specs/supervisor-product-contract.md`](./specs/supervisor-product-contract.md)
 - Supervisor testing plan: [`specs/supervisor-testing-plan.md`](./specs/supervisor-testing-plan.md)
 - Beam product / Academy: https://docs.beam.ai

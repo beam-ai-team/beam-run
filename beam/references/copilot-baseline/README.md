@@ -7,11 +7,12 @@ Source root:
 
 `src/mastra/agents/copilot`
 
-The snapshot exists so Beam Run specialists are derived from the product
-Copilot's routing, prompt, tool-ownership, and confirmation rules instead of
-being independently invented. Do not edit the TypeScript snapshot to adapt it
-for a coding-agent host. Put host-specific differences in the relevant
-`SKILL.md` and record them in `beam/contracts/copilot-parity.yaml`.
+Beam Run no longer copies its instructions from this snapshot: the agent brief and
+playbooks are written by hand (see `specs/agent-playbook-architecture.md`). The
+snapshot is kept only as a change warning. When Copilot's product rules change,
+`test/copilot-source-drift.sh` reports it, and we decide what to carry into the
+playbooks or the action list. Never edit the TypeScript snapshot by hand; refresh
+it from the source commit and update `SHA256SUMS` together.
 
 Snapshot mapping:
 
@@ -25,13 +26,6 @@ Snapshot mapping:
 | `general-agent/prompt.ts` | `sub-agents/general-agent/prompt.ts` |
 | `builder/prompt.ts` | `sub-agents/builder/prompt.ts` |
 | `pages/prompts.ts` | `sub-agents/pages/prompts.ts` |
-
-Parity has two gates:
-
-1. Source drift: snapshot hashes must remain stable until deliberately refreshed.
-2. Behavior: routing, required reads, confirmation, tool choice, and response
-   behavior must match the corresponding Copilot specialist after applying the
-   documented host adapter.
 
 When the Copilot source is available locally, run `sh test/copilot-source-drift.sh`
 to compare every snapshot byte-for-byte with its canonical source. To inspect a

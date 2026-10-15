@@ -162,7 +162,7 @@ def handle_degraded(msg):
             "result": {
                 "protocolVersion": PROTOCOL,
                 "capabilities": {"tools": {"listChanged": True}},
-                "serverInfo": {"name": "beam (setup required)", "version": "0.6.0"},
+                "serverInfo": {"name": "beam (setup required)", "version": "0.7.0"},
                 "instructions": SETUP_HINT,
             },
         }

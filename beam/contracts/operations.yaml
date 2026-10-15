@@ -1,8 +1,10 @@
 version: 1
 description: >-
-  Supervisor-owned operation catalog. MCP names track the Beam server; CLI
-  commands are the required fallback surface. A command marked planned must be
-  implemented before that operation is considered complete in Beam Run.
+  Every Beam action the agent can take. Playbooks name these ids; this file is
+  the one place that says how each action runs (MCP first, then the CLI
+  fallback), how risky it is, whether it needs the user's OK, what to re-read
+  afterwards, and any practical notes. A command marked planned must be
+  implemented before that action is considered complete in Beam Run.
 defaults:
   surfaceOrder: [mcp, cli]
   workspaceRequired: true
@@ -11,13 +13,12 @@ defaults:
 
 operations:
   user.current:
-    specialist: general-workspace
     safety: read
     mcp: getCurrentUser
     cli: beam whoami
     status: ready
+    notes: "Gives the user id that Learning Hub writes need. Never invent a user id."
   workspace.create:
-    specialist: general-workspace
     safety: external-effect
     workspaceRequired: false
     confirmation: explicit-workspace-create-intent
@@ -25,20 +26,20 @@ operations:
     cli: beam workspace create <name> [--domain domain] [--icon-src url]
     postRead: user.current
     status: ready
+    notes: "Creating a workspace does not switch to it."
   agent.list:
-    specialist: general-workspace
     safety: read
     mcp: listAgents
     cli: beam agents list
     status: ready
+    notes: "When more than one agent matches a name, ask which one; never pick by display name alone."
   agent.get:
-    specialist: agent-config
     safety: read
     mcp: getAgentGraph
     cli: beam agents get <agentId>
     status: ready
+    notes: "Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics."
   agent.delete:
-    specialist: agent-config
     safety: destructive-write
     confirmation: explicit-agent-name-and-id
     mcp: null
@@ -46,61 +47,57 @@ operations:
     preRead: agent.get
     postRead: agent.list
     status: ready
+    notes: "Irreversible. Confirm with the agent's exact name and id."
   agent.tools:
-    specialist: agent-config
     safety: read
     mcp: beam_get_agent_tools
     cli: beam agents tools <agentId>
     status: ready
+    notes: "Report toolName, description and requiresConsent per tool. Each tool's toolFunctionName is the key for integration.is-connected."
   agent.sub-agents:
-    specialist: agent-config
     safety: read
     mcp: beam_list_sub_agents
     cli: beam agents sub-agents <agentId>
     status: ready
   agent.files:
-    specialist: agent-config
     safety: read
     mcp: beam_list_context_files
     cli: beam agents files <agentId>
     status: ready
+    notes: "The result is a list whose first entry holds the files."
   agent.history:
-    specialist: agent-config
     safety: read
     mcp: beam_get_graph_history
     cli: beam agents history <agentId>
     status: ready
   agent.update-metadata:
-    specialist: agent-config
     safety: reversible-write
     mcp: agent_update_metadata
     cli: beam agent-builder update-metadata <agentId> ...
     postRead: agent.get
     status: ready
+    notes: "Changes name, description, suggested prompts, personality and restrictions. The model of a step changes with graph.update-node; the agent's icon and category cannot be changed from here, so say so and link beam://agent.config?agentId=<id>."
   agent.remove-tools:
-    specialist: agent-config
     safety: destructive-write
     confirmation: explicit
     mcp: agent_remove_tools
     cli: beam agents remove-tools <agentId> <payloadFile> --confirm <agentId>
     postRead: agent.tools
     status: ready
+    notes: "Show the exact list first; removing more than five always needs a second look."
   agent.external-files-add:
-    specialist: agent-config
     safety: reversible-write
     mcp: agent_upload_external_file
     cli: beam agents external-files-add <agentId> <payloadFile>
     postRead: agent.files
     status: ready
   agent.upload-file:
-    specialist: agent-config
     safety: reversible-write
     mcp: agent_upload_context_file
     cli: beam agents upload-file <agentId> <localFile>
     postRead: agent.files
     status: ready
   agent.context-file-delete:
-    specialist: agent-config
     safety: destructive-write
     confirmation: always
     mcp: agent_delete_context_file
@@ -108,7 +105,6 @@ operations:
     postRead: agent.files
     status: ready
   agent.external-files-delete:
-    specialist: agent-config
     safety: destructive-write
     confirmation: always
     mcp: agent_delete_external_file
@@ -116,199 +112,280 @@ operations:
     postRead: agent.files
     status: ready
   agent.change-file-agent:
-    specialist: agent-config
     safety: reversible-write
     mcp: agent_change_file_agent
     cli: beam agents change-file-agent <agentId> <payloadFile>
     status: ready
   agent.transcribe:
-    specialist: agent-config
     safety: read
     mcp: agent_transcribe_audio
     cli: beam agents transcribe <localAudioFile>
     status: ready
 
   graph.get:
-    specialist: agent-flow
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-graph <agentId>
     status: ready
+    notes: "Large (around 136 KB). Prefer graph.nodes for structure; fetch the full graph only for a node id or when the user asks for the whole thing."
   graph.nodes:
-    specialist: agent-flow
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-nodes <agentId>
     status: ready
+    notes: "Light list of node id and objective. The entry node has the objective 'Entry Node'."
   graph.node:
-    specialist: agent-flow
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-node <agentId> <nodeId>
     status: ready
   graph.verify-links:
-    specialist: agent-flow
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder verify-links <agentId>
     status: ready
+    notes: "Run after every change; report any broken link by node."
   graph.deploy:
-    specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder deploy <specFile>
     postRead: graph.verify-links
     status: ready
+    notes: "Lint and run with --dry-run --summary first. With --agent-id it rewrites the whole graph: include every node to keep; node ids change and an existing trigger is deleted. Stays a draft unless --publish is passed, which needs graph.publish's confirmation."
   graph.publish:
-    specialist: agent-builder
     safety: external-effect
     confirmation: explicit-publish-intent
     mcp: null
     cli: beam agent-builder publish <graphId>
     postRead: graph.get
     status: ready
+    notes: "Makes the draft live. Only on a clear request to publish or go live."
   graph.update-prompt:
-    specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-prompt <agentId> <nodeId> <promptFile>
     postRead: graph.node
     status: ready
+    notes: "Smallest change for prompt or tone edits."
   graph.update-params:
-    specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-params <agentId> <nodeId> ...
     postRead: graph.node
     status: ready
   graph.update-consent:
-    specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-consent <agentId> <nodeId> <true|false>
     postRead: graph.node
     status: ready
+    notes: "A setting on an existing integration step, not a new step: the run asks for consent right before that tool runs."
   graph.add-node:
-    specialist: agent-builder
     safety: reversible-write
     mcp: null
     cli: beam agent-builder add-node <agentId> <nodeFile> ...
     postRead: graph.verify-links
     status: ready
+    notes: "Rewrites the graph: node ids change and an existing trigger is deleted. Re-read nodes afterwards and re-create the trigger."
   graph.remove-node:
-    specialist: agent-builder
     safety: destructive-write
     confirmation: explicit
     mcp: null
     cli: beam agent-builder remove-node <agentId> <nodeId>
     postRead: graph.verify-links
     status: ready
+    notes: "Rewrites the graph: node ids change and an existing trigger is deleted. Re-read nodes afterwards."
   graph.test-node:
-    specialist: agent-builder
     safety: reversible-write
     mcp: testGraphNode
     cli: beam agent-builder test-node <agentId> <graphId> <nodeId> <paramsJson>
     status: ready
+    notes: "Runs one step with explicit inputs; needs agentId, graphId, nodeId and a JSON params object."
   graph.triggers:
-    specialist: agent-flow
     safety: read
     mcp: getAgentGraph
-    cli: beam agent-builder get-triggers <entryNodeId>
+    cli: beam agent-builder get-triggers <agentId> <entryNodeId>
     status: ready
+    notes: "Needs the entry node id from graph.nodes as well as the agent id."
   graph.webhook:
-    specialist: agent-flow
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-webhook <agentId>
     status: ready
+  graph.validate:
+    safety: read
+    mcp: null
+    cli: beam agent-builder validate
+    status: ready
+    notes: "Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure."
+  graph.search-tools:
+    safety: read
+    mcp: null
+    cli: beam agent-builder search-tools <keyword> [--managed-only]
+    status: ready
+    notes: "Search before adding any integration step; never invent a toolFunctionName. Prefer nango_cloud, then pipedream; ask before choosing a custom fallback."
+  graph.search-agents:
+    safety: read
+    mcp: null
+    cli: beam agent-builder search-agents <keyword>
+    status: ready
+    notes: "Use before building, to avoid duplicating an existing agent."
+  graph.attach-tool:
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder attach-tool <agentId> <graphId> <nodeId> <toolConfigFile>
+    postRead: graph.verify-links
+    status: ready
+  graph.update-node:
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder update-node <agentId> <graphId> <nodeFile>
+    postRead: graph.node
+    status: ready
+    notes: "For a step's model or other configuration. Read the full node first and send it back whole."
+  graph.update-edge:
+    safety: reversible-write
+    mcp: null
+    cli: beam agent-builder update-edge <edgeId> [--condition TEXT]
+    postRead: graph.verify-links
+    status: ready
+  graph.trigger-actions:
+    safety: read
+    mcp: null
+    cli: beam agent-builder trigger-actions <integrationIdentifier>
+    status: ready
+    notes: "Actions differ per workspace; always look them up. Gives the integrationProviderId for an integration trigger; a timer needs none."
+  graph.create-trigger:
+    safety: external-effect
+    confirmation: explicit
+    mcp: null
+    cli: beam agent-builder create-trigger <triggerFile>
+    postRead: graph.triggers
+    status: ready
+    notes: "Once active, the agent starts runs on its own. One trigger per agent: delete the old one first. Add it last, after the graph is settled, because a graph rewrite deletes it."
+  graph.update-trigger:
+    safety: external-effect
+    confirmation: explicit
+    mcp: null
+    cli: beam agent-builder update-trigger <triggerId> <triggerFile>
+    postRead: graph.triggers
+    status: ready
+  graph.toggle-trigger:
+    safety: external-effect
+    confirmation: explicit
+    mcp: null
+    cli: beam agent-builder toggle-trigger <triggerId>
+    postRead: graph.triggers
+    status: ready
+    notes: "Switching a trigger on makes the agent start runs on its own; say which way it is switching."
+  graph.delete-trigger:
+    safety: destructive-write
+    confirmation: always
+    mcp: null
+    cli: beam agent-builder delete-trigger <triggerId>
+    postRead: graph.triggers
+    status: ready
+  graph.create-webhook:
+    safety: external-effect
+    confirmation: explicit
+    mcp: null
+    cli: beam agent-builder create-webhook <agentId>
+    postRead: graph.webhook
+    status: ready
+    notes: "Anyone with the URL can start runs; treat it as a secret."
+  graph.delete-webhook:
+    safety: destructive-write
+    confirmation: always
+    mcp: null
+    cli: beam agent-builder delete-webhook <agentId>
+    postRead: graph.webhook
+    status: ready
 
   task.list:
-    specialist: global-tasks
     safety: read
     mcp: listAgentTasks
     cli: beam tasks list
     status: ready
+    notes: "For a count read totalCount, never the number of rows returned. isDraftTask true means test runs and false means real runs; without it the list mixes both. The agent id is at agentGraph.agent.id. Use a small page size."
   task.statuses:
-    specialist: global-tasks
     safety: read
     mcp: beam_get_task_statuses
     cli: beam tasks statuses [agentIds]
     status: ready
+    notes: "Counts by status; pass agent ids to narrow. There is no single success rate across all agents, so never invent one."
   task.agents:
-    specialist: global-tasks
     safety: read
     mcp: beam_list_task_agents
     cli: beam tasks agents
     status: ready
   task.latest:
-    specialist: agent-tasks
     safety: read
     mcp: beam_get_latest_task_executions
     cli: beam tasks latest <agentId> [pageSize]
     status: ready
+    notes: "Preferred over task.list for 'show me the latest runs' on one agent."
   task.get:
-    specialist: agent-tasks
     safety: read
     mcp: getTaskDetails
     cli: beam tasks get <taskId>
     status: ready
+    notes: "Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId."
   task.create-live:
-    specialist: agent-tasks
     safety: external-effect
     confirmation: required-if-production-side-effect
     mcp: createAgentTask
     cli: beam tasks create <agentId> <input>
     postRead: task.get
     status: ready
+    notes: "Needs a concrete agent id; send the input as an object, not a pre-stringified value. Check the returned graph is the active graph."
   task.create-draft:
-    specialist: agent-tasks
     safety: reversible-write
     mcp: null
     cli: beam tasks test <agentId> <input>
     postRead: task.get
     status: ready
+    notes: "Runs the unpublished draft. For a batch, check the first task's agentGraphId before sending the rest."
   task.submit-input:
-    specialist: inbox
     safety: reversible-write
     confirmation: confirm-proposed-values
     mcp: submitUserInput
     cli: beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>
     postRead: task.get
     status: ready
+    notes: "Answer the paused step's userQuestions. Never guess a value; propose it and get it confirmed."
   task.retry:
-    specialist: agent-tasks
     safety: external-effect
     confirmation: required-if-production-side-effect
     mcp: retryTaskExecution
     cli: beam tasks retry <taskId> [--task-node-id <taskNodeId> --feedback <text>]
     postRead: task.get
     status: ready
+    notes: "Retry from a step needs one task id plus the taskNodeId and feedback text. Confirm before retrying more than five."
   task.approve:
-    specialist: inbox
     safety: external-effect
     confirmation: always
     mcp: approveTaskExecution
     cli: beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>
     postRead: task.get
     status: ready
+    notes: "Before asking, show what the agent is about to do: the tool and its parameters from the paused step."
   task.reject:
-    specialist: inbox
     safety: destructive-write
     confirmation: always
     mcp: rejectTaskExecution
     cli: beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason <text>]
     postRead: task.get
     status: ready
+    notes: "Ends the task."
   task.abort:
-    specialist: agent-tasks
     safety: destructive-write
     confirmation: always
     mcp: null
     cli: beam tasks abort <taskId> --confirm <taskId> [--reason <text>]
     postRead: task.get
     status: ready
+    notes: "Stops a running task; different from task.cancel-wait."
   task.delete:
-    specialist: agent-tasks
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -316,21 +393,19 @@ operations:
     postRead: task.list
     status: ready
   task.rate:
-    specialist: agent-tasks
     safety: reversible-write
     mcp: rateTaskOutput
     cli: beam tasks rate <taskId> <up|down> [feedback]
     status: ready
   task.cancel-wait:
-    specialist: agent-tasks
     safety: destructive-write
     confirmation: always
     mcp: task_cancel_wait_node
     cli: beam tasks cancel-wait <taskNodeId> <agentId> --confirm <taskNodeId>
     postRead: task.get
     status: ready
+    notes: "Only for a step whose status is WAITING. The agent id is agentGraph.agentId from task.get."
   task.update-tool:
-    specialist: agent-config
     safety: reversible-write
     mcp: task_update_agent_tool
     cli: beam tasks update-tool <toolFunctionName> <payloadFile>
@@ -338,102 +413,98 @@ operations:
     status: ready
 
   inbox.list:
-    specialist: inbox
     safety: read
     mcp: null
     cli: beam inbox list
     status: ready
+    notes: "Each row carries agentId and agentTaskId; resolve the task from those."
   inbox.unread-count:
-    specialist: inbox
     safety: read
     mcp: null
     cli: beam inbox unread-count
     status: ready
   inbox.mark-read:
-    specialist: inbox
     safety: reversible-write
     mcp: null
     cli: beam inbox mark-read <notificationId>
     status: ready
   inbox.delete:
-    specialist: inbox
     safety: destructive-write
     confirmation: always
     mcp: null
     cli: beam inbox delete <notificationId> --confirm <notificationId>
     status: ready
+    notes: "Confirm every delete, and especially a sweep of many notifications."
 
   integration.list:
-    specialist: integrations
     safety: read
     mcp: null
     cli: beam integrations list
     status: ready
+    notes: "The catalog can be large; filter and use a small page size."
   integration.categories:
-    specialist: integrations
     safety: read
     mcp: beam_list_integration_categories
     cli: beam integrations categories
     status: ready
   integration.connected:
-    specialist: integrations
     safety: read
     mcp: null
     cli: beam integrations connected
     status: ready
+    notes: "Only status 'active' counts as connected; pending and inactive do not."
   integration.connections:
-    specialist: integrations
     safety: read
     mcp: null
     cli: beam integrations connections <integrationId>
     status: ready
+    notes: "Needs the integration UUID from integration.connected, not a slug such as 'gmail' (that returns 400). Offer to tidy up when a provider has two or more active connections."
   integration.is-connected:
-    specialist: integrations
     safety: read
     mcp: beam_is_integration_connected
     cli: beam integrations is-connected <toolFunctionName>
     status: ready
+    notes: "Workspace connection state. A step's own isIntegrationConnected is per-agent wiring; never infer one from the other."
   integration.connect:
-    specialist: integrations
     safety: external-effect
     confirmation: required-if-credentials-or-external-effect
     mcp: null
     cli: beam integrations connect <payloadFile>
     status: ready
+    notes: "OAuth providers must be finished by the user in the browser: link beam://integrations?provider=<name>. Never ask for a secret in chat or echo one back; credentials go only in a local payload file. A custom integration uses provider custom with identifier httpCustomAuth (token) or httpBasicAuth (basic)."
   integration.update:
-    specialist: integrations
     safety: reversible-write
     mcp: integration_update_connection
     cli: beam integrations update <payloadFile>
     postRead: integration.connections
     status: ready
+    notes: "providerId is the connection row id, not the catalog integrationId."
   integration.remove:
-    specialist: integrations
     safety: destructive-write
     confirmation: always
     mcp: null
     cli: beam integrations remove <providerId> --confirm <providerId>
     status: ready
+    notes: "providerId is the connection row id, not the catalog integrationId."
   integration.set-default:
-    specialist: integrations
     safety: reversible-write
     mcp: null
     cli: beam integrations set-default <providerId> <integrationId>
     status: ready
+    notes: "providerId is the connection row id, not the catalog integrationId."
   integration.custom-create:
-    specialist: integrations
     safety: reversible-write
     mcp: null
     cli: beam integrations custom-create <payloadFile>
     status: ready
+    notes: "Creates an unconnected definition; follow with integration.connect. authType is none, token, basic or oauth (there is no 'apiKey'); token also needs apiKeyType. Resolve the category with integration.categories; never invent its id."
   integration.custom-update:
-    specialist: integrations
     safety: reversible-write
     mcp: null
     cli: beam integrations custom-update <id> <payloadFile>
     status: ready
+    notes: "A full replace, not a partial change."
   integration.custom-remove:
-    specialist: integrations
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -441,94 +512,89 @@ operations:
     status: ready
 
   template.list:
-    specialist: templates
     safety: read
     mcp: null
     cli: beam templates list
     status: ready
+    notes: "Rows use title and shortDescription. count is the full library total: page with pageNum and never present one page as the whole library."
   template.categories:
-    specialist: templates
     safety: read
     mcp: beam_list_template_categories
     cli: beam templates categories
     status: ready
+    notes: "Resolve a category name to its id before filtering."
   template.get:
-    specialist: templates
     safety: read
     mcp: null
     cli: beam templates get <templateId>
     status: ready
   template.prerequisites:
-    specialist: templates
     safety: read
     mcp: beam_get_template_with_prerequisites
     cli: beam templates get <templateId> + beam integrations connected
     status: ready
+    notes: "missingIntegrations is the 'what do I connect first' answer."
   template.recommend:
-    specialist: templates
     safety: read
     mcp: null
     cli: beam templates recommend [categoryId]
     status: ready
+    notes: "Prefer this over keyword search for 'what should I build?'."
   template.create-agent:
-    specialist: templates
     safety: reversible-write
     mcp: null
     cli: beam templates create-agent <templateId>
     postRead: agent.get
     status: ready
+    notes: "Read the full template first and pass its graph as is (a nested graph-and-tools object). The new agent is a draft."
 
   analytics.get:
-    specialist: agent-analytics
     safety: read
     mcp: getAgentAnalytics
     cli: beam analytics get <agentId> [startDate] [endDate]
     status: ready
+    notes: "Dates as Y-m-d. With no range given, use the agent's createdAt to today, not the current month. Read figures from currentPeriod and changes from metricsDelta. There is no per-tool failure figure; it has to be worked out from failed runs."
   analytics.export:
-    specialist: agent-analytics
     safety: reversible-write
     mcp: null
     cli: beam analytics export <agentId> <startDate> <endDate>
     status: ready
+    notes: "Returns a shareable file link."
 
   view.list:
-    specialist: views
     safety: read
     mcp: null
     cli: beam views list
     status: ready
   view.get:
-    specialist: views
     safety: read
     mcp: null
     cli: beam views get <viewId>
     status: ready
+    notes: "Read the column schema before explaining records."
   view.records:
-    specialist: views
     safety: read
     mcp: null
     cli: beam views records <viewId>
     status: ready
+    notes: "pageSize at most 100; supports where, sort and fields."
   view.export:
-    specialist: views
     safety: reversible-write
     mcp: null
     cli: beam views export <viewId>
     status: ready
   view.linked-records:
-    specialist: views
     safety: read
     mcp: beam_list_linked_records
     cli: beam views linked-records <viewId> <columnId> <numericRecordId>
     status: ready
+    notes: "Needs the link column id and the numeric record id."
   view.create:
-    specialist: views
     safety: reversible-write
     mcp: view_create
     cli: beam views create <payloadFile>
     status: ready
   view.delete:
-    specialist: views
     safety: destructive-write
     confirmation: always
     mcp: view_delete
@@ -536,21 +602,20 @@ operations:
     postRead: view.list
     status: ready
   view.add-column:
-    specialist: views
     safety: reversible-write
     mcp: view_create_column
     cli: beam views add-column <viewId> <payloadFile>
     postRead: view.get
     status: ready
+    notes: "Name: letters, numbers and underscore, up to 60 characters. A non-link column needs the feeding agent's node id and parameter; if they cannot be resolved with confidence, do not guess: link beam://views?viewId=<id>."
   view.update-column:
-    specialist: views
     safety: reversible-write
     mcp: view_update_column
     cli: beam views update-column <viewId> <columnId> <fullPayloadFile>
     postRead: view.get
     status: ready
+    notes: "Send the full column, keeping the required mapping fields."
   view.delete-column:
-    specialist: views
     safety: destructive-write
     confirmation: always
     mcp: view_delete_column
@@ -559,145 +624,139 @@ operations:
     status: ready
 
   learning.issues:
-    specialist: learning-hub
     safety: read
     mcp: optimizeTool
     cli: beam learning issues <agentId>
     status: ready
+    notes: "Tabs: issues (active), review (completed jobs awaiting a decision), archived. Default to issues."
   learning.issue:
-    specialist: learning-hub
     safety: read
     mcp: getToolOptimizationStatus
     cli: beam learning issue <agentId> <issueId>
     status: ready
+    notes: "Name the tool and its bucket when reporting an issue."
   learning.feedbacks:
-    specialist: learning-hub
     safety: read
     mcp: lh_get_issue_feedbacks
     cli: beam learning feedbacks <agentId> <issueId>
     status: ready
   learning.issue-jobs:
-    specialist: learning-hub
     safety: read
     mcp: lh_get_issue_jobs
     cli: beam learning issue-jobs <agentId> <issueId>
     status: ready
   learning.trend:
-    specialist: learning-hub
     safety: read
     mcp: lh_get_accuracy_trend
     cli: beam learning trend <agentId> [startDate endDate]
     status: ready
+    notes: "The default answer to 'how accurate is it?'."
   learning.tools:
-    specialist: learning-hub
     safety: read
     mcp: lh_get_learning_tools
     cli: beam learning tools <agentId>
     status: ready
   learning.tool:
-    specialist: learning-hub
     safety: read
     mcp: lh_get_tool_detail
     cli: beam learning tool <agentId> <toolFunctionName>
     status: ready
   learning.config:
-    specialist: learning-hub
     safety: read
     mcp: lh_get_tuner_config
     cli: beam learning config <agentId>
     status: ready
   learning.set-config:
-    specialist: learning-hub
     safety: reversible-write
     confirmation: always-two-turn
     mcp: lh_set_tuner_config
     cli: beam learning set-config <agentId> <payloadFile> --confirm <agentId>
     postRead: learning.config
     status: ready
+    notes: "autoApply true means future jobs skip manual review."
   learning.submit-feedback:
-    specialist: learning-hub
     safety: additive-write
     mcp: lh_submit_feedback
     cli: beam learning submit-feedback <payloadFile>
     status: ready
   learning.submit-task-feedback:
-    specialist: learning-hub
     safety: additive-write
     mcp: lh_submit_task_feedback
     cli: beam learning submit-task-feedback <payloadFile>
     status: ready
+    notes: "May return isAmbiguous true; if so, say which steps it could apply to."
   learning.merge:
-    specialist: learning-hub
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_merge_issues
     cli: beam learning merge <payloadFile> --confirm merge
     status: ready
+    notes: "Only issues on the same tool can be merged."
   learning.optimize:
-    specialist: learning-hub
     safety: external-effect
     confirmation: always
     mcp: optimizeTool
     cli: beam learning optimize <agentId> <issueId> --confirm <issueId>
     status: ready
+    notes: "Costs credits. Needs workspaceId and userId (from user.current)."
   learning.discard:
-    specialist: learning-hub
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_discard_issue
     cli: beam learning discard <agentId> <issueId> --confirm <issueId>
     status: ready
+    notes: "Archives the feedback and closes the issue. Needs workspaceId and userId (from user.current)."
   learning.job:
-    specialist: learning-hub
     safety: read
     mcp: getToolOptimizationStatus
     cli: beam learning job <threadId>
     status: ready
+    notes: "Always report the job status, and scoreChange when completed."
   learning.approve-job:
-    specialist: learning-hub
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_approve_job
     cli: beam learning approve-job <threadId> --confirm <threadId>
     postRead: learning.job
     status: ready
+    notes: "Applies the proposed prompt to the live tool; not directly reversible. Show the prompt before and after first."
   learning.reject-job:
-    specialist: learning-hub
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_reject_job
     cli: beam learning reject-job <threadId> --keep-feedbacks <true|false> --confirm <threadId>
     postRead: learning.job
     status: ready
+    notes: "keepFeedbacks true reuses the feedback; false archives it."
   learning.reoptimize-job:
-    specialist: learning-hub
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_reoptimize_job
     cli: beam learning reoptimize-job <threadId> --feedback <text> --confirm <threadId>
     postRead: learning.job
     status: ready
+    notes: "Costs credits."
   learning.cancel-job:
-    specialist: learning-hub
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_cancel_job
     cli: beam learning cancel-job <threadId> --confirm <threadId>
     postRead: learning.job
     status: ready
+    notes: "Releases the feedback back to its issue."
   learning.run-job:
-    specialist: learning-hub
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_run_job
     cli: beam learning run-job <threadId> --confirm <threadId>
     postRead: learning.job
     status: ready
+    notes: "Costs credits."
   learning.resume:
-    specialist: learning-hub
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_resume_on_hold_jobs
     cli: beam learning resume <agentId> --confirm <agentId>
     postRead: learning.issues
     status: ready
+    notes: "Costs credits: starts one on-hold job per tool."

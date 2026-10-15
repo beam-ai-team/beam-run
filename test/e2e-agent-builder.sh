@@ -45,7 +45,7 @@ grep -rq "python3 scripts/beam.py" "$ROOT/beam/internal/agent-builder" \
   && bad "docs still use the unresolvable relative path" || ok "no relative-path invocations left in docs"
 
 group "conversational flow approval"
-SKILL="$ROOT/beam/internal/agent-builder/SKILL.md"
+SKILL="$ROOT/beam/playbooks/build-a-new-agent.md"
 FLOW="$ROOT/beam/internal/agent-builder/references/conversation-flow.md"
 grep -q "A Mermaid diagram" "$SKILL" && ok "new flows require a Mermaid proposal" || bad "no Mermaid proposal rule"
 grep -q "list of the integrations" "$SKILL" && ok "new flows name integrations" || bad "no integration-list rule"
