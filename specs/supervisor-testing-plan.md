@@ -60,7 +60,7 @@ run plus their read-after-write verification.
 | Inbox | List/unread count; mark read; explain notification; submit requested input; approve/reject consent; delete | Underlying task/node is read first; proposed values and consent are confirmed; state is re-read |
 | Agent flow | Read graph/nodes/node; trigger and webhook inspection; link verification; graph history | Explanation follows trigger → path → branches/waits → exit; no mutation from read-only skill |
 | Agent builder | New draft; metadata update; prompt/parameter/node/edge/tool/consent changes; trigger/webhook; test; publish | Existing builder suite passes; smallest patch used; draft default preserved; publish explicit |
-| Agent config | Metadata; tools; sub-agents; context files; upload/URL attach; reassign/remove; agent deletion | Copilot-supported fields only; file/tool removals confirmed; post-write lists match |
+| Agent config | Metadata; tools; sub-agents; context files; upload/URL attach; reassign/remove; agent deletion | Only fields the action list supports; file/tool removals confirmed; post-write lists match |
 | Integrations | Catalog/categories; connected state; connection list; connect/update/default/remove; custom create/update/remove | IDs resolved from reads; credentials only in payload files; no secrets in chat/history; removals confirmed |
 | Templates | Categories/list/detail/recommendations/prerequisites; create agent | Full template read before create; prerequisites stated; new agent remains draft unless separately published |
 | Analytics | Default and explicit date ranges; metrics; task drill-down; graph-history correlation; export | Exact range and metric labels reported; causal claims supported by drill-down data |
@@ -89,7 +89,6 @@ Run from the repository root:
 ```sh
 sh test/playbook-contract.sh
 sh test/supervisor-contract.sh
-sh test/copilot-source-drift.sh
 sh test/smoke.sh
 sh test/e2e.sh
 sh test/e2e-agent-builder.sh

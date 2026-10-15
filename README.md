@@ -95,7 +95,6 @@ Then follow the instructions in that document for your agent environment.
 - Playbooks: [`beam/playbooks/`](./beam/playbooks/)
 - Action list: [`beam/contracts/operations.yaml`](./beam/contracts/operations.yaml)
 - Architecture: [`specs/agent-playbook-architecture.md`](./specs/agent-playbook-architecture.md)
-- Saved Copilot copy (change warning only): [`beam/references/copilot-baseline/README.md`](./beam/references/copilot-baseline/README.md)
 - Supervisor product contract: [`specs/supervisor-product-contract.md`](./specs/supervisor-product-contract.md)
 - Supervisor testing plan: [`specs/supervisor-testing-plan.md`](./specs/supervisor-testing-plan.md)
 - Beam product / Academy: https://docs.beam.ai — `beam docs <query>` searches it and reads a page from the terminal; `beam models` lists the workspace's live model catalog

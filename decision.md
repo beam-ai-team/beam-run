@@ -324,3 +324,9 @@
 - **Problem:** Playbooks named action ids and sent the agent to the full action list (124 actions, about 3,350 words) for details, which could more than double the instructions read per request compared with the earlier screen cards.
 - **Decision:** `beam/scripts/check_playbooks.py --write` appends an "Actions" table to each playbook, copied from `operations.yaml` for only the actions that playbook names. The brief tells the agent to use that table. The action list stays the single source; the check fails if any table is stale (confirmed by editing one note).
 - **Result:** "Why did my run fail?" now reads about 2,100 words (brief plus playbook), against about 2,200 for the earlier design before main's session section and about 2,500 with it. "Build a new agent" reads about 2,550 against about 2,750.
+
+## 2026-10-15 — Beam Run deliberately diverges from Copilot
+
+- **Decision (Saqib):** Beam Run will not be kept consistent with the in-product Copilot. A person building agents and wiring integrations from a coding agent has different needs from a workspace assistant inside the Beam app, and the two products are expected to grow apart.
+- **Removed:** the saved Copilot copy (`beam/references/copilot-baseline/` with its hash file), `test/copilot-source-drift.sh`, the snapshot hash and commit checks in `test/supervisor-contract.sh`, the snapshot whitespace rule in `.gitattributes`, and the related doc links. The product promise in `specs/supervisor-product-contract.md` now names coding-agent builders as Beam Run's audience.
+- **Kept:** the Copilot tool-name aliases in `test/evals/score_playbook_evals.py`, which are only used to score versions from before this change.

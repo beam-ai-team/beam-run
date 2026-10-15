@@ -32,7 +32,7 @@ Nothing a user can do today goes away, and every safety stop stays.
 | Entry point | One public "Beam" skill that sorts requests into 12 screen areas | The same public "Beam" skill, rewritten as the agent's brief: who it is, its standing rules, and the list of playbooks |
 | Instructions | 12 screen instructions plus 12 action tables, generated automatically from Copilot's text | 16 playbooks, one per situation, written by hand |
 | Actions and safety | A list of 102 Beam actions, each with its backup route and whether it needs the user's OK; the flow-building actions were missing from it | 124 actions: the same list, the 13 flow-building actions (search tools, attach, triggers, webhooks and so on), the 9 actions main added for docs, models, readiness checks and Learning Hub, and the practical details for each action moved in from the screen instructions |
-| Link to Copilot | Instructions are regenerated from a saved copy of Copilot and must match it word for word | The saved copy is kept only to warn us when Copilot's rules change; we decide what to carry over |
+| Link to Copilot | Instructions are regenerated from a saved copy of Copilot and must match it word for word | None. Beam Run serves people building agents from a coding tool and deliberately goes its own way |
 | Old specialist skills | Kept in a hidden folder for reference | Deleted once the playbooks are live |
 | Setup and sign-in | Separate setup skill | Unchanged |
 
@@ -146,16 +146,18 @@ the numbers". Run every request on today's version and on the new one, in all th
 | Risk | What you would notice | How we handle it |
 | --- | --- | --- |
 | Hard-won details in today's instructions get lost in the rewrite, such as "the task count is the total, not the number of rows shown" | A wrong count or a wrong first step on a request that used to work | Move every such detail into the action list next to the action it belongs to; check each old instruction line by line during step 2 |
-| Beam Run drifts away from Copilot | Copilot and Beam Run give different answers about the same product rule | Keep comparing against Copilot; when its rules change we are warned and decide what to carry over |
 | Two playbooks both seem to fit | The agent follows the wrong one | Each playbook's "When to use" states the boundary; the evals deliberately include unclear requests |
 | A request fits no playbook | The agent improvises | The brief's fallback: read freely, and make changes only under the action list's rules |
 
 ## Decisions
 
-Decided 15 October 2026: stop copying Copilot word for word (the saved copy stays as
-a change warning), keep the 16 playbooks as listed, and build all of them in one go
-rather than pausing after a three-playbook pilot. Whoever owns Copilot should be told
-that Beam Run no longer mirrors its structure.
+Decided 15 October 2026:
+
+- Beam Run deliberately diverges from Copilot. Someone building agents and wiring
+  integrations from a coding tool needs different things from a workspace assistant inside
+  the Beam app, so Beam Run no longer copies, tracks or checks against Copilot. The saved
+  Copilot copy and its change check are removed.
+- Keep the 16 playbooks as listed, built in one go rather than after a three-playbook pilot.
 
 ## For the engineer
 
@@ -173,11 +175,10 @@ that Beam Run no longer mirrors its structure.
   reference material those playbooks link to.
 - **Remove:** `beam/runtime/` (routes, common, 12 domain cards, 12 operations cards, manifest),
   `beam/scripts/compile_runtime_policy.py`, `beam/scripts/verify_runtime_policy.py`,
-  `beam/internal/legacy-skills/`, `beam/references/host-adapter.md`. Update or remove
-  `beam/contracts/copilot-parity.yaml`.
+  `beam/internal/legacy-skills/`, `beam/references/` (host adapter and the saved Copilot copy
+  with its hash file), `test/copilot-source-drift.sh`, and `beam/contracts/copilot-parity.yaml`.
 - **Keep untouched:** `beam/skills/setup/`, `beam/bin/beam`, `beam/bin/mcp_proxy.py`,
-  `beam/contracts/context.yaml`, `GETTING_STARTED.md`. Keep `beam/references/copilot-baseline/`,
-  its hash file and `test/copilot-source-drift.sh` as a change warning only.
+  `beam/contracts/context.yaml`, `GETTING_STARTED.md`.
 - **Checks:** replace `test/runtime-policy-contract.sh` with a playbook check: every operation id
   named in a playbook exists; every operation is named by at least one playbook; every playbook
   has the six headings; every operation whose confirmation is not `none` appears under that

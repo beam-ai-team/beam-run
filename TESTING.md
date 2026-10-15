@@ -22,7 +22,6 @@ python3 beam/scripts/check_playbooks.py --write   # refresh each playbook's Acti
 sh test/cross-host-contract.sh          # same public skill surface on every host
 sh test/activity-ux-contract.sh         # grouped, user-facing operation narration
 sh test/supervisor-contract.sh          # CLI fallback and safety contracts
-sh test/copilot-source-drift.sh         # warns when live Copilot rules changed since the saved copy
 BEAM_WORKSPACE_URL='<url>' BEAM_API_KEY='<your key>' sh test/smoke.sh
 ```
 

@@ -53,7 +53,6 @@ beam/skills/setup/SKILL.md"
 ok "only Beam Run and onboarding are host-discoverable"
 
 grep -q '../../playbooks/' beam/skills/beam/SKILL.md || fail "public skill does not route through playbooks"
-if grep -q 'copilot-baseline' beam/skills/beam/SKILL.md beam/playbooks/*.md; then fail "runtime reads the Copilot snapshot"; fi
 grep -q 'one short, user-facing activity message' beam/skills/beam/SKILL.md || fail "public skill lacks shared activity UX"
 grep -q 'never narrate each command' beam/skills/beam/SKILL.md || fail "public skill can expose per-command detail"
 [ ! -e beam/internal/legacy-skills ] || fail "old specialist skills should be gone"

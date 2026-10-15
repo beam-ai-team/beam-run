@@ -1,5 +1,5 @@
 #!/bin/sh
-# Offline contract checks for the Copilot-aligned supervisor and fallbacks.
+# Offline contract checks for the Beam Run agent and its CLI fallbacks.
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,18 +8,6 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 ok() { printf '  ok   %s\n' "$1"; }
 
 cd "$ROOT"
-
-printf '\n=== canonical Copilot baseline ===\n'
-if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 -c beam/references/copilot-baseline/SHA256SUMS >/dev/null || fail "Copilot snapshot drifted"
-elif command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c beam/references/copilot-baseline/SHA256SUMS >/dev/null || fail "Copilot snapshot drifted"
-else
-  fail "no SHA-256 checker available"
-fi
-ok "snapshot hashes match the recorded Beam Copilot source"
-grep -q '40fdd5687a7a4e9122c27d8b175235107c096a58' beam/references/copilot-baseline/README.md || fail "source commit missing"
-ok "source commit is recorded"
 
 printf '\n=== Beam Run agent ===\n'
 [ -s beam/skills/beam/SKILL.md ] || fail "missing Beam Run agent brief"
@@ -178,7 +166,7 @@ printf '%s' "$raw_identity" | grep -q 'memberships' || fail "raw whoami did not 
 ok "whoami is compact by default and explicit about raw access"
 
 env $fallback_env BEAM_TEST_CAPTURE_URL="$tmp/url" sh "$BEAM" analytics get agent-1 >/dev/null || fail "analytics fallback failed"
-grep -q '/agent-tasks/analytics?agentId=agent-1&startDate=2026-01-02&endDate=' "$tmp/url" || fail "analytics fallback did not use the Copilot date range and public route"
-ok "analytics fallback uses the Copilot date default and public route"
+grep -q '/agent-tasks/analytics?agentId=agent-1&startDate=2026-01-02&endDate=' "$tmp/url" || fail "analytics fallback did not use the whole-history date range and public route"
+ok "analytics fallback defaults to the agent's whole history and uses the public route"
 
 printf '\nSupervisor contract checks PASSED.\n'

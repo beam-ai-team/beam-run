@@ -2,10 +2,11 @@
 
 ## Outcome
 
-A user can complete the same core Beam workspace operation from a coding agent
-as from Beam Copilot, with equivalent product instructions and safety, explicit
-workspace/entity context, and recovery when the MCP layer is unavailable but
-the Beam API remains healthy.
+A person building agents and wiring integrations from a coding agent can complete
+every core Beam workspace operation with explicit safety stops, explicit
+workspace/entity context, and recovery when the MCP layer is unavailable but the
+Beam API remains healthy. Beam Run serves those builders' needs and deliberately
+does not track the in-product Copilot.
 
 ## Invariants
 
@@ -13,8 +14,7 @@ the Beam API remains healthy.
   experience remain unchanged.
 - The agent brief (`beam/skills/beam/SKILL.md`), the playbooks (`beam/playbooks/`)
   and the action list (`beam/contracts/operations.yaml`) are the source for routing,
-  steps, confirmation, and reporting behavior. The saved Copilot copy is a change
-  warning only.
+  steps, confirmation, and reporting behavior.
 - The coding-agent host runs the Beam Run agent. Beam Run does not add a
   second LLM, memory service, or Mastra deployment.
 - A normal single-situation request follows exactly one playbook; a multi-situation
