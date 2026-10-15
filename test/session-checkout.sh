@@ -134,6 +134,20 @@ codex_task="$(run BEAM_SESSION_ID= CODEX_THREAD_ID=codex-task sh "$BEAM" checkou
 printf '%s' "$codex_task" | grep -q '"workspaceId":"prod-a"' || fail "Codex task lost its checkout"
 ok "Codex terminal commands use the current task id"
 
+run BEAM_SESSION_ID= CLAUDE_CODE_SESSION_ID=claude-conversation sh "$BEAM" checkout app Alpha >/dev/null 2>&1 || fail "Claude Code checkout"
+claude_conversation="$(run BEAM_SESSION_ID= CLAUDE_CODE_SESSION_ID=claude-conversation sh "$BEAM" checkout)"
+printf '%s' "$claude_conversation" | grep -q '"workspaceId":"prod-a"' || fail "Claude Code commands lost their checkout between shells"
+ok "Claude Code terminal commands use the current conversation id"
+
+mkdir -p "$tmp/pybin"
+# The stub prints the builder's own environment, so these quotes are literal.
+# shellcheck disable=SC2016
+printf '#!/bin/sh\nprintf "%%s|%%s|%%s\\n" "$BEAM_API_KEY" "$BEAM_WORKSPACE_ID" "$BEAM_API_URL"\n' > "$tmp/pybin/python3"
+chmod +x "$tmp/pybin/python3"
+builder_env="$(run BEAM_SESSION_ID=session-b PATH="$tmp/pybin:$tmp/bin:$PATH" sh "$BEAM" agent-builder validate 2>/dev/null)"
+[ "$builder_env" = "prod-key|prod-a|https://api.beamstudio.ai" ] || fail "agent builder did not receive the checked-out instance ($builder_env)"
+ok "agent builder uses the checked-out instance's key and workspace"
+
 run BEAM_SESSION_ID=session-b BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp BEAM_API_KEY=enterprise-key BEAM_WORKSPACE_ID=ent-a sh "$BEAM" agents list >/dev/null || fail "saved checkout ignored inherited overrides"
 grep -q 'api.beamstudio.ai.*prod-a.*prod-key' "$tmp/requests" || fail "environment values overrode the saved checkout"
 ok "saved checkout controls endpoint, key, and workspace"

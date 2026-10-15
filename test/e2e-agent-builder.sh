@@ -215,6 +215,12 @@ prompt_node["toolConfiguration"]["inputParams"] = []
 report = module._readiness_report(broken)
 assert not report["ready"]
 assert any(f["name"] == "gpt_has_input_variable" for f in report["failures"])
+
+# Beam saves the entry node with an empty GPTAction tool; that is not a defect.
+saved = copy.deepcopy(nodes)
+entry = next(n for n in saved if n.get("isEntryNode"))
+entry["toolConfiguration"] = {"toolFunctionName": "GPTAction_Entry", "prompt": "", "inputParams": [], "outputParams": []}
+assert module._readiness_report(saved)["ready"], module._readiness_report(saved)["failures"]
 PY
 
 group "MCP attachment preserves complete prompt-node configuration"
