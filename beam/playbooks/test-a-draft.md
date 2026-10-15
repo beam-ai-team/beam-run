@@ -20,8 +20,12 @@
 ## Steps
 
 1. Read `agent.get` to confirm a draft exists.
-2. For one step in isolation, run `graph.test-node` with explicit inputs.
-3. For the whole flow, run `task.create-draft` with the first input.
+2. Use `graph.test-node` only when the user explicitly asks to test one step in
+   isolation. A node test alone does not verify the flow's routing or downstream reply.
+3. Otherwise run the whole draft with `task.create-draft`, using the first input.
+   "Test it" after building, changing or repairing an agent means this whole-flow
+   test, even when the fix changed only one prompt. A node test may supplement it,
+   never replace it.
 4. Read it with `task.get` and check its `agentGraphId` is the draft before
    sending any further inputs.
 5. For each run, compare what happened with what the user expected, step by step:
@@ -57,6 +61,9 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `graph.test-node` | `testGraphNode` | `beam agent-builder test-node <agentId> <graphId> <nodeId> <paramsJson>` | no | — | Runs one step with explicit inputs; needs agentId, graphId, nodeId and a JSON params object. |
+| `graph.validate` | — | `beam agent-builder validate` | no | — | Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure. |
 | `task.create-draft` | — | `beam tasks test <agentId> <input>` | no | `task.get` | Runs the unpublished draft. For a batch, check the first task's agentGraphId before sending the rest. |
 | `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

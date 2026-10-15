@@ -15,14 +15,19 @@
 
 1. Read `agent.get` for the draft and live graph ids.
 2. Check the draft with `graph.readiness`. Do not publish while any check fails.
-3. Publish with `graph.publish` using the draft graph id.
+3. Show the concrete publication effect and wait for confirmation, then publish
+   with `graph.publish` using the draft graph id.
 4. Read back with `graph.get` and `agent.get`.
 
 ## Stop and ask
 
-- `graph.publish`: needs a clear request to publish or go live. If the request is
-  vague ("ship it?", "looks good"), ask: "Publish the draft of <agent> so live runs
-  use it?" Say what changes for live runs and triggers.
+- `graph.publish`: always stop after identifying the draft and checking readiness.
+  Even "publish it now" or "fix it, test it, then make it live" requests this
+  workflow; it does not approve a concrete publication that has not been shown yet.
+  Ask: "Publish the tested draft of <agent> so live runs use it?" Say what changes
+  for live runs and triggers, then wait for a clear yes to that question.
+  Reuse that confirmation only for the unchanged draft and effect just shown;
+  do not ask again after the user answers yes. A no leaves the draft unpublished.
 
 ## Done when
 
@@ -43,6 +48,9 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `graph.get` | `getAgentGraph` | `beam agent-builder get-graph <agentId>` | no | — | Large (around 136 KB). Prefer graph.nodes for structure; fetch the full graph only for a node id or when the user asks for the whole thing. |
-| `graph.publish` | — | `beam agent-builder publish <graphId> --agent-id <agentId>` | explicit-publish-intent | `graph.get` | Makes the draft live. Only on a clear request to publish or go live, and only after graph.readiness passes. |
+| `graph.publish` | — | `beam agent-builder publish <graphId> --agent-id <agentId>` | explicit-publish-intent | `graph.get` | Makes the draft live. After graph.readiness passes, show the exact draft and live effect and wait for confirmation, even if the initial request explicitly asked to publish. A yes to that concrete proposal authorizes this publication only; a no leaves the draft unpublished. |
 | `graph.readiness` | — | `beam agent-builder readiness <agentId>` | no | — | Every graph change returns this report. Resolve every failure before testing or publishing. |
+| `graph.validate` | — | `beam agent-builder validate` | no | — | Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

@@ -23,6 +23,10 @@
 ## Steps
 
 1. Run `graph.validate`, then read `graph.nodes` and the affected `graph.node`.
+   Use `graph.get` only for details such as an exact edge id; read `graph.triggers`
+   before a rewrite that may remove automation. For integration changes, read
+   `agent.tools`, `integration.connected` and `integration.is-connected` as needed
+   to resolve the actual tool, workspace connection and consent state.
    Query, don't remember: check `model.catalog` before changing a model, and
    `docs.search` before relying on how a feature works.
 2. Pick the smallest action that does the job:
@@ -85,6 +89,9 @@ the CLI in Codex). Re-read with the re-check action after a change.
 
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
+| `agent.tools` | `beam_get_agent_tools` | `beam agents tools <agentId>` | no | — | Report toolName, description and requiresConsent per tool. Each tool's toolFunctionName is the key for integration.is-connected. |
 | `docs.search` | — | `beam docs <query> [--page url]` | no | — | Check the live product docs before relying on how a feature works (loops, automation modes, publishing, triggers, evaluation); the live docs outrank any vendored note. |
 | `graph.add-node` | — | `beam agent-builder add-node <agentId> <nodeFile> ...` | no | `graph.readiness` | Rewrites the graph: node ids change and an existing trigger is deleted. Re-read nodes afterwards and re-create the trigger. |
 | `graph.attach-tool` | — | `beam agent-builder attach-tool <agentId> <graphId> <nodeId> <toolConfigFile>` | no | `graph.readiness` | — |
@@ -93,6 +100,7 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `graph.delete-trigger` | — | `beam agent-builder delete-trigger <triggerId>` | always | `graph.triggers` | — |
 | `graph.delete-webhook` | — | `beam agent-builder delete-webhook <agentId>` | always | `graph.webhook` | — |
 | `graph.deploy` | — | `beam agent-builder deploy <specFile>` | no | `graph.readiness` | Lint and run with --dry-run --summary first. With --agent-id it rewrites the whole graph: include every node to keep; node ids change and an existing trigger is deleted. Stays a draft unless --publish is passed, which needs graph.publish's confirmation. Returns a readiness report; resolve every failure before testing or publishing. |
+| `graph.get` | `getAgentGraph` | `beam agent-builder get-graph <agentId>` | no | — | Large (around 136 KB). Prefer graph.nodes for structure; fetch the full graph only for a node id or when the user asks for the whole thing. |
 | `graph.node` | `getAgentGraph` | `beam agent-builder get-node <agentId> <nodeId>` | no | — | — |
 | `graph.nodes` | `getAgentGraph` | `beam agent-builder get-nodes <agentId>` | no | — | Light list of node id and objective. The entry node has the objective 'Entry Node'. |
 | `graph.readiness` | — | `beam agent-builder readiness <agentId>` | no | — | Every graph change returns this report. Resolve every failure before testing or publishing. |
@@ -101,6 +109,7 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `graph.toggle-trigger` | — | `beam agent-builder toggle-trigger <triggerId>` | explicit | `graph.triggers` | Switching a trigger on makes the agent start runs on its own; say which way it is switching. |
 | `graph.trigger-actions` | — | `beam agent-builder trigger-actions <integrationIdentifier>` | no | — | Actions differ per workspace; always look them up. Gives the integrationProviderId for an integration trigger; a timer needs none. |
 | `graph.trigger-readiness` | — | `beam agent-builder validate-trigger <agentId> <entryNodeId>` | no | — | Run after every timer or integration trigger create or update; do not call a trigger working until it passes. |
+| `graph.triggers` | `getAgentGraph` | `beam agent-builder get-triggers <agentId> <entryNodeId>` | no | — | Needs the entry node id from graph.nodes as well as the agent id. |
 | `graph.update-consent` | — | `beam agent-builder update-node-consent <agentId> <nodeId> <true\|false>` | no | `graph.readiness` | A setting on an existing integration step, not a new step: the run asks for consent right before that tool runs. |
 | `graph.update-edge` | — | `beam agent-builder update-edge <edgeId> [--condition TEXT]` | no | `graph.readiness` | — |
 | `graph.update-node` | — | `beam agent-builder update-node <agentId> <graphId> <nodeFile>` | no | `graph.readiness` | For a step's model or other configuration. Read the full node first and send it back whole. |
@@ -108,5 +117,9 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `graph.update-prompt` | — | `beam agent-builder update-node-prompt <agentId> <nodeId> <promptFile>` | no | `graph.readiness` | Smallest change for prompt or tone edits. |
 | `graph.update-trigger` | — | `beam agent-builder update-trigger <triggerId> <triggerFile>` | explicit | `graph.trigger-readiness` | — |
 | `graph.validate` | — | `beam agent-builder validate` | no | — | Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure. |
+| `graph.webhook` | `getAgentGraph` | `beam agent-builder get-webhook <agentId>` | no | — | — |
 | `graph.webhook-readiness` | — | `beam agent-builder validate-webhook <agentId> [--entry-node-id ID]` | no | — | Run after every webhook create; do not call a webhook working until it passes. |
+| `integration.connected` | — | `beam integrations connected` | no | — | Only status 'active' counts as connected; pending and inactive do not. |
+| `integration.is-connected` | `beam_is_integration_connected` | `beam integrations is-connected <toolFunctionName>` | no | — | Workspace connection state. A step's own isIntegrationConnected is per-agent wiring; never infer one from the other. |
 | `model.catalog` | — | `beam agent-builder models` | no | — | The only valid list of models for this workspace, including the default. Check it before setting or discussing a step's model or its cost. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

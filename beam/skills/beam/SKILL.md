@@ -20,6 +20,8 @@ the same Codex conversation. On other hosts, use `beam_session_status` or
 `beam checkout`. Relay only the user-facing checklist and its next question.
 Do not add an explanation, file link, or citation for why the question is asked.
 Keep skill, tool, and fallback mechanics out of the user-facing reply.
+If the host requires a skill announcement, say "I’ll use Beam to help with that."
+Never call it a skill or narrate loading its instructions.
 
 - No saved instance: show the returned setup checklist and guide `beam login`.
 - One saved instance: show it and relay the workspace question from status.
@@ -58,8 +60,11 @@ identifiers unless the user asks.
 2. **Follow its steps.** Each step names an action id such as `task.retry`. The
    playbook's own "Actions" table, at its end, says how to run each action, its CLI
    command, whether it needs the user's OK, what to re-read afterwards, and its notes.
-   Do not read the full action list in `../../contracts/operations.yaml` for an
-   action the playbook already covers.
+   The table includes common target lookups and prerequisite/re-check actions.
+   Common lookup rows are optional: reuse resolved ids and do not fetch unrelated data.
+   Read another matching playbook if an action is missing. Do not open
+   `../../contracts/operations.yaml` during ordinary Beam work; it is build-time
+   source material, not a runtime lookup.
 3. **Finish on its "Done when".** Re-read whatever proves the result before you
    report it.
 
@@ -88,9 +93,10 @@ consent state before any write, test, publish, approval or other external effect
 | Learning Hub: issues, feedback, improvement jobs, accuracy, tuner settings | `improve-an-agent-from-feedback.md` |
 | Saved Views: columns, records, export | `work-with-views.md` |
 
-**No playbook fits:** answer with read actions from the action list. Make a change
-only through an action in that list, under its confirmation rule. If no action can
-do it, say so plainly and link the relevant Beam page with a `beam://` link.
+**No playbook fits:** use the nearest playbook's read actions to establish what
+is supported. Make a change only through a documented action under its confirmation
+rule. If none can do it, say so plainly and link the relevant Beam page with a
+`beam://` link. Do not open the full action list to improvise a new operation.
 
 ## Standing rules
 
@@ -117,6 +123,8 @@ do it, say so plainly and link the relevant Beam page with a `beam://` link.
   test, publish, consent request or other external effect, name the target and its
   intended effect before starting. Afterwards, state the result; for a change, name
   the exact entity and resulting state, plus what was verified.
+  Keep local preparation (specifications, payload files and linting) inside the
+  requested operation; ask approval for the draft or live effect, not its machinery.
   Example: "Checking the draft flow, Gmail connection and recent runs — no changes."
   Then: "Checked: the flow is a draft, Gmail is connected, and two runs are waiting
   for input or consent."
@@ -133,7 +141,9 @@ do it, say so plainly and link the relevant Beam page with a `beam://` link.
 - **Draft versus live.** New and changed flows stay drafts unless the user clearly
   asks to publish. Resolve the live (active) and draft graph before any run or test.
 - **Answers.** Lead with the result, summarise raw output, and use a table only
-  when it makes comparison clearer. Offer a `beam://` link when the user would
+  when it makes comparison clearer. Keep graph/node UUIDs internal unless asked;
+  say "verified against the unpublished draft" and use task labels or links for runs.
+  Offer a `beam://` link when the user would
   benefit from opening the page, for example `beam://agent.flow?agentId=<id>`
   (ids are query parameters, never path segments).
 

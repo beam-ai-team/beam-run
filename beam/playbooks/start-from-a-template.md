@@ -60,3 +60,4 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `template.list` | — | `beam templates list` | no | — | Rows use title and shortDescription. count is the full library total: page with pageNum and never present one page as the whole library. |
 | `template.prerequisites` | `beam_get_template_with_prerequisites` | `beam templates get <templateId> + beam integrations connected` | no | — | missingIntegrations is the 'what do I connect first' answer. |
 | `template.recommend` | — | `beam templates recommend [categoryId]` | no | — | Prefer this over keyword search for 'what should I build?'. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

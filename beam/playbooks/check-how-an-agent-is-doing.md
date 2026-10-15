@@ -55,3 +55,4 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `analytics.export` | — | `beam analytics export <agentId> <startDate> <endDate>` | no | — | Returns a shareable file link. |
 | `analytics.get` | `getAgentAnalytics` | `beam analytics get <agentId> [startDate] [endDate]` | no | — | Dates as Y-m-d. With no range given, use the agent's createdAt to today, not the current month. Read figures from currentPeriod and changes from metricsDelta. There is no per-tool failure figure; it has to be worked out from failed runs. |
 | `task.list` | `listAgentTasks` | `beam tasks list` | no | — | For a count read totalCount, never the number of rows returned. isDraftTask true means test runs and false means real runs; without it the list mixes both. The agent id is at agentGraph.agent.id. Use a small page size. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

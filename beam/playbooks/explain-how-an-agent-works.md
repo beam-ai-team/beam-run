@@ -62,6 +62,8 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `graph.nodes` | `getAgentGraph` | `beam agent-builder get-nodes <agentId>` | no | — | Light list of node id and objective. The entry node has the objective 'Entry Node'. |
 | `graph.readiness` | — | `beam agent-builder readiness <agentId>` | no | — | Every graph change returns this report. Resolve every failure before testing or publishing. |
 | `graph.triggers` | `getAgentGraph` | `beam agent-builder get-triggers <agentId> <entryNodeId>` | no | — | Needs the entry node id from graph.nodes as well as the agent id. |
+| `graph.validate` | — | `beam agent-builder validate` | no | — | Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure. |
 | `graph.verify-links` | `getAgentGraph` | `beam agent-builder verify-links <agentId>` | no | — | Report any broken link by node. Changes are checked with graph.readiness, which includes links. |
 | `graph.webhook` | `getAgentGraph` | `beam agent-builder get-webhook <agentId>` | no | — | — |
 | `integration.is-connected` | `beam_is_integration_connected` | `beam integrations is-connected <toolFunctionName>` | no | — | Workspace connection state. A step's own isIntegrationConnected is per-agent wiring; never infer one from the other. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

@@ -29,6 +29,7 @@ MAX_LINES = 100
 ACTION = re.compile(r"`([a-z]+\.[a-z][a-z0-9-]*)`")
 FILE_REF = re.compile(r"`((?:\.\./)?[A-Za-z0-9_./-]+\.(?:md|json))`")
 TABLE_HEADING = "## Actions"
+COMMON_READS = {"user.current", "agent.list", "agent.get"}
 
 
 def load_operations() -> dict[str, dict[str, str]]:
@@ -52,6 +53,20 @@ def sections(text: str) -> dict[str, str]:
 
 def actions_in(text: str) -> set[str]:
     return {a for a in ACTION.findall(text) if not a.endswith(".md")}
+
+
+def table_actions(actions: set[str], ops: dict[str, dict[str, str]]) -> set[str]:
+    actions = actions | COMMON_READS
+    if any(a.startswith("graph.") for a in actions):
+        actions.add("graph.validate")
+    while True:
+        expanded = actions | {
+            ops[action][key] for action in actions
+            for key in ("preRead", "postRead") if ops[action].get(key)
+        }
+        if expanded == actions:
+            return actions
+        actions = expanded
 
 
 def action_table(actions: set[str], ops: dict[str, dict[str, str]]) -> str:
@@ -121,7 +136,7 @@ def main() -> int:
         used |= named
         for action in sorted(named - ops.keys()):
             errors.append(f"{name}: names unknown action {action}")
-        expected = text + "\n" + action_table(named & ops.keys(), ops)
+        expected = text + "\n" + action_table(table_actions(named & ops.keys(), ops), ops)
         if write:
             path.write_text(expected)
         elif full != expected:

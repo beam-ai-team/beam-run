@@ -38,7 +38,8 @@
    `../internal/agent-builder/templates/lint-checklist.md`.
 6. Dry-run, then create the draft with `graph.deploy` (no `--publish`).
 7. Check the draft with `graph.readiness` and fix every failure.
-8. Add a trigger or webhook only if the user asked for one, and only after the graph
+8. Resolve the saved entry node with `graph.nodes`. Add a trigger or webhook only
+   if the user asked for one, and only after the graph
    is settled: `graph.trigger-actions`, then `graph.create-trigger` and
    `graph.trigger-readiness`, or `graph.create-webhook` and `graph.webhook-readiness`.
 
@@ -83,10 +84,13 @@ the CLI in Codex). Re-read with the re-check action after a change.
 
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `docs.search` | — | `beam docs <query> [--page url]` | no | — | Check the live product docs before relying on how a feature works (loops, automation modes, publishing, triggers, evaluation); the live docs outrank any vendored note. |
 | `graph.create-trigger` | — | `beam agent-builder create-trigger <triggerFile>` | explicit | `graph.trigger-readiness` | Once active, the agent starts runs on its own. One trigger per agent: delete the old one first. Add it last, after the graph is settled, because a graph rewrite deletes it. |
 | `graph.create-webhook` | — | `beam agent-builder create-webhook <agentId>` | explicit | `graph.webhook-readiness` | Anyone with the URL can start runs; treat it as a secret. |
 | `graph.deploy` | — | `beam agent-builder deploy <specFile>` | no | `graph.readiness` | Lint and run with --dry-run --summary first. With --agent-id it rewrites the whole graph: include every node to keep; node ids change and an existing trigger is deleted. Stays a draft unless --publish is passed, which needs graph.publish's confirmation. Returns a readiness report; resolve every failure before testing or publishing. |
+| `graph.nodes` | `getAgentGraph` | `beam agent-builder get-nodes <agentId>` | no | — | Light list of node id and objective. The entry node has the objective 'Entry Node'. |
 | `graph.readiness` | — | `beam agent-builder readiness <agentId>` | no | — | Every graph change returns this report. Resolve every failure before testing or publishing. |
 | `graph.search-agents` | — | `beam agent-builder search-agents <keyword>` | no | — | Use before building, to avoid duplicating an existing agent. |
 | `graph.search-tools` | — | `beam agent-builder search-tools <keyword> [--managed-only]` | no | — | Search before adding any integration step; never invent a toolFunctionName. Prefer nango_cloud, then pipedream; ask before choosing a custom fallback. |
@@ -96,3 +100,4 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `graph.webhook-readiness` | — | `beam agent-builder validate-webhook <agentId> [--entry-node-id ID]` | no | — | Run after every webhook create; do not call a webhook working until it passes. |
 | `integration.connected` | — | `beam integrations connected` | no | — | Only status 'active' counts as connected; pending and inactive do not. |
 | `model.catalog` | — | `beam agent-builder models` | no | — | The only valid list of models for this workspace, including the default. Check it before setting or discussing a step's model or its cost. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

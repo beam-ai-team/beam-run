@@ -49,8 +49,12 @@ the CLI in Codex). Re-read with the re-check action after a change.
 
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `graph.node` | `getAgentGraph` | `beam agent-builder get-node <agentId> <nodeId>` | no | — | — |
 | `graph.nodes` | `getAgentGraph` | `beam agent-builder get-nodes <agentId>` | no | — | Light list of node id and objective. The entry node has the objective 'Entry Node'. |
+| `graph.validate` | — | `beam agent-builder validate` | no | — | Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |
 | `view.add-column` | `view_create_column` | `beam views add-column <viewId> <payloadFile>` | no | `view.get` | Name: letters, numbers and underscore, up to 60 characters. A non-link column needs the feeding agent's node id and parameter; if they cannot be resolved with confidence, do not guess: link beam://views?viewId=<id>. |
 | `view.create` | `view_create` | `beam views create <payloadFile>` | no | — | — |
 | `view.delete` | `view_delete` | `beam views delete <viewId> --confirm <viewId>` | always | `view.list` | — |

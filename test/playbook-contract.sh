@@ -10,6 +10,7 @@ cd "$ROOT"
 
 printf '\n=== agent and playbooks ===\n'
 python3 beam/scripts/check_playbooks.py || fail "playbooks, brief and action list disagree"
+python3 test/evals/test_scoring.py || fail "eval scoring or action dependencies regressed"
 ok "every action is covered and every confirmation is a stop point"
 
 [ ! -e beam/runtime ] || fail "generated screen cards are back; playbooks replace them"

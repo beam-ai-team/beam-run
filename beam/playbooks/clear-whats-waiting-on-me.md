@@ -58,6 +58,8 @@ the CLI in Codex). Re-read with the re-check action after a change.
 
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `inbox.delete` | — | `beam inbox delete <notificationId> --confirm <notificationId>` | always | — | Confirm every delete, and especially a sweep of many notifications. |
 | `inbox.list` | — | `beam inbox list` | no | — | Each row carries agentId and agentTaskId; resolve the task from those. |
 | `inbox.mark-read` | — | `beam inbox mark-read <notificationId>` | no | — | — |
@@ -66,3 +68,4 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
 | `task.reject` | `rejectTaskExecution` | `beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason <text>]` | always | `task.get` | Ends the task. |
 | `task.submit-input` | `submitUserInput` | `beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>` | confirm-proposed-values | `task.get` | Answer the paused step's userQuestions. Never guess a value; propose it and get it confirmed. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

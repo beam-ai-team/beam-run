@@ -72,6 +72,7 @@ the CLI in Codex). Re-read with the re-check action after a change.
 
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
 | `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `learning.approve-job` | `lh_approve_job` | `beam learning approve-job <threadId> --confirm <threadId>` | always-two-turn | `learning.job` | Applies the proposed prompt to the live tool; not directly reversible. Show the prompt before and after first. |
 | `learning.cancel-job` | `lh_cancel_job` | `beam learning cancel-job <threadId> --confirm <threadId>` | always-two-turn | `learning.job` | Releases the feedback back to its issue. |

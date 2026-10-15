@@ -19,6 +19,8 @@
 
 1. Resolve the target runs with `task.list` (small page, newest first) or
    `task.latest`, then read each with `task.get`.
+   Before a retry, refresh the agent's graph with `agent.get`, its tools and consent
+   with `agent.tools`, and workspace connections with `integration.connected`.
 2. Act with the matching action:
    - retry the whole run, or from one step: `task.retry`
    - stop a running task: `task.abort`
@@ -54,6 +56,10 @@ the CLI in Codex). Re-read with the re-check action after a change.
 
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
+| `agent.tools` | `beam_get_agent_tools` | `beam agents tools <agentId>` | no | — | Report toolName, description and requiresConsent per tool. Each tool's toolFunctionName is the key for integration.is-connected. |
+| `integration.connected` | — | `beam integrations connected` | no | — | Only status 'active' counts as connected; pending and inactive do not. |
 | `task.abort` | — | `beam tasks abort <taskId> --confirm <taskId> [--reason <text>]` | always | `task.get` | Stops a running task; different from task.cancel-wait. |
 | `task.cancel-wait` | `task_cancel_wait_node` | `beam tasks cancel-wait <taskNodeId> <agentId> --confirm <taskNodeId>` | always | `task.get` | Only for a step whose status is WAITING. The agent id is agentGraph.agentId from task.get. |
 | `task.delete` | — | `beam tasks delete <taskId> --confirm <taskId>` | always | `task.list` | — |
@@ -62,3 +68,4 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `task.list` | `listAgentTasks` | `beam tasks list` | no | — | For a count read totalCount, never the number of rows returned. isDraftTask true means test runs and false means real runs; without it the list mixes both. The agent id is at agentGraph.agent.id. Use a small page size. |
 | `task.rate` | `rateTaskOutput` | `beam tasks rate <taskId> <up\|down> [feedback]` | no | — | — |
 | `task.retry` | `retryTaskExecution` | `beam tasks retry <taskId> [--task-node-id <taskNodeId> --feedback <text>]` | required-if-production-side-effect | `task.get` | Retry from a step needs one task id plus the taskNodeId and feedback text. Confirm before retrying more than five. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

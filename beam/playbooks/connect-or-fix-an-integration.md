@@ -62,6 +62,8 @@ the CLI in Codex). Re-read with the re-check action after a change.
 
 | Action | MCP tool | CLI | Needs OK | Re-check | Notes |
 | --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `integration.categories` | `beam_list_integration_categories` | `beam integrations categories` | no | — | — |
 | `integration.connect` | — | `beam integrations connect <payloadFile>` | required-if-credentials-or-external-effect | — | OAuth providers must be finished by the user in the browser: link beam://integrations?provider=<name>. Never ask for a secret in chat or echo one back; credentials go only in a local payload file. A custom integration uses provider custom with identifier httpCustomAuth (token) or httpBasicAuth (basic). |
 | `integration.connected` | — | `beam integrations connected` | no | — | Only status 'active' counts as connected; pending and inactive do not. |
@@ -74,3 +76,4 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `integration.remove` | — | `beam integrations remove <providerId> --confirm <providerId>` | always | — | providerId is the connection row id, not the catalog integrationId. |
 | `integration.set-default` | — | `beam integrations set-default <providerId> <integrationId>` | no | — | providerId is the connection row id, not the catalog integrationId. |
 | `integration.update` | `integration_update_connection` | `beam integrations update <payloadFile>` | no | `integration.connections` | providerId is the connection row id, not the catalog integrationId. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

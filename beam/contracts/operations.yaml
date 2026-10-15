@@ -178,7 +178,7 @@ operations:
     cli: beam agent-builder publish <graphId> --agent-id <agentId>
     postRead: graph.get
     status: ready
-    notes: "Makes the draft live. Only on a clear request to publish or go live, and only after graph.readiness passes."
+    notes: "Makes the draft live. After graph.readiness passes, show the exact draft and live effect and wait for confirmation, even if the initial request explicitly asked to publish. A yes to that concrete proposal authorizes this publication only; a no leaves the draft unpublished."
   graph.update-prompt:
     safety: reversible-write
     mcp: null

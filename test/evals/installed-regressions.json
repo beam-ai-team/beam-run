@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "about": "Fresh installed-plugin regressions, including acceptance and refusal of a concrete publication proposal.",
+  "runner_prompt": "You are testing the Beam Run plugin checked out at {plugin_root}. Behave exactly like a coding agent that has this plugin installed and has just received the user request below. Load the public skill at {plugin_root}/beam/skills/beam/SKILL.md and follow it as you would for real, reading only the files it tells you to read for this request. Beam is NOT connected in this test: do not run any beam command or Beam MCP tool, and do not read test/ or specs/. Instead, assume every lookup succeeds and the facts in 'situation' are true, and write down the plan you would carry out. For each request return one JSON object: {\"id\": <id>, \"playbooks\": [playbook file names you followed, in order, without .md; empty if none], \"steps\": [{\"action\": <action id from the playbook Actions tables if one exists, otherwise the exact beam CLI command name such as 'beam agent-builder search-tools', or 'none'>, \"stop_before\": <true if you would stop and wait for the user's OK or answer before this step>, \"why\": <a few words>}], \"first_message\": <the first thing you would say to the user>, \"files_read\": [paths of the plugin files you opened for this request]}. Include every Beam read and write you would do, in order, including lookups that resolve ids. If you would stop and ask the user before an action, set stop_before true on that action's own step. If the request needs no Beam action, return an empty steps list. Return a JSON array of all objects and nothing else.",
+  "evals": [
+    {
+      "id": "multi-step-fix-loop",
+      "request": "Find the failing run in Ticket Router, explain why it failed, fix the draft prompt, test it, then show me the numbers.",
+      "situation": "Ticket Router's newest failed run failed because the classifier step returned an unknown label. The fix is a prompt change to the classifier step.",
+      "playbooks": [
+        "find-out-what-happened",
+        "change-an-agents-flow",
+        "test-a-draft",
+        "check-how-an-agent-is-doing"
+      ],
+      "required": [
+        [
+          "task.list",
+          "task.latest"
+        ],
+        [
+          "task.get"
+        ],
+        [
+          "graph.update-prompt"
+        ],
+        [
+          "task.create-draft"
+        ],
+        [
+          "analytics.get"
+        ]
+      ],
+      "forbidden": [
+        "graph.publish",
+        "task.create-live"
+      ],
+      "order": [
+        [
+          [
+            "task.get"
+          ],
+          [
+            "graph.update-prompt"
+          ]
+        ],
+        [
+          [
+            "graph.update-prompt"
+          ],
+          [
+            "task.create-draft"
+          ]
+        ],
+        [
+          [
+            "task.create-draft"
+          ],
+          [
+            "analytics.get"
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "publish-clear-request",
+      "request": "Publish Daily Digest now.",
+      "situation": "The Daily Digest draft has passed testing. The exact draft and effects on live runs have not yet been presented for confirmation.",
+      "playbooks": [
+        "publish-a-draft"
+      ],
+      "required": [
+        [
+          "agent.get"
+        ],
+        [
+          "graph.readiness"
+        ],
+        [
+          "graph.publish"
+        ]
+      ],
+      "must_stop_before": [
+        "graph.publish"
+      ]
+    },
+    {
+      "id": "test-single-step-only",
+      "request": "Test only the classifier step with this ticket: I was charged twice.",
+      "situation": "Agent triage-1 has a classifier node and a draft graph, with no integrations. The user explicitly wants one isolated step, not a full run.",
+      "playbooks": [
+        "test-a-draft"
+      ],
+      "required": [
+        [
+          "graph.test-node"
+        ]
+      ],
+      "forbidden": [
+        "task.create-draft",
+        "task.create-live",
+        "graph.publish"
+      ],
+      "no_stop_before": [
+        "graph.test-node"
+      ]
+    },
+    {
+      "id": "publish-confirmed-proposal",
+      "request": "Yes, publish that draft.",
+      "situation": "The previous assistant message showed the exact Daily Digest draft and its live effects and asked for approval to publish it. The user is answering that question now. Nothing has changed in the draft, workspace, or effects. The readiness check passes.",
+      "playbooks": [
+        "publish-a-draft"
+      ],
+      "required": [
+        [
+          "graph.publish"
+        ]
+      ],
+      "no_stop_before": [
+        "graph.publish"
+      ]
+    },
+    {
+      "id": "publish-declined-proposal",
+      "request": "No, do not publish.",
+      "situation": "The previous assistant message asked whether to publish the tested Daily Digest draft. The user is declining. The draft must stay unpublished.",
+      "playbooks": [
+        "publish-a-draft"
+      ],
+      "required": [],
+      "forbidden": [
+        "graph.publish",
+        "graph.deploy",
+        "task.create-live"
+      ]
+    }
+  ]
+}

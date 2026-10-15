@@ -74,3 +74,4 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `agent.update-metadata` | `agent_update_metadata` | `beam agent-builder update-metadata <agentId> ...` | no | `agent.get` | Changes name, description, suggested prompts, personality and restrictions. The model of a step changes with graph.update-node; the agent's icon and category cannot be changed from here, so say so and link beam://agent.config?agentId=<id>. |
 | `agent.upload-file` | `agent_upload_context_file` | `beam agents upload-file <agentId> <localFile>` | no | `agent.files` | — |
 | `task.update-tool` | `task_update_agent_tool` | `beam tasks update-tool <toolFunctionName> <payloadFile>` | no | `agent.tools` | — |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

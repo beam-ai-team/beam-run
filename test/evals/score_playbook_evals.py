@@ -8,6 +8,8 @@ playbook-evals.json. Actions may be written as action ids, CLI command names or
 MCP tool names; all are mapped to action ids using beam/contracts/operations.yaml.
 --no-playbooks skips the playbook check (for versions without playbooks).
 --evals scores against another file with the same shape as playbook-evals.json.
+An expected playbook stage may be a list of acceptable alternatives. Other stages
+still have to appear in order; an empty list still means a non-Beam request.
 """
 
 from __future__ import annotations
@@ -96,13 +98,13 @@ def score(case: dict, plan: dict, check_playbooks: bool) -> list[str]:
 
     if check_playbooks:
         want, got = case["playbooks"], [p.removesuffix(".md") for p in plan.get("playbooks", [])]
-        if want and (not got or got[0] != want[0]):
+        if want and (not got or got[0] not in group(want[0])):
             problems.append(f"wrong-playbook: started with {got[:1]}, expected {want[0]}")
         if not want and got:
             problems.append(f"wrong-playbook: used {got} for a non-Beam request")
         if len(want) > 1:
             it = iter(got)
-            if not all(p in it for p in want):
+            if not all(next((p for p in it if p in group(stage)), None) for stage in want):
                 problems.append(f"wrong-playbook: sequence {got} misses {want}")
 
     for alternatives in case.get("required", []):
