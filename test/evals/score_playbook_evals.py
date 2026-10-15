@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Score Beam Run plan evals.
 
-Usage: score_playbook_evals.py <plans.json> [--no-playbooks]
+Usage: score_playbook_evals.py <plans.json> [--no-playbooks] [--evals <file>]
 
 <plans.json> is the JSON array a runner returns for the requests in
 playbook-evals.json. Actions may be written as action ids, CLI command names or
 MCP tool names; all are mapped to action ids using beam/contracts/operations.yaml.
 --no-playbooks skips the playbook check (for versions without playbooks).
+--evals scores against another file with the same shape as playbook-evals.json.
 """
 
 from __future__ import annotations
@@ -17,7 +18,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-EVALS = json.loads((Path(__file__).parent / "playbook-evals.json").read_text())["evals"]
+EVALS_FILE = (Path(sys.argv[sys.argv.index("--evals") + 1]) if "--evals" in sys.argv
+              else Path(__file__).parent / "playbook-evals.json")
+EVALS = json.loads(EVALS_FILE.read_text())["evals"]
 
 
 TWO_TURN: set[str] = set()  # first call only previews; the confirmed second call acts
