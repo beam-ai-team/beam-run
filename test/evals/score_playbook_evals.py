@@ -144,6 +144,10 @@ def main() -> int:
             totals[kind] = totals.get(kind, 0) + 1
         print(f"{'PASS' if not problems else 'FAIL'}  {case['id']}" + "".join(f"\n      - {p}" for p in problems))
     print(f"\n{passed}/{len(EVALS)} passed")
+    reported = [p for p in plans.values() if "files_read" in p]
+    if reported:
+        full = sum(any(f.endswith("operations.yaml") for f in p["files_read"]) for p in reported)
+        print(f"  plans that opened the full action list: {full}/{len(reported)}")
     for kind, count in sorted(totals.items()):
         print(f"  {kind}: {count}")
     return 0 if passed == len(EVALS) else 1

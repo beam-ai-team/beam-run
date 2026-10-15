@@ -18,6 +18,7 @@ beam --version    # -> beam 0.7.0
 ```sh
 sh test/smoke.sh                       # offline checks
 sh test/playbook-contract.sh            # brief, playbooks and action list agree; safety stops intact
+python3 beam/scripts/check_playbooks.py --write   # refresh each playbook's Actions table after editing operations.yaml
 sh test/cross-host-contract.sh          # same public skill surface on every host
 sh test/activity-ux-contract.sh         # grouped, user-facing operation narration
 sh test/supervisor-contract.sh          # CLI fallback and safety contracts

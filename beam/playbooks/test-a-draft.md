@@ -47,3 +47,16 @@
   with made-up test values the user agrees to.
 - Detailed diagnosis guides: `../internal/agent-builder/references/validation.md`
   and `../internal/agent-builder/references/troubleshooting.md`.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `graph.test-node` | `testGraphNode` | `beam agent-builder test-node <agentId> <graphId> <nodeId> <paramsJson>` | no | — | Runs one step with explicit inputs; needs agentId, graphId, nodeId and a JSON params object. |
+| `task.create-draft` | — | `beam tasks test <agentId> <input>` | no | `task.get` | Runs the unpublished draft. For a batch, check the first task's agentGraphId before sending the rest. |
+| `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |

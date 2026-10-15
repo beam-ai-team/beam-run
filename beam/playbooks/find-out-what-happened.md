@@ -46,3 +46,21 @@
   `retry-stop-or-clean-up-runs.md` (retry the run).
 - "What's the overall success rate across all agents?": there is no single figure.
   Offer counts by status, or per-agent analytics.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `agent.history` | `beam_get_graph_history` | `beam agents history <agentId>` | no | — | — |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
+| `graph.node` | `getAgentGraph` | `beam agent-builder get-node <agentId> <nodeId>` | no | — | — |
+| `graph.nodes` | `getAgentGraph` | `beam agent-builder get-nodes <agentId>` | no | — | Light list of node id and objective. The entry node has the objective 'Entry Node'. |
+| `task.agents` | `beam_list_task_agents` | `beam tasks agents` | no | — | — |
+| `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
+| `task.latest` | `beam_get_latest_task_executions` | `beam tasks latest <agentId> [pageSize]` | no | — | Preferred over task.list for 'show me the latest runs' on one agent. |
+| `task.list` | `listAgentTasks` | `beam tasks list` | no | — | For a count read totalCount, never the number of rows returned. isDraftTask true means test runs and false means real runs; without it the list mixes both. The agent id is at agentGraph.agent.id. Use a small page size. |
+| `task.statuses` | `beam_get_task_statuses` | `beam tasks statuses [agentIds]` | no | — | Counts by status; pass agent ids to narrow. There is no single success rate across all agents, so never invent one. |

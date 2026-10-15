@@ -55,9 +55,11 @@ identifiers unless the user asks.
    their playbooks in order (for example: find out what happened → change an
    agent's flow → test a draft → check how an agent is doing), carrying the same
    workspace, agent, task and draft-or-live choice from one to the next.
-2. **Follow its steps.** Each step names an action id such as `task.retry`. Look the
-   action up in `../../contracts/operations.yaml` for how to run it, its fallback,
-   whether it needs the user's OK, what to re-read afterwards, and its notes.
+2. **Follow its steps.** Each step names an action id such as `task.retry`. The
+   playbook's own "Actions" table, at its end, says how to run each action, its CLI
+   command, whether it needs the user's OK, what to re-read afterwards, and its notes.
+   Do not read the full action list in `../../contracts/operations.yaml` for an
+   action the playbook already covers.
 3. **Finish on its "Done when".** Re-read whatever proves the result before you
    report it.
 

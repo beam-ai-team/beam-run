@@ -318,3 +318,9 @@
 - **Defect 2:** `beam agent-builder` launched the builder without the checked-out instance's key and workspace, and the builder only reads the legacy single-instance credentials file, so every builder command reported "Not signed in" for multi-instance users. The CLI now passes the checked-out key, workspace and API base, as `beam agents deploy` already did; covered in `test/session-checkout.sh`.
 - **Defect 3:** Publish readiness applied the custom-GPT prompt contract to the entry node, which Beam saves with an empty GPTAction tool. Every graph failed readiness, including the existing published Daily PR Digest, which would block publishing under the readiness rule. Entry nodes are now exempt; covered in `test/e2e-agent-builder.sh`.
 - Each new check was confirmed to fail without its fix.
+
+## 2026-10-15 — Give each playbook its own action table
+
+- **Problem:** Playbooks named action ids and sent the agent to the full action list (124 actions, about 3,350 words) for details, which could more than double the instructions read per request compared with the earlier screen cards.
+- **Decision:** `beam/scripts/check_playbooks.py --write` appends an "Actions" table to each playbook, copied from `operations.yaml` for only the actions that playbook names. The brief tells the agent to use that table. The action list stays the single source; the check fails if any table is stale (confirmed by editing one note).
+- **Result:** "Why did my run fail?" now reads about 2,100 words (brief plus playbook), against about 2,200 for the earlier design before main's session section and about 2,500 with it. "Build a new agent" reads about 2,550 against about 2,750.

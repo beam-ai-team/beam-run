@@ -33,3 +33,16 @@
 
 - Readiness fails: fix it with `change-an-agents-flow.md` first.
 - Publish times out: re-read `agent.get` before trying again.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `graph.get` | `getAgentGraph` | `beam agent-builder get-graph <agentId>` | no | — | Large (around 136 KB). Prefer graph.nodes for structure; fetch the full graph only for a node id or when the user asks for the whole thing. |
+| `graph.publish` | — | `beam agent-builder publish <graphId> --agent-id <agentId>` | explicit-publish-intent | `graph.get` | Makes the draft live. Only on a clear request to publish or go live, and only after graph.readiness passes. |
+| `graph.readiness` | — | `beam agent-builder readiness <agentId>` | no | — | Every graph change returns this report. Resolve every failure before testing or publishing. |

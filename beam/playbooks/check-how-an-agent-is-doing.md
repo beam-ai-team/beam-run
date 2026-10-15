@@ -40,3 +40,18 @@
   which takes longer. Offer to do it.
 - Across all agents: there is no single figure; offer counts by status from
   `find-out-what-happened.md`.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.history` | `beam_get_graph_history` | `beam agents history <agentId>` | no | — | — |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
+| `analytics.export` | — | `beam analytics export <agentId> <startDate> <endDate>` | no | — | Returns a shareable file link. |
+| `analytics.get` | `getAgentAnalytics` | `beam analytics get <agentId> [startDate] [endDate]` | no | — | Dates as Y-m-d. With no range given, use the agent's createdAt to today, not the current month. Read figures from currentPeriod and changes from metricsDelta. There is no per-tool failure figure; it has to be worked out from failed runs. |
+| `task.list` | `listAgentTasks` | `beam tasks list` | no | — | For a count read totalCount, never the number of rows returned. isDraftTask true means test runs and false means real runs; without it the list mixes both. The agent id is at agentGraph.agent.id. Use a small page size. |

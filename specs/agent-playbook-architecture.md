@@ -73,6 +73,10 @@ A playbook names the actions it uses. It never repeats how an action is carried 
 route or its safety rule. Those live once, in the action list, so a safety rule cannot end up
 different in two playbooks.
 
+Each playbook ends with an "Actions" table that a script copies from the action list, so the
+agent reads only the actions that playbook uses, never the whole list. The automatic check fails
+if any table is out of date.
+
 ## The 16 playbooks
 
 | Playbook | Handles | Replaces today's |

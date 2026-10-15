@@ -45,3 +45,20 @@
 - A retry fails the same way: stop retrying after the second attempt and continue
   with `find-out-what-happened.md`, then `change-an-agents-flow.md`.
 - A delete or abort times out: re-read before trying again.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `task.abort` | — | `beam tasks abort <taskId> --confirm <taskId> [--reason <text>]` | always | `task.get` | Stops a running task; different from task.cancel-wait. |
+| `task.cancel-wait` | `task_cancel_wait_node` | `beam tasks cancel-wait <taskNodeId> <agentId> --confirm <taskNodeId>` | always | `task.get` | Only for a step whose status is WAITING. The agent id is agentGraph.agentId from task.get. |
+| `task.delete` | — | `beam tasks delete <taskId> --confirm <taskId>` | always | `task.list` | — |
+| `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
+| `task.latest` | `beam_get_latest_task_executions` | `beam tasks latest <agentId> [pageSize]` | no | — | Preferred over task.list for 'show me the latest runs' on one agent. |
+| `task.list` | `listAgentTasks` | `beam tasks list` | no | — | For a count read totalCount, never the number of rows returned. isDraftTask true means test runs and false means real runs; without it the list mixes both. The agent id is at agentGraph.agent.id. Use a small page size. |
+| `task.rate` | `rateTaskOutput` | `beam tasks rate <taskId> <up\|down> [feedback]` | no | — | — |
+| `task.retry` | `retryTaskExecution` | `beam tasks retry <taskId> [--task-node-id <taskNodeId> --feedback <text>]` | required-if-production-side-effect | `task.get` | Retry from a step needs one task id plus the taskNodeId and feedback text. Confirm before retrying more than five. |

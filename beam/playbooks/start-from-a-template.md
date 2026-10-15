@@ -43,3 +43,20 @@
   search with `agent.list` instead.
 - Next steps after creating: `test-a-draft.md`, `change-an-agents-flow.md`, then
   `publish-a-draft.md`.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
+| `template.categories` | `beam_list_template_categories` | `beam templates categories` | no | — | Resolve a category name to its id before filtering. |
+| `template.create-agent` | — | `beam templates create-agent <templateId>` | no | `agent.get` | Read the full template first and pass its graph as is (a nested graph-and-tools object). The new agent is a draft. |
+| `template.get` | — | `beam templates get <templateId>` | no | — | — |
+| `template.list` | — | `beam templates list` | no | — | Rows use title and shortDescription. count is the full library total: page with pageNum and never present one page as the whole library. |
+| `template.prerequisites` | `beam_get_template_with_prerequisites` | `beam templates get <templateId> + beam integrations connected` | no | — | missingIntegrations is the 'what do I connect first' answer. |
+| `template.recommend` | — | `beam templates recommend [categoryId]` | no | — | Prefer this over keyword search for 'what should I build?'. |

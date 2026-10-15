@@ -53,3 +53,24 @@
   `beam://integrations?provider=<name>`.
 - "Which agents use this connection?": there is no lookup for that; say so plainly.
 - A slug such as "gmail" returns 400: use the UUID from `integration.connected`.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `integration.categories` | `beam_list_integration_categories` | `beam integrations categories` | no | — | — |
+| `integration.connect` | — | `beam integrations connect <payloadFile>` | required-if-credentials-or-external-effect | — | OAuth providers must be finished by the user in the browser: link beam://integrations?provider=<name>. Never ask for a secret in chat or echo one back; credentials go only in a local payload file. A custom integration uses provider custom with identifier httpCustomAuth (token) or httpBasicAuth (basic). |
+| `integration.connected` | — | `beam integrations connected` | no | — | Only status 'active' counts as connected; pending and inactive do not. |
+| `integration.connections` | — | `beam integrations connections <integrationId>` | no | — | Needs the integration UUID from integration.connected, not a slug such as 'gmail' (that returns 400). Offer to tidy up when a provider has two or more active connections. |
+| `integration.custom-create` | — | `beam integrations custom-create <payloadFile>` | no | — | Creates an unconnected definition; follow with integration.connect. authType is none, token, basic or oauth (there is no 'apiKey'); token also needs apiKeyType. Resolve the category with integration.categories; never invent its id. |
+| `integration.custom-remove` | — | `beam integrations custom-remove <id> --confirm <id>` | always | — | — |
+| `integration.custom-update` | — | `beam integrations custom-update <id> <payloadFile>` | no | — | A full replace, not a partial change. |
+| `integration.is-connected` | `beam_is_integration_connected` | `beam integrations is-connected <toolFunctionName>` | no | — | Workspace connection state. A step's own isIntegrationConnected is per-agent wiring; never infer one from the other. |
+| `integration.list` | — | `beam integrations list` | no | — | The catalog can be large; filter and use a small page size. |
+| `integration.remove` | — | `beam integrations remove <providerId> --confirm <providerId>` | always | — | providerId is the connection row id, not the catalog integrationId. |
+| `integration.set-default` | — | `beam integrations set-default <providerId> <integrationId>` | no | — | providerId is the connection row id, not the catalog integrationId. |
+| `integration.update` | `integration_update_connection` | `beam integrations update <payloadFile>` | no | `integration.connections` | providerId is the connection row id, not the catalog integrationId. |

@@ -43,3 +43,25 @@
 
 - The user asks to change something: continue with `change-an-agents-flow.md`.
 - A webhook URL is shown: remind the user that anyone with it can start runs.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `agent.get` | `getAgentGraph` | `beam agents get <agentId>` | no | — | Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics. |
+| `agent.history` | `beam_get_graph_history` | `beam agents history <agentId>` | no | — | — |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
+| `agent.sub-agents` | `beam_list_sub_agents` | `beam agents sub-agents <agentId>` | no | — | — |
+| `agent.tools` | `beam_get_agent_tools` | `beam agents tools <agentId>` | no | — | Report toolName, description and requiresConsent per tool. Each tool's toolFunctionName is the key for integration.is-connected. |
+| `graph.get` | `getAgentGraph` | `beam agent-builder get-graph <agentId>` | no | — | Large (around 136 KB). Prefer graph.nodes for structure; fetch the full graph only for a node id or when the user asks for the whole thing. |
+| `graph.node` | `getAgentGraph` | `beam agent-builder get-node <agentId> <nodeId>` | no | — | — |
+| `graph.nodes` | `getAgentGraph` | `beam agent-builder get-nodes <agentId>` | no | — | Light list of node id and objective. The entry node has the objective 'Entry Node'. |
+| `graph.readiness` | — | `beam agent-builder readiness <agentId>` | no | — | Every graph change returns this report. Resolve every failure before testing or publishing. |
+| `graph.triggers` | `getAgentGraph` | `beam agent-builder get-triggers <agentId> <entryNodeId>` | no | — | Needs the entry node id from graph.nodes as well as the agent id. |
+| `graph.verify-links` | `getAgentGraph` | `beam agent-builder verify-links <agentId>` | no | — | Report any broken link by node. Changes are checked with graph.readiness, which includes links. |
+| `graph.webhook` | `getAgentGraph` | `beam agent-builder get-webhook <agentId>` | no | — | — |
+| `integration.is-connected` | `beam_is_integration_connected` | `beam integrations is-connected <toolFunctionName>` | no | — | Workspace connection state. A step's own isIntegrationConnected is per-agent wiring; never infer one from the other. |

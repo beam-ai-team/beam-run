@@ -7,7 +7,10 @@
 - every action in operations.yaml is used by at least one playbook;
 - every action that needs confirmation, used in a playbook's Steps, is named
   under that playbook's "Stop and ask";
-- every file a playbook points to exists.
+- every file a playbook points to exists;
+- every playbook ends with an up-to-date table of the actions it names, so the
+  agent never has to read the full action list. Regenerate the tables with
+  `python3 beam/scripts/check_playbooks.py --write`.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ SECTIONS = ["When to use", "What you need first", "Steps", "Stop and ask", "Done
 MAX_LINES = 100
 ACTION = re.compile(r"`([a-z]+\.[a-z][a-z0-9-]*)`")
 FILE_REF = re.compile(r"`((?:\.\./)?[A-Za-z0-9_./-]+\.(?:md|json))`")
+TABLE_HEADING = "## Actions"
 
 
 def load_operations() -> dict[str, dict[str, str]]:
@@ -50,9 +54,37 @@ def actions_in(text: str) -> set[str]:
     return {a for a in ACTION.findall(text) if not a.endswith(".md")}
 
 
+def action_table(actions: set[str], ops: dict[str, dict[str, str]]) -> str:
+    def cell(value: str) -> str:
+        return value.strip().strip('"').replace("|", "\\|")
+    rows = [
+        TABLE_HEADING,
+        "",
+        "Generated from `../contracts/operations.yaml`; do not edit by hand. Run each",
+        "action through its MCP tool, or its CLI command when MCP is unavailable (always",
+        "the CLI in Codex). Re-read with the re-check action after a change.",
+        "",
+        "| Action | MCP tool | CLI | Needs OK | Re-check | Notes |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for action in sorted(actions):
+        f = ops[action]
+        mcp = f.get("mcp", "null")
+        rows.append("| `{}` | {} | `{}` | {} | {} | {} |".format(
+            action,
+            "—" if mcp == "null" else f"`{cell(mcp)}`",
+            cell(f.get("cli", "")),
+            "no" if f.get("confirmation", "none") == "none" else cell(f["confirmation"]),
+            f"`{f['postRead']}`" if f.get("postRead") else "—",
+            cell(f.get("notes", "")) or "—",
+        ))
+    return "\n".join(rows) + "\n"
+
+
 def main() -> int:
     errors: list[str] = []
     ops = load_operations()
+    write = "--write" in sys.argv
 
     for op, fields in ops.items():
         for key in ("safety", "cli", "status"):
@@ -73,7 +105,9 @@ def main() -> int:
 
     used: set[str] = set()
     for path in files:
-        text = path.read_text()
+        full = path.read_text()
+        text, _, table = full.partition("\n" + TABLE_HEADING + "\n")
+        text = text.rstrip("\n") + "\n"
         name = path.name
         if not text.startswith("# "):
             errors.append(f"{name}: no title")
@@ -87,6 +121,11 @@ def main() -> int:
         used |= named
         for action in sorted(named - ops.keys()):
             errors.append(f"{name}: names unknown action {action}")
+        expected = text + "\n" + action_table(named & ops.keys(), ops)
+        if write:
+            path.write_text(expected)
+        elif full != expected:
+            errors.append(f"{name}: action table is missing or out of date; run check_playbooks.py --write")
 
         parts = sections(text)
         stop = actions_in(parts.get("Stop and ask", ""))

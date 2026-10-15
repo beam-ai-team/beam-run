@@ -45,3 +45,16 @@
 - No workspace selected (exit 2): ask the user to pick from a short list.
 - No agents found: say so plainly and offer `start-from-a-template.md` or
   `build-a-new-agent.md`.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
+| `docs.search` | — | `beam docs <query> [--page url]` | no | — | Check the live product docs before relying on how a feature works (loops, automation modes, publishing, triggers, evaluation); the live docs outrank any vendored note. |
+| `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |
+| `workspace.create` | — | `beam workspace create <name> [--domain domain] [--icon-src url]` | explicit-workspace-create-intent | `user.current` | Creating a workspace does not switch to it. |

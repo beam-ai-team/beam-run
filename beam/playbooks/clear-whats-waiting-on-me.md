@@ -49,3 +49,20 @@
 - The value needed for an input is not known: ask the user; do not invent it.
 - The feed is empty: say so plainly.
 - The approved run then fails: continue with `find-out-what-happened.md`.
+
+## Actions
+
+Generated from `../contracts/operations.yaml`; do not edit by hand. Run each
+action through its MCP tool, or its CLI command when MCP is unavailable (always
+the CLI in Codex). Re-read with the re-check action after a change.
+
+| Action | MCP tool | CLI | Needs OK | Re-check | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `inbox.delete` | — | `beam inbox delete <notificationId> --confirm <notificationId>` | always | — | Confirm every delete, and especially a sweep of many notifications. |
+| `inbox.list` | — | `beam inbox list` | no | — | Each row carries agentId and agentTaskId; resolve the task from those. |
+| `inbox.mark-read` | — | `beam inbox mark-read <notificationId>` | no | — | — |
+| `inbox.unread-count` | — | `beam inbox unread-count` | no | — | — |
+| `task.approve` | `approveTaskExecution` | `beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>` | always | `task.get` | Before asking, show what the agent is about to do: the tool and its parameters from the paused step. |
+| `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
+| `task.reject` | `rejectTaskExecution` | `beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason <text>]` | always | `task.get` | Ends the task. |
+| `task.submit-input` | `submitUserInput` | `beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>` | confirm-proposed-values | `task.get` | Answer the paused step's userQuestions. Never guess a value; propose it and get it confirmed. |
