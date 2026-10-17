@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stand-in for a host CLI: tests must never reach a real one. Fails, so beam falls back to its own config writer.
+printf "%s %s\n" "$(basename "$0")" "$*" >> "${BEAM_STUB_LOG:-/dev/null}"
+exit 1

@@ -2,6 +2,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 BEAM="$ROOT/beam/bin/beam"
 PROXY="$ROOT/beam/bin/mcp_proxy.py"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/beam-session-test.XXXXXX")"
@@ -17,6 +18,10 @@ out=""; url=""; key=""; workspace=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
+    -K)  # beam passes headers in a private config file, never on the command line
+      key="$(sed -n 's/^header = "x-api-key: \(.*\)"$/\1/p' "$2")"
+      workspace="$(sed -n 's/^header = "current-workspace-id: \(.*\)"$/\1/p' "$2")"
+      shift 2 ;;
     -H)
       case "$2" in
         x-api-key:*) key="${2#x-api-key: }" ;;
@@ -59,9 +64,10 @@ status_call='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bea
 printf '\n=== connection requires a workspace URL ===\n'
 if missing_url="$(run BEAM_SESSION_ID=no-url BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
 if [ "$rc" -ne 3 ] || ! printf '%s' "$missing_url" | grep -q workspace_url_missing; then fail "login assumed an instance without a workspace URL"; fi
-if root_url="$(run BEAM_SESSION_ID=root-url BEAM_WORKSPACE_URL=https://app.beam.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
-if [ "$rc" -ne 2 ] || ! printf '%s' "$root_url" | grep -q workspace_url_invalid; then fail "login accepted an instance root instead of a workspace URL"; fi
-ok "new connections never assume Beam App"
+if root_url="$(run BEAM_SESSION_ID=root-url BEAM_CONFIG_DIR="$tmp/root-config" BEAM_WORKSPACE_URL=https://app.beam.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ] || [ ! -f "$tmp/root-config/instances/app" ]; then fail "an explicitly typed instance address was refused"; fi
+printf '%s' "$root_url" | grep -q '"status":"choose_workspace"' || fail "an instance address should leave the workspace to choose afterwards"
+ok "new connections never assume Beam App; a typed instance address leaves the workspace to choose"
 
 printf '\n=== detected instances and duplicate safety ===\n'
 run BEAM_SESSION_ID=login BEAM_WORKSPACE_URL=https://app.beam.ai/prod-a/agents BEAM_API_KEY=prod-key sh "$BEAM" login --workspace-id Alpha >/dev/null 2>&1 || fail "Beam App login"
@@ -78,12 +84,15 @@ printf '\n=== structured session initialization ===\n'
 mkdir -p "$tmp/empty-config"
 new_user="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=new-user BEAM_API_KEY= python3 "$PROXY")"
 printf '%s' "$new_user" | grep -q 'Beam session setup' || fail "new-user status omitted setup heading"
-printf '%s' "$new_user" | grep -q 'Paste a Beam workspace URL' || fail "new-user status omitted URL step"
-printf '%s' "$new_user" | grep -q 'Enter the API key in the hidden prompt' || fail "new-user status omitted secure key step"
-printf '%s' "$new_user" | grep -q 'Select or create a workspace' || fail "new-user status omitted workspace step"
+printf '%s' "$new_user" | grep -q 'which Beam instance' || fail "new-user status omitted the instance question"
+printf '%s' "$new_user" | grep -q 'Connect link' || fail "new-user status omitted the Connect link step"
+printf '%s' "$new_user" | grep -q 'beam login --wait <instanceId>' || fail "new-user status omitted the wait step"
+printf '%s' "$new_user" | grep -q 'sandbox_blocked' || fail "new-user status omitted the sandbox step"
+printf '%s' "$new_user" | grep -q 'ask the user to create one in Beam first' || fail "new-user status omitted the no-workspace step"
+if printf '%s' "$new_user" | grep -q 'API key'; then fail "new-user status asks for a key"; fi
 if printf '%s' "$new_user" | grep -q 'Ask the user\|Never ask\|skill\|policy card'; then fail "new-user response exposed agent instructions"; fi
 setup_user="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"beam_setup_status","arguments":{}}}' | env BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=setup-user BEAM_API_KEY= python3 "$PROXY")"
-printf '%s' "$setup_user" | grep -q 'Paste a Beam workspace URL' || fail "setup skill status omitted the first connection step"
+printf '%s' "$setup_user" | grep -q 'beam login <instance>' || fail "setup skill status omitted the first connection step"
 if new_checkout="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=new-checkout PATH="$tmp/bin:$PATH" sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 3 ] || fail "unconnected checkout should require login"
 printf '%s' "$new_checkout" | grep -q 'Beam session setup' || fail "unconnected CLI omitted structured setup"

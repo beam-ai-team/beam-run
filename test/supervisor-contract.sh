@@ -3,6 +3,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 BEAM="$ROOT/beam/bin/beam"
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 ok() { printf '  ok   %s\n' "$1"; }
@@ -64,6 +65,10 @@ bearer=false
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="${2:-}"; shift 2 ;;
+    -K)
+      grep -q '^header = "x-api-key:' "$2" && api_key=true
+      grep -q '^header = "Authorization: Bearer ' "$2" && bearer=true
+      shift 2 ;;
     -H)
       case "${2:-}" in
         x-api-key:*) api_key=true ;;

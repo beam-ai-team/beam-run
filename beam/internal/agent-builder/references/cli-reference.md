@@ -10,11 +10,12 @@ beam agent-builder <command> [args]
 ## Conventions
 
 - **Credentials** resolve automatically: environment variables first, then
-  `~/.config/beam/credentials` (written by `beam login`); `BEAM_API_URL`
+  the saved connection under `~/.config/beam/instances/` (written by `beam login`); `BEAM_API_URL`
   defaults to the public API. A loopback URL is accepted only with
   `BEAM_LOCAL_DEV=1`, so inherited developer-shell settings cannot redirect a
   production install. There is no `.env` file. Never ask the user to
-  paste a key into the chat — if nothing resolves, the fix is `beam login`.
+  paste a key into the chat — if nothing resolves, the fix is `beam login
+  <instance>` (browser Connect; poll `beam login --wait <instanceId>` until it says connected).
 - **Output**: every command prints one JSON object to **stdout**. Success →
   `{"ok": true, "command": "...", ...}`. Failure → `{"ok": false, "code": "...",
   "error": "...", "next": "..."}` plus a categorical exit code: 1 internal,
