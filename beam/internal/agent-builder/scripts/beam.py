@@ -180,6 +180,8 @@ def _creds_file_values():
     into the chat (which the plugin's setup skill explicitly forbids).
     Parsed line by line - the file is never sourced or executed.
     """
+    if os.environ.get("BEAM_MANAGED_CONTEXT") == "1":
+        return {}
     config_dir = _config_dir()
     path = os.path.join(config_dir, "credentials")
     values = {}
@@ -235,6 +237,14 @@ def resolve_creds():
 # HTTP layer (stdlib urllib)
 # ===========================================================================
 
+def _record_managed_http_status(status):
+    """Numeric auth result only; the host owns this ephemeral file."""
+    path = os.environ.get("BEAM_MANAGED_HTTP_STATUS_FILE")
+    if os.environ.get("BEAM_MANAGED_CONTEXT") == "1" and path and status in (401, 403):
+        with open(path, "w", encoding="ascii") as stream:
+            stream.write(str(status))
+
+
 def _http(method, url, headers, body=None, params=None, timeout=HTTP_TIMEOUT):
     """Perform an HTTP request; return parsed JSON (or {} when the body is empty)."""
     if params:
@@ -250,6 +260,7 @@ def _http(method, url, headers, body=None, params=None, timeout=HTTP_TIMEOUT):
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
+        _record_managed_http_status(exc.code)
         detail = ""
         try:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -346,6 +357,7 @@ class Api:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            _record_managed_http_status(exc.code)
             detail = ""
             try:
                 detail = exc.read().decode("utf-8", errors="replace")
@@ -1865,6 +1877,7 @@ def _fetch_text(url, timeout=HTTP_TIMEOUT):
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
+        _record_managed_http_status(exc.code)
         raise BeamError(f"GET {url} failed ({exc.code}).", code="api_error",
                         next_step="Check the page against the index: beam agent-builder docs <query>.")
     except urllib.error.URLError as exc:

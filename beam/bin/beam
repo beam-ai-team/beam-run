@@ -267,6 +267,15 @@ activate_profile_file() {
 }
 
 load_session_context() {
+  # Hosted callers own their credentials and immutable conversation target.
+  if [ "${BEAM_MANAGED_CONTEXT:-}" = "1" ]; then
+    [ -n "${BEAM_API_KEY:-}" ] && [ -n "${BEAM_API_URL:-}" ] && [ -n "${BEAM_SESSION_ID:-}" ] \
+      || die "managed_context_missing" "the host must supply credentials, API origin and session identity" 3
+    ACTIVE_INSTANCE_ID=""
+    ACTIVE_INSTANCE_NAME="${BEAM_INSTANCE_NAME:-Beam}"
+    CREDS_FILE="$CONFIG_DIR/no-managed-credentials"
+    return
+  fi
   instance="$(file_value "$SESSION_FILE" BEAM_INSTANCE_ID 2>/dev/null || true)"
   if [ -n "$instance" ]; then
     if activate_profile_file "$(profile_file "$instance")"; then return; fi
@@ -499,6 +508,12 @@ elif isinstance(ws, list) and ws:
 # --- resilient HTTP ------------------------------------------------------------
 # Returns: 0 ok (body on stdout) - 3 auth - 5 network/other. Bounded retry+backoff.
 
+record_managed_http_status() {
+  if [ "${BEAM_MANAGED_CONTEXT:-}" = "1" ] && [ -n "${BEAM_MANAGED_HTTP_STATUS_FILE:-}" ]; then
+    case "$1" in 401|403) printf '%s' "$1" > "$BEAM_MANAGED_HTTP_STATUS_FILE" ;; esac
+  fi
+}
+
 _http_get() {
   # $1 = full URL ; remaining args = extra curl args (e.g. -H "Name: value")
   url="$1"; shift
@@ -520,6 +535,7 @@ _http_get() {
       if [ "$attempt" -lt "$max" ]; then sleep "$delay"; delay=$((delay * 2)); attempt=$((attempt + 1)); continue; fi
       rm -f "$tmp"; return 5
     fi
+    record_managed_http_status "$code"
     case "$code" in
       2*) cat "$tmp"; rm -f "$tmp"; return 0 ;;
       401|403) rm -f "$tmp"; return 3 ;;
@@ -637,6 +653,7 @@ _http_send() {
       -X "$method" -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then cx=0; else cx=$?; fi
   fi
   if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
+  record_managed_http_status "$code"
   case "$code" in
     2*) cat "$tmp"; rm -f "$tmp"; return 0 ;;
     401|403) rm -f "$tmp"; return 3 ;;
@@ -866,6 +883,13 @@ cmd_instance() {
 }
 
 cmd_checkout() {
+  if [ "${BEAM_MANAGED_CONTEXT:-}" = "1" ]; then
+    [ $# -eq 0 ] || die "managed_context_locked" "the host owns this session's Beam target" 2
+    printf '{"instanceId":%s,"instanceName":%s,"workspaceId":%s,"workspaceName":%s,"locked":true,"managed":true}\n' \
+      "$(json_quote "${BEAM_INSTANCE_ID:-managed}")" "$(json_quote "${BEAM_INSTANCE_NAME:-Beam}")" \
+      "$(json_quote "${BEAM_WORKSPACE_ID:-}")" "$(json_quote "${BEAM_WORKSPACE_NAME:-}")"
+    return
+  fi
   selector="${1:-}"; workspace_selector="${2:-}"
   [ $# -le 2 ] || die "validation_error" "usage: beam checkout <instance> [workspace]" 2
   if [ -z "$selector" ]; then
@@ -2673,10 +2697,19 @@ cmd_uninstall() {
 main() {
   if [ $# -eq 0 ]; then cmd_help; exit 0; fi
   cmd="$1"; shift
+  if [ "${BEAM_MANAGED_CONTEXT:-}" = "1" ]; then
+    case "$cmd" in login|logout|setup|register|uninstall|workspace|instance|mcp)
+      # Workspace creation remains available through the operation contract.
+      if [ "$cmd" != workspace ] || [ "${1:-}" != create ]; then
+        die "managed_context_locked" "the host manages Beam connections and workspace selection" 2
+      fi ;;
+    esac
+  fi
   case "$cmd" in -h|--help|help|--version|version) ;; *) load_session_context ;; esac
   case "$cmd" in
     -h|--help|help) cmd_help ;;
     --version|version) printf 'beam %s\n' "$VERSION" ;;
+    manifest) python3 "$(script_dir)/operation_manifest.py" ;;
     setup) cmd_setup "$@" ;;
     doctor) cmd_doctor "$@" ;;
     login) cmd_login "$@" ;;
