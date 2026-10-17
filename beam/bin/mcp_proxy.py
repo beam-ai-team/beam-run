@@ -204,10 +204,11 @@ def connections_text():
             "🚀 Beam session setup\n"
             "✅ Beam Run ready\n"
             "⬜ Connect Beam\n\n"
-            "Next: run `beam login` in a terminal.\n"
-            "1. Paste a Beam workspace URL\n"
-            "2. Enter the API key in the hidden prompt\n"
-            "3. Select or create a workspace"
+            "Next: run `beam login <workspace URL>`, using any URL from the user's Beam workspace.\n"
+            "1. Show the Connect link it prints as a clickable link; the user approves it in their browser\n"
+            "2. Run `beam login --wait` every few seconds until it reports connected (each call returns quickly)\n"
+            "3. If it reports sandbox_blocked, re-run the same command with network access approved, or add --paste\n"
+            "4. If it lists workspaces, ask which one to use; if there are none, ask the user to create one in Beam first"
         )
     rows = []
     for number, path in enumerate(profiles, 1):

@@ -59,8 +59,9 @@ external software.
 Learning Hub commands cover the documented issue, feedback, job, tuner, and
 accuracy APIs. Use `beam learning` to access them; the public contract is
 available at [Beam API docs](https://api.beamstudio.ai/public-docs).
-`beam login` asks for a familiar Beam workspace URL before the key, derives Beam
-App, Beam Enterprise, or Beam `{Region}`, and saves that connection locally. Each
+`beam login <workspace URL>` derives Beam App, Beam Enterprise, or Beam `{Region}`,
+prints a Connect link to approve in the browser (no API key to copy), and saves
+that connection locally. `beam logout` deletes the key in Beam. Each
 conversation checks out and locks one instance and workspace; parallel
 conversations can use different contexts without sharing active state.
 
@@ -100,4 +101,4 @@ Then follow the instructions in that document for your agent environment.
 - Beam product / Academy: https://docs.beam.ai — `beam docs <query>` searches it and reads a page from the terminal; `beam models` lists the workspace's live model catalog
 - MCP connection reference: https://docs.beam.ai/08-reference/api/mcp-connection/mcp-connection
 - API base: `https://api.beamstudio.ai`
-- Auth: API key from Beam → Personal settings → API Keys (`x-api-key` for CLI; Bearer for MCP)
+- Auth: browser Connect creates the key for you (`x-api-key` for CLI; Bearer for MCP); an API key from Beam → Personal settings → API Keys still works for older instances

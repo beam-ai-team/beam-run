@@ -78,12 +78,15 @@ printf '\n=== structured session initialization ===\n'
 mkdir -p "$tmp/empty-config"
 new_user="$(printf '%s\n' "$status_call" | env BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=new-user BEAM_API_KEY= python3 "$PROXY")"
 printf '%s' "$new_user" | grep -q 'Beam session setup' || fail "new-user status omitted setup heading"
-printf '%s' "$new_user" | grep -q 'Paste a Beam workspace URL' || fail "new-user status omitted URL step"
-printf '%s' "$new_user" | grep -q 'Enter the API key in the hidden prompt' || fail "new-user status omitted secure key step"
-printf '%s' "$new_user" | grep -q 'Select or create a workspace' || fail "new-user status omitted workspace step"
+printf '%s' "$new_user" | grep -q 'beam login <workspace URL>' || fail "new-user status omitted URL step"
+printf '%s' "$new_user" | grep -q 'Connect link' || fail "new-user status omitted the Connect link step"
+printf '%s' "$new_user" | grep -q 'beam login --wait' || fail "new-user status omitted the wait step"
+printf '%s' "$new_user" | grep -q 'sandbox_blocked' || fail "new-user status omitted the sandbox step"
+printf '%s' "$new_user" | grep -q 'ask the user to create one in Beam first' || fail "new-user status omitted the no-workspace step"
+if printf '%s' "$new_user" | grep -q 'API key'; then fail "new-user status asks for a key"; fi
 if printf '%s' "$new_user" | grep -q 'Ask the user\|Never ask\|skill\|policy card'; then fail "new-user response exposed agent instructions"; fi
 setup_user="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"beam_setup_status","arguments":{}}}' | env BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=setup-user BEAM_API_KEY= python3 "$PROXY")"
-printf '%s' "$setup_user" | grep -q 'Paste a Beam workspace URL' || fail "setup skill status omitted the first connection step"
+printf '%s' "$setup_user" | grep -q 'beam login <workspace URL>' || fail "setup skill status omitted the first connection step"
 if new_checkout="$(env HOME="$tmp" BEAM_CONFIG_DIR="$tmp/empty-config" BEAM_SESSION_ID=new-checkout PATH="$tmp/bin:$PATH" sh "$BEAM" checkout 2>&1)"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 3 ] || fail "unconnected checkout should require login"
 printf '%s' "$new_checkout" | grep -q 'Beam session setup' || fail "unconnected CLI omitted structured setup"

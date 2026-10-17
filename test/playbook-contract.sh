@@ -28,4 +28,19 @@ op learning.approve-job | grep -q 'confirmation: always-two-turn' || fail "live 
 op graph.create-trigger | grep -q 'confirmation: explicit' || fail "trigger creation confirmation missing"
 ok "publish, live runs, approvals, deletion, live prompt changes and triggers stop for the user"
 
+printf '\n=== setup skill: Connect wording ===\n'
+setup=beam/skills/setup/SKILL.md
+# Everything outside "## Fallbacks" is the Connect path: no key pasting, no mandatory restart.
+connect_path="$(awk '/^## Fallbacks/{skip=1; next} /^## /{skip=0} !skip' "$setup")"
+if printf '%s\n' "$connect_path" | grep -iE 'paste (an |your |the )?(api )?key|enter (the |your )?(api )?key|hidden prompt|masked' | grep -v '^- \*\*Never\*\*' | grep -q .; then
+  fail "the setup skill tells the user to paste a key on the Connect path"
+fi
+if grep -ihE 'restart' "$setup" GETTING_STARTED.md TESTING.md | grep -iE 'afterward([^s]|$)|after (you )?(connect|sign|log)' | grep -viE 'no restart|not needed|not required|only' | grep -q .; then
+  fail "a restart is described as required after connecting"
+fi
+for needle in 'beam login <workspace URL>' 'beam login --wait' 'sandbox_blocked' 'no_workspace' 'choose_workspace' 'clickable link' 'beam login --callback'; do
+  grep -qF "$needle" "$setup" || fail "the setup skill omits: $needle"
+done
+ok "the setup skill drives Connect, never asks for a key on that path, and needs no restart"
+
 printf '\nPlaybook contract checks PASSED.\n'
