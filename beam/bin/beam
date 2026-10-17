@@ -152,7 +152,7 @@ app_url_from_api() {
   # $1 = API origin; prints the matching app origin, or nothing for a custom host.
   case "${1%/}" in
     https://api.beamstudio.ai) printf 'https://app.beam.ai' ;;
-    https://api.enterprise.beamstudio.ai) printf 'https://enterprise.beamstudio.ai' ;;
+    https://api.enterprise.beamstudio.ai) printf 'https://app.enterprise.beam.ai' ;;
     https://api.staging.beamstudio.ai) printf 'https://app.staging.beamstudio.ai' ;;
     https://api.*.beamstudio.ai) region="${1#https://api.}"; printf 'https://app.%s.beam.ai' "${region%%.beamstudio.ai*}" ;;
     http://localhost:*|http://127.0.0.1:*) if [ "${BEAM_LOCAL_DEV:-}" = "1" ]; then printf 'http://localhost:3000'; fi ;;
@@ -171,7 +171,7 @@ instance_origin() {
   case "$wanted" in
     app) printf 'https://app.beam.ai' ;;
     staging) printf 'https://app.staging.beamstudio.ai' ;;
-    enterprise) printf 'https://enterprise.beamstudio.ai' ;;
+    enterprise) printf 'https://app.enterprise.beam.ai' ;;
     local) if [ "${BEAM_LOCAL_DEV:-}" = "1" ]; then printf 'http://localhost:3000'; fi ;;
     *) printf 'https://app.%s.beam.ai' "$wanted" ;;
   esac
@@ -551,15 +551,20 @@ elif isinstance(ws, list) and ws:
 
 # --- resilient HTTP ------------------------------------------------------------
 
+_NL='
+'
+_CR="$(printf '\r')"
+
 beam_curl() {
   # curl with every -H value moved into a private config file, so keys never appear in `ps`.
-  _bc_cfg="$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.cfg.$$")"
-  chmod 600 "$_bc_cfg" 2>/dev/null || true
-  trap 'rm -f "${_bc_cfg:?}"; exit 130' INT TERM
+  # A value with a line break could add curl options to that file, so it is refused.
+  _bc_cfg="$(umask 077; mktemp 2>/dev/null || { _bc_f="${TMPDIR:-/tmp}/beam.cfg.$$"; : > "$_bc_f"; printf '%s' "$_bc_f"; })"
+  trap 'rm -f "${_bc_cfg:?}"; exit 130' INT TERM HUP
   _bc_n=$#
   while [ "$_bc_n" -gt 0 ]; do
     _bc_a="$1"; shift; _bc_n=$((_bc_n - 1))
     if [ "$_bc_a" = "-H" ] && [ "$_bc_n" -gt 0 ]; then
+      case "$1" in *"$_NL"*|*"$_CR"*) rm -f "${_bc_cfg:?}"; die "validation_error" "refusing to send a credential or header that contains a line break" 2 ;; esac
       printf 'header = "%s"\n' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')" >> "$_bc_cfg"
       shift; _bc_n=$((_bc_n - 1))
     else
@@ -567,7 +572,7 @@ beam_curl() {
     fi
   done
   if curl -K "$_bc_cfg" "$@"; then _bc_rc=0; else _bc_rc=$?; fi
-  rm -f "${_bc_cfg:?}"; trap - INT TERM
+  rm -f "${_bc_cfg:?}"; trap - INT TERM HUP
   return "$_bc_rc"
 }
 
@@ -1105,7 +1110,7 @@ EOF
 cmd_login() {
   load_session_context
   key=""; workspace=""; workspace_url="${BEAM_WORKSPACE_URL:-}"; url_kind="workspace"; replace=0
-  force_key=0; paste=0; wait_mode=0; callback_url=""; positional=""; connect=""; workspace_hint=""; bare_origin=0
+  force_key=0; paste=0; wait_mode=0; callback_url=""; positional=""; connect=""; workspace_hint=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --api-key) case "${2:-}" in
@@ -1152,8 +1157,8 @@ cmd_login() {
     case "$workspace_hint" in *[!A-Za-z0-9._-]*) workspace_hint="" ;; esac
   fi
   if ! derive_instance_from_url "$workspace_url" "$url_kind"; then
-    # A bare instance address is enough for Connect (the workspace is chosen after sign-in), but not for a key.
-    if [ "$url_kind" = "workspace" ] && [ -z "$key" ] && [ -z "${BEAM_API_KEY:-}" ] && [ "$force_key" -eq 0 ] && derive_instance_from_url "$workspace_url" origin; then bare_origin=1
+    # A bare instance address is enough (the workspace is chosen after sign-in), with Connect or with a key.
+    if [ "$url_kind" = "workspace" ] && derive_instance_from_url "$workspace_url" origin; then url_kind="origin"
     else die "workspace_url_invalid" "use a Beam instance (app, staging, enterprise, or a region such as anz) or a workspace URL such as https://app.us.beam.ai/<workspace>" 2; fi
   fi
   existing_profile="$(profile_for_api "$DETECTED_API_URL" 2>/dev/null || true)"
@@ -1167,7 +1172,6 @@ cmd_login() {
 
   if [ -z "$key" ] && [ -z "${BEAM_API_KEY:-}" ] && [ "$force_key" -eq 0 ] && login_probe; then login_connect; return; fi
 
-  [ "$bare_origin" -eq 0 ] || die "workspace_url_invalid" "$DETECTED_INSTANCE_NAME does not support browser sign-in yet. Use a workspace URL (https://…/<workspace>) with an API key instead." 2
 
   if [ "$key" = "-" ]; then IFS= read -r key || true; fi
   if [ -z "$key" ] && [ -n "${BEAM_API_KEY:-}" ]; then key="$BEAM_API_KEY"; fi
@@ -1297,7 +1301,7 @@ login_failed() {
   if [ -n "${pending:-}" ]; then rm -f "${pending:?}"; fi
   case "$reason" in
     api_keys_manage_required) hint="Your Beam role cannot create API keys. Ask a workspace admin to grant API key access, then run beam login again." ;;
-    *) hint="Sign-in did not complete ($reason). Run beam login <workspace URL> to try again." ;;
+    *) hint="Sign-in did not complete ($reason). Run beam login <instance> to try again." ;;
   esac
   printf '{"ok":false,"status":"failed","reason":"%s","message":"%s"}\n' "$reason" "$hint"
   exit 2
@@ -1360,7 +1364,7 @@ login_collect() {
         if [ "$started" -ge "$newest" ]; then newest="$started"; pending="$candidate"; fi
       done
     fi
-    if [ ! -f "$pending" ]; then pending=""; die "no_pending_login" "no Beam sign-in is in progress. Run: beam login <workspace URL>" 2; fi
+    if [ ! -f "$pending" ]; then pending=""; die "no_pending_login" "no Beam sign-in is in progress. Run: beam login <instance>" 2; fi
     waited=0
     while :; do
       code="$(file_value "$pending" CODE 2>/dev/null || true)"; err="$(file_value "$pending" ERROR 2>/dev/null || true)"
@@ -1389,23 +1393,33 @@ login_collect() {
     *) login_failed "$(printf '%s' "$token_body" | json_field errorCode)" ;;
   esac
   key="$(printf '%s' "$token_body" | json_field api_key)"; unset token_body body code
-  [ -n "$key" ] || login_failed "invalid_response"
+  case "$key" in ""|*"$_NL"*|*"$_CR"*) login_failed "invalid_response" ;; esac
   if DETECTED_PROFILE="$(_http_get "$DETECTED_API_URL/v2/user/me" -H "x-api-key: $key")"; then :; else
     _http_send POST "$DETECTED_API_URL/auth/cli/revoke" "" -H "x-api-key: $key" >/dev/null || true  # do not leave an unusable key behind
     login_failed "profile_unavailable"
   fi
   rm -f "${pending:?}"
   workspace=""; connect=1; existing_profile="$(profile_for_api "$DETECTED_API_URL" 2>/dev/null || true)"
-  # Reconnecting: the new key works, so the old one can go.
-  if [ "$replace" = "1" ] && [ -n "$existing_profile" ]; then revoke_connected "$existing_profile"; fi
+  # Reconnecting: remember the old Connect key, save the new profile, and only then delete the old key.
+  old_key=""; old_api=""
+  if [ "$replace" = "1" ] && [ -n "$existing_profile" ] && [ "$(file_value "$existing_profile" BEAM_CONNECT 2>/dev/null || true)" = "1" ]; then
+    old_key="$(file_value "$existing_profile" BEAM_API_KEY 2>/dev/null || true)"; old_api="$(file_value "$existing_profile" BEAM_API_URL 2>/dev/null || true)"
+  fi
   login_save </dev/null
+  if [ -n "$old_key" ] && [ "$old_key" != "$key" ]; then revoke_key "$old_api" "$old_key"; fi
 }
 
 revoke_connected() {
-  # $1 = profile. Deletes a Connect-issued key in Beam; a key that is already gone counts as done.
+  # $1 = profile. Deletes a Connect-issued key in Beam; keys the user pasted are left alone.
   REVOKED=0
   [ "$(file_value "$1" BEAM_CONNECT 2>/dev/null || true)" = "1" ] || return 0
-  if _http_send POST "$(file_value "$1" BEAM_API_URL)/auth/cli/revoke" "" -H "x-api-key: $(file_value "$1" BEAM_API_KEY)" >/dev/null; then rc=0; else rc=$?; fi
+  revoke_key "$(file_value "$1" BEAM_API_URL)" "$(file_value "$1" BEAM_API_KEY)"
+}
+
+revoke_key() {
+  # $1 = API origin, $2 = key. A key that is already gone counts as done.
+  REVOKED=0
+  if _http_send POST "$1/auth/cli/revoke" "" -H "x-api-key: $2" >/dev/null; then rc=0; else rc=$?; fi
   if [ "$rc" -eq 0 ] || [ "$rc" -eq 3 ]; then REVOKED=1
   else printf "Beam could not be reached, so the key was removed only on this computer. Delete the key named 'Beam Run · …' under API keys in Beam.\n" >&2; fi
 }

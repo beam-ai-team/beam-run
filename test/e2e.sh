@@ -8,6 +8,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 BEAM="${BEAM_BIN:-$ROOT/beam/bin/beam}"
 PROXY="$ROOT/beam/bin/mcp_proxy.py"
 FAKE="${TMPDIR:-/tmp}/beam-e2e-$$"

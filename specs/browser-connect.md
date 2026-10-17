@@ -10,11 +10,11 @@ Beam Run key for them. Nobody copies an API key. Supersedes the key-first part o
    `BEAM_APP_URL` in the profile). A typed app address is used as typed; a typed API
    address is mapped (`api.beamstudio.ai` to `app.beam.ai`, `api.staging.beamstudio.ai`
    to `app.staging.beamstudio.ai`, `api.enterprise.beamstudio.ai` to
-   `enterprise.beamstudio.ai`, `api.<region>.beamstudio.ai` to `app.<region>.beam.ai`).
+   `app.enterprise.beam.ai`, `api.<region>.beamstudio.ai` to `app.<region>.beam.ai`).
    Custom API hosts need `--app-url`. Local development (`BEAM_LOCAL_DEV=1`): the typed
    address is the app, the API is `BEAM_LOCAL_API_URL` (default `http://localhost:4000`).
 2. Probe `GET <app>/api/cli/authorize`. one 5-second attempt, no retries. `200 {"ok":true,"version":1}` means Connect is
-   available; `404` falls back to the key prompt (a bare address cannot, since a key needs a workspace URL);
+   available; `404` falls back to the key prompt (a bare address works there too; the workspace is chosen afterwards);
    anything else is reported as a network error.
 3. `beam login` generates a PKCE verifier and state, starts a one-shot listener on
    `127.0.0.1` (`beam/bin/login_listener.py`, gone after the first callback or 300 s),
@@ -43,8 +43,9 @@ Beam Run key for them. Nobody copies an API key. Supersedes the key-first part o
 - Keys the user pasted (`--api-key`, `BEAM_API_KEY`, the prompt) are never revoked.
 - No key is ever on a command line: every request goes through `beam_curl`, which passes headers
   in a private temporary config file (`curl -K`). The pasted callback address is read on stdin.
-- A reconnect (`--replace`) deletes the old key only after the new key has been issued and works,
-  so an abandoned reconnect changes nothing. A listener that cannot be started never costs the old key.
+- A reconnect (`--replace`) deletes the old key only after the new key has been issued, works and the
+  new profile is saved, so an abandoned or failed reconnect changes nothing. A header value with a
+  line break is refused. A listener that cannot be started never costs the old key.
 - The key, verifier and code are never printed. `BEAM_API_KEY`, `--api-key -` and bare
   `--api-key` keep today's behaviour and skip Connect.
 

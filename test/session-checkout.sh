@@ -2,6 +2,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 BEAM="$ROOT/beam/bin/beam"
 PROXY="$ROOT/beam/bin/mcp_proxy.py"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/beam-session-test.XXXXXX")"
@@ -63,9 +64,10 @@ status_call='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bea
 printf '\n=== connection requires a workspace URL ===\n'
 if missing_url="$(run BEAM_SESSION_ID=no-url BEAM_API_URL=https://api.enterprise.beamstudio.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
 if [ "$rc" -ne 3 ] || ! printf '%s' "$missing_url" | grep -q workspace_url_missing; then fail "login assumed an instance without a workspace URL"; fi
-if root_url="$(run BEAM_SESSION_ID=root-url BEAM_WORKSPACE_URL=https://app.beam.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
-if [ "$rc" -ne 2 ] || ! printf '%s' "$root_url" | grep -q workspace_url_invalid; then fail "login accepted an instance root instead of a workspace URL"; fi
-ok "new connections never assume Beam App"
+if root_url="$(run BEAM_SESSION_ID=root-url BEAM_CONFIG_DIR="$tmp/root-config" BEAM_WORKSPACE_URL=https://app.beam.ai BEAM_API_KEY=prod-key sh "$BEAM" login </dev/null 2>&1)"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ] || [ ! -f "$tmp/root-config/instances/app" ]; then fail "an explicitly typed instance address was refused"; fi
+printf '%s' "$root_url" | grep -q '"status":"choose_workspace"' || fail "an instance address should leave the workspace to choose afterwards"
+ok "new connections never assume Beam App; a typed instance address leaves the workspace to choose"
 
 printf '\n=== detected instances and duplicate safety ===\n'
 run BEAM_SESSION_ID=login BEAM_WORKSPACE_URL=https://app.beam.ai/prod-a/agents BEAM_API_KEY=prod-key sh "$BEAM" login --workspace-id Alpha >/dev/null 2>&1 || fail "Beam App login"

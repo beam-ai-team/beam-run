@@ -24,6 +24,7 @@ sh test/cross-host-contract.sh          # same public skill surface on every hos
 sh test/activity-ux-contract.sh         # grouped, user-facing operation narration
 sh test/supervisor-contract.sh          # CLI fallback and safety contracts
 sh test/connect.sh                      # browser Connect against a fake Beam (offline)
+sh test/no-real-config.sh               # guard: no suite edits a real ~/.claude.json or ~/.cursor config
 BEAM_WORKSPACE_URL='<url>' BEAM_API_KEY='<your key>' sh test/smoke.sh
 ```
 

@@ -3,6 +3,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 BEAM="$ROOT/beam/bin/beam"
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 ok() { printf '  ok   %s\n' "$1"; }

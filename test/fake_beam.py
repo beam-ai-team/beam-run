@@ -2,7 +2,7 @@
 """A fake Beam (Studio + API) for test/connect.sh. Paths are /<host>/<real path>.
 
 Control files in <dir>: ws.json {host: [{id, name}]}, old (hosts without Connect, one per
-line), bad ("<host> <status>" probe answers), slow (hosts whose probe stalls), deny (exists: the browser step returns error=access_denied). Writes port, revoked
+line), bad ("<host> <status>" probe answers), slow (hosts whose probe stalls), deny (exists: the browser step returns error=access_denied), badkey (exists: the token holds a line break). Writes port, revoked
 (host key), lastcode and tokens (host key) back into <dir>.
 """
 import base64
@@ -89,6 +89,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(400, {"errorCode": "invalid_grant"})
             counter[0] += 1
             key = "key-%s-%d" % (host, counter[0])
+            if os.path.exists(os.path.join(DIR, "badkey")):  # a hostile server: a key that smuggles a curl option
+                key = key + '\nurl = "http://127.0.0.1:1/x"'
             keys[key] = host
             append("tokens", "%s %s" % (host, key))
             return self.send(200, {"api_key": key, "user": {"id": "u", "email": "u@example.com"}})

@@ -5,6 +5,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 BEAM="$ROOT/beam/bin/beam"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/beam-connect-test.XXXXXX")"
 fake="$tmp/fake"
@@ -196,7 +197,7 @@ app_of() { b login "$@" --paste; jget connectUrl | sed 's#/api/cli/authorize.*##
 [ "$(app_of https://app.staging.beamstudio.ai/x)" = https://app.staging.beamstudio.ai ] || fail "staging app address"
 [ "$(app_of https://app.enterprise.beam.ai/x)" = https://app.enterprise.beam.ai ] || fail "enterprise app form was rewritten"
 [ "$(app_of https://enterprise.beamstudio.ai/x)" = https://enterprise.beamstudio.ai ] || fail "enterprise studio form was rewritten"
-[ "$(app_of --api-url https://api.enterprise.beamstudio.ai)" = https://enterprise.beamstudio.ai ] || fail "enterprise API address"
+[ "$(app_of --api-url https://api.enterprise.beamstudio.ai)" = https://app.enterprise.beam.ai ] || fail "enterprise API address"
 [ "$(app_of --api-url https://api.eu.beamstudio.ai)" = https://app.eu.beam.ai ] || fail "regional API address"
 [ "$(app_of --api-url https://api.beamstudio.ai)" = https://app.beam.ai ] || fail "production API address"
 b login --api-url https://api.acme.example.com
@@ -250,7 +251,7 @@ ok "bare instance, workspace URL preselect, and unknown workspace falls back to 
 printf '\n=== instance names and bare addresses ===\n'
 CFG="$tmp/config4"; mkdir -p "$CFG"
 app_of() { b login "$@" --paste; jget connectUrl | sed 's#/api/cli/authorize.*##'; }
-for pair in "app=https://app.beam.ai" "staging=https://app.staging.beamstudio.ai" "enterprise=https://enterprise.beamstudio.ai" \
+for pair in "app=https://app.beam.ai" "staging=https://app.staging.beamstudio.ai" "enterprise=https://app.enterprise.beam.ai" \
   "anz=https://app.anz.beam.ai" "Beam ANZ=https://app.anz.beam.ai" "Beam Staging=https://app.staging.beamstudio.ai" \
   "https://app.beam.ai=https://app.beam.ai" "https://app.staging.beamstudio.ai=https://app.staging.beamstudio.ai" \
   "https://app.anz.beam.ai/=https://app.anz.beam.ai" "https://enterprise.beamstudio.ai=https://enterprise.beamstudio.ai" \
@@ -263,8 +264,12 @@ unset BEAM_LOCAL_DEV
 b login http://localhost:3000 --paste
 [ "$rc" -eq 2 ] && saw workspace_url_invalid || fail "a local address was accepted without BEAM_LOCAL_DEV"
 printf 'app.us.beam.ai\n' > "$fake/old"
-b login us
-[ "$rc" -eq 2 ] && saw 'does not support browser sign-in yet' || fail "bare instance without Connect should explain the key needs a workspace URL"
+if printf 'legacy-key\n1\n' | run env BEAM_TEST_INTERACTIVE=1 sh "$BEAM" login us > "$tmp/out" 2> "$tmp/err"; then :; else fail "a bare instance name dead-ended when Connect is unavailable"; fi
+[ -f "$CFG/instances/us" ] && [ "$(prof us BEAM_APP_URL)" = https://app.us.beam.ai ] && ! grep -q '^BEAM_CONNECT=' "$CFG/instances/us" || fail "the key fallback did not save the instance"
+b logout
+KEY=legacy-key; b login us; KEY=""
+[ "$rc" -eq 0 ] && [ "$(jget status)" = connected ] || fail "a bare instance with an env key did not connect"
+b logout
 : > "$fake/old"
 b login --api-key https://app.beam.ai/x
 [ "$rc" -eq 2 ] && saw 'not a URL' || fail "--api-key <url> was not refused"
@@ -339,5 +344,35 @@ while IFS= read -r secret; do
 done < "$tmp/keys"
 grep -q -- '-K ' "$tmp/argv" || fail "headers are not passed through a config file"
 ok "headers travel in a private config file; no key in any recorded argv"
+
+printf '\n=== enterprise: replacing an old profile opens the app address ===\n'
+CFG="$tmp/config9"; mkdir -p "$CFG/instances"
+printf 'BEAM_INSTANCE_ID=enterprise\nBEAM_INSTANCE_NAME=Beam Enterprise\nBEAM_API_URL=https://api.enterprise.beamstudio.ai\nBEAM_MCP_URL=https://api.enterprise.beamstudio.ai/mcp\nBEAM_API_KEY=k\n' > "$CFG/instances/enterprise"
+b login --replace --paste
+[ "$(jget connectUrl | sed 's#/api/cli/authorize.*##')" = https://app.enterprise.beam.ai ] || fail "enterprise replace did not open app.enterprise.beam.ai"
+ok "enterprise resolves to app.enterprise.beam.ai from a name, an API address and a saved profile"
+
+printf '\n=== a failed save never costs the old key ===\n'
+CFG="$tmp/config10"; mkdir -p "$CFG"
+b login "$APP" --paste; final="$("$REAL_CURL" -s --noproxy '*' -o /dev/null -w '%{redirect_url}' "$(tofake "$(jget connectUrl)")")"
+b login --callback "$final"; keyA="$(prof app BEAM_API_KEY)"
+b login app --replace --paste; final="$("$REAL_CURL" -s --noproxy '*' -o /dev/null -w '%{redirect_url}' "$(tofake "$(jget connectUrl)")")"
+rm -rf "$CFG/sessions"; : > "$CFG/sessions"   # the session file cannot be written, so the save step fails part-way
+b login --callback "$final"
+rm -f "$CFG/sessions"
+keyB="$(prof app BEAM_API_KEY)"
+[ "$rc" -ne 0 ] && [ "$(revoked "$keyA")" -eq 0 ] && [ "$keyB" != "$keyA" ] || fail "a failed save revoked the old key before the new profile was safe"
+b whoami
+[ "$rc" -eq 0 ] || fail "the saved profile holds a key that does not work"
+ok "the old key is revoked only after the new profile is saved"
+
+printf '\n=== header values with a line break are refused ===\n'
+CFG="$tmp/config11"; mkdir -p "$CFG"
+touch "$fake/badkey"; b login "$APP"; browse "$(jget connectUrl)"; b login --wait; rm -f "$fake/badkey"
+[ "$rc" -eq 2 ] && [ "$(jget reason)" = invalid_response ] && [ ! -f "$CFG/instances/app" ] || fail "a key with a line break was accepted"
+before="$(wc -l < "$tmp/argv")"
+KEY="$(printf 'a\nb')"; b whoami; KEY=""
+[ "$rc" -ne 0 ] && [ "$(wc -l < "$tmp/argv")" -eq "$before" ] || fail "a credential with a line break reached curl"
+ok "a hostile key cannot add curl options"
 
 printf '\nBrowser Connect checks PASSED.\n'
