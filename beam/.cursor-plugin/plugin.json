@@ -1,9 +1,13 @@
 {
   "name": "beam",
-  "version": "0.7.0",
+  "version": "0.7.1-prism.2",
   "description": "Universally operate Beam from Cursor",
-  "author": { "name": "Beam AI" },
+  "author": {
+    "name": "Beam AI"
+  },
   "logo": "assets/beam-logo.jpg",
-  "skills": ["./skills"],
+  "skills": [
+    "./skills"
+  ],
   "mcpServers": "./mcp.json"
 }

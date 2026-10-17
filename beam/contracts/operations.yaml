@@ -13,12 +13,14 @@ defaults:
 
 operations:
   user.current:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"whoami"}]]}
     safety: read
     mcp: getCurrentUser
     cli: beam whoami
     status: ready
     notes: "Gives the user id that Learning Hub writes need. Never invent a user id."
   docs.search:
+    execution: {"inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":200000},"url":{"type":"string","maxLength":200000}},"required":["query"],"additionalProperties":false},"commands":[[{"literal":"docs"},{"field":"query","kind":"value"},{"field":"url","kind":"value","optional":true,"flag":"--page"}]]}
     safety: read
     workspaceRequired: false
     mcp: null
@@ -26,6 +28,7 @@ operations:
     status: ready
     notes: "Check the live product docs before relying on how a feature works (loops, automation modes, publishing, triggers, evaluation); the live docs outrank any vendored note."
   workspace.create:
+    execution: {"inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":200000},"domain":{"type":"string","maxLength":200000},"url":{"type":"string","maxLength":200000}},"required":["name"],"additionalProperties":false},"commands":[[{"literal":"workspace"},{"literal":"create"},{"field":"name","kind":"value"},{"field":"domain","kind":"value","optional":true,"flag":"--domain"},{"field":"url","kind":"value","optional":true,"flag":"--icon-src"}]]}
     safety: external-effect
     workspaceRequired: false
     confirmation: explicit-workspace-create-intent
@@ -35,18 +38,21 @@ operations:
     status: ready
     notes: "Creating a workspace does not switch to it."
   agent.list:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"list"}]]}
     safety: read
     mcp: listAgents
     cli: beam agents list
     status: ready
     notes: "When more than one agent matches a name, ask which one; never pick by display name alone."
   agent.get:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"get"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: getAgentGraph
     cli: beam agents get <agentId>
     status: ready
     notes: "Shows activeGraphId (live) and draftGraphId (unpublished). Report the model token exactly as returned. createdAt is the default start date for analytics."
   agent.delete:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"delete"},{"field":"agentId","kind":"value"},{"literal":"--confirm"},{"field":"agentId","kind":"value"}]]}
     safety: destructive-write
     confirmation: explicit-agent-name-and-id
     mcp: null
@@ -56,28 +62,33 @@ operations:
     status: ready
     notes: "Irreversible. Confirm with the agent's exact name and id."
   agent.tools:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"tools"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: beam_get_agent_tools
     cli: beam agents tools <agentId>
     status: ready
     notes: "Report toolName, description and requiresConsent per tool. Each tool's toolFunctionName is the key for integration.is-connected."
   agent.sub-agents:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"sub-agents"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: beam_list_sub_agents
     cli: beam agents sub-agents <agentId>
     status: ready
   agent.files:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"files"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: beam_list_context_files
     cli: beam agents files <agentId>
     status: ready
     notes: "The result is a list whose first entry holds the files."
   agent.history:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"history"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: beam_get_graph_history
     cli: beam agents history <agentId>
     status: ready
   agent.update-metadata:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"name":{"type":"string","maxLength":200000},"description":{"type":"string","maxLength":200000},"personality":{"type":"string","maxLength":200000},"restrictions":{"type":"string","maxLength":200000},"promptsFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"update-metadata"},{"field":"agentId","kind":"value"},{"field":"name","kind":"value","optional":true,"flag":"--name"},{"field":"description","kind":"value","optional":true,"flag":"--description"},{"field":"personality","kind":"value","optional":true,"flag":"--personality"},{"field":"restrictions","kind":"value","optional":true,"flag":"--restrictions"},{"field":"promptsFile","kind":"json-file","optional":true,"flag":"--prompts-file"}]]}
     safety: reversible-write
     mcp: agent_update_metadata
     cli: beam agent-builder update-metadata <agentId> ...
@@ -85,6 +96,7 @@ operations:
     status: ready
     notes: "Changes name, description, suggested prompts, personality and restrictions. The model of a step changes with graph.update-node; the agent's icon and category cannot be changed from here, so say so and link beam://agent.config?agentId=<id>."
   agent.remove-tools:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"remove-tools"},{"field":"agentId","kind":"value"},{"field":"payloadFile","kind":"json-file"},{"literal":"--confirm"},{"field":"agentId","kind":"value"}]]}
     safety: destructive-write
     confirmation: explicit
     mcp: agent_remove_tools
@@ -93,18 +105,21 @@ operations:
     status: ready
     notes: "Show the exact list first; removing more than five always needs a second look."
   agent.external-files-add:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"external-files-add"},{"field":"agentId","kind":"value"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: agent_upload_external_file
     cli: beam agents external-files-add <agentId> <payloadFile>
     postRead: agent.files
     status: ready
   agent.upload-file:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"localFile":{"type":"string","minLength":1,"description":"Prism artifact id; never a filesystem path"}},"required":["agentId","localFile"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"upload-file"},{"field":"agentId","kind":"value"},{"field":"localFile","kind":"artifact"}]]}
     safety: reversible-write
     mcp: agent_upload_context_file
     cli: beam agents upload-file <agentId> <localFile>
     postRead: agent.files
     status: ready
   agent.context-file-delete:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"fileKey":{"type":"string","maxLength":200000}},"required":["agentId","fileKey"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"context-file-delete"},{"field":"agentId","kind":"value"},{"field":"fileKey","kind":"value"},{"literal":"--confirm"},{"field":"fileKey","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: agent_delete_context_file
@@ -112,6 +127,7 @@ operations:
     postRead: agent.files
     status: ready
   agent.external-files-delete:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"external-files-delete"},{"field":"agentId","kind":"value"},{"field":"payloadFile","kind":"json-file"},{"literal":"--confirm"},{"field":"agentId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: agent_delete_external_file
@@ -119,52 +135,61 @@ operations:
     postRead: agent.files
     status: ready
   agent.change-file-agent:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"change-file-agent"},{"field":"agentId","kind":"value"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: agent_change_file_agent
     cli: beam agents change-file-agent <agentId> <payloadFile>
     status: ready
   agent.transcribe:
+    execution: {"inputSchema":{"type":"object","properties":{"localAudioFile":{"type":"string","minLength":1,"description":"Prism artifact id; never a filesystem path"}},"required":["localAudioFile"],"additionalProperties":false},"commands":[[{"literal":"agents"},{"literal":"transcribe"},{"field":"localAudioFile","kind":"artifact"}]]}
     safety: read
     mcp: agent_transcribe_audio
     cli: beam agents transcribe <localAudioFile>
     status: ready
 
   graph.get:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"get-graph"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-graph <agentId>
     status: ready
     notes: "Large (around 136 KB). Prefer graph.nodes for structure; fetch the full graph only for a node id or when the user asks for the whole thing."
   graph.nodes:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"get-nodes"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-nodes <agentId>
     status: ready
     notes: "Light list of node id and objective. The entry node has the objective 'Entry Node'."
   graph.node:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000}},"required":["agentId","nodeId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"get-node"},{"field":"agentId","kind":"value"},{"field":"nodeId","kind":"value"}]]}
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-node <agentId> <nodeId>
     status: ready
   graph.verify-links:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"verify-links"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder verify-links <agentId>
     status: ready
     notes: "Report any broken link by node. Changes are checked with graph.readiness, which includes links."
   graph.readiness:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"readiness"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam agent-builder readiness <agentId>
     status: ready
     notes: "Every graph change returns this report. Resolve every failure before testing or publishing."
   model.catalog:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"models"}]]}
     safety: read
     mcp: null
     cli: beam agent-builder models
     status: ready
     notes: "The only valid list of models for this workspace, including the default. Check it before setting or discussing a step's model or its cost."
   graph.deploy:
+    execution: {"inputSchema":{"type":"object","properties":{"specFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["specFile"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"deploy"},{"field":"specFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder deploy <specFile>
@@ -172,6 +197,7 @@ operations:
     status: ready
     notes: "Lint and run with --dry-run --summary first. With --agent-id it rewrites the whole graph: include every node to keep; node ids change and an existing trigger is deleted. Stays a draft unless --publish is passed, which needs graph.publish's confirmation. Returns a readiness report; resolve every failure before testing or publishing."
   graph.publish:
+    execution: {"inputSchema":{"type":"object","properties":{"graphId":{"type":"string","maxLength":200000},"agentId":{"type":"string","maxLength":200000}},"required":["graphId","agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"publish"},{"field":"graphId","kind":"value"},{"literal":"--agent-id"},{"field":"agentId","kind":"value"}]]}
     safety: external-effect
     confirmation: explicit-publish-intent
     mcp: null
@@ -180,6 +206,7 @@ operations:
     status: ready
     notes: "Makes the draft live. After graph.readiness passes, show the exact draft and live effect and wait for confirmation, even if the initial request explicitly asked to publish. A yes to that concrete proposal authorizes this publication only; a no leaves the draft unpublished."
   graph.update-prompt:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000},"promptFile":{"type":"string","maxLength":200000}},"required":["agentId","nodeId","promptFile"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"update-node-prompt"},{"field":"agentId","kind":"value"},{"field":"nodeId","kind":"value"},{"field":"promptFile","kind":"text-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-prompt <agentId> <nodeId> <promptFile>
@@ -187,12 +214,14 @@ operations:
     status: ready
     notes: "Smallest change for prompt or tone edits."
   graph.update-params:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000},"inputParamsFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"},"outputParamsFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","nodeId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"update-node-params"},{"field":"agentId","kind":"value"},{"field":"nodeId","kind":"value"},{"field":"inputParamsFile","kind":"json-file","optional":true,"flag":"--input-params-file"},{"field":"outputParamsFile","kind":"json-file","optional":true,"flag":"--output-params-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-params <agentId> <nodeId> ...
     postRead: graph.readiness
     status: ready
   graph.update-consent:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000},"enabled":{"type":"string","maxLength":200000,"enum":["true","false"]}},"required":["agentId","nodeId","enabled"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"update-node-consent"},{"field":"agentId","kind":"value"},{"field":"nodeId","kind":"value"},{"field":"enabled","kind":"value"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node-consent <agentId> <nodeId> <true|false>
@@ -200,6 +229,7 @@ operations:
     status: ready
     notes: "A setting on an existing integration step, not a new step: the run asks for consent right before that tool runs."
   graph.add-node:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"},"sourceNodeId":{"type":"string","maxLength":200000},"targetNodeId":{"type":"string","maxLength":200000},"integrationFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","nodeFile"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"add-node"},{"field":"agentId","kind":"value"},{"field":"nodeFile","kind":"json-file"},{"field":"sourceNodeId","kind":"value","optional":true,"flag":"--source-node-id"},{"field":"targetNodeId","kind":"value","optional":true,"flag":"--target-node-id"},{"field":"integrationFile","kind":"json-file","optional":true,"flag":"--integration-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder add-node <agentId> <nodeFile> ...
@@ -207,6 +237,7 @@ operations:
     status: ready
     notes: "Rewrites the graph: node ids change and an existing trigger is deleted. Re-read nodes afterwards and re-create the trigger."
   graph.remove-node:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000}},"required":["agentId","nodeId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"remove-node"},{"field":"agentId","kind":"value"},{"field":"nodeId","kind":"value"}]]}
     safety: destructive-write
     confirmation: explicit
     mcp: null
@@ -215,53 +246,62 @@ operations:
     status: ready
     notes: "Rewrites the graph: node ids change and an existing trigger is deleted. Re-read nodes afterwards."
   graph.test-node:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"graphId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000},"paramsJson":{"type":["object","array"]}},"required":["agentId","graphId","nodeId","paramsJson"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"test-node"},{"field":"agentId","kind":"value"},{"field":"graphId","kind":"value"},{"field":"nodeId","kind":"value"},{"field":"paramsJson","kind":"json"}]]}
     safety: reversible-write
     mcp: testGraphNode
     cli: beam agent-builder test-node <agentId> <graphId> <nodeId> <paramsJson>
     status: ready
     notes: "Runs one step with explicit inputs; needs agentId, graphId, nodeId and a JSON params object."
   graph.triggers:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"entryNodeId":{"type":"string","maxLength":200000}},"required":["agentId","entryNodeId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"get-triggers"},{"field":"agentId","kind":"value"},{"field":"entryNodeId","kind":"value"}]]}
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-triggers <agentId> <entryNodeId>
     status: ready
     notes: "Needs the entry node id from graph.nodes as well as the agent id."
   graph.trigger-readiness:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"entryNodeId":{"type":"string","maxLength":200000}},"required":["agentId","entryNodeId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"validate-trigger"},{"field":"agentId","kind":"value"},{"field":"entryNodeId","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam agent-builder validate-trigger <agentId> <entryNodeId>
     status: ready
     notes: "Run after every timer or integration trigger create or update; do not call a trigger working until it passes."
   graph.webhook:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"get-webhook"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: getAgentGraph
     cli: beam agent-builder get-webhook <agentId>
     status: ready
   graph.validate:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"validate"}]]}
     safety: read
     mcp: null
     cli: beam agent-builder validate
     status: ready
     notes: "Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure."
   graph.search-tools:
+    execution: {"inputSchema":{"type":"object","properties":{"keyword":{"type":"string","maxLength":200000},"managedOnly":{"type":"boolean"}},"required":["keyword"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"search-tools"},{"field":"keyword","kind":"value"},{"field":"managedOnly","flag":"--managed-only","kind":"boolean","optional":true}]]}
     safety: read
     mcp: null
     cli: beam agent-builder search-tools <keyword> [--managed-only]
     status: ready
     notes: "Search before adding any integration step; never invent a toolFunctionName. Prefer nango_cloud, then pipedream; ask before choosing a custom fallback."
   graph.search-agents:
+    execution: {"inputSchema":{"type":"object","properties":{"keyword":{"type":"string","maxLength":200000}},"required":["keyword"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"search-agents"},{"field":"keyword","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam agent-builder search-agents <keyword>
     status: ready
     notes: "Use before building, to avoid duplicating an existing agent."
   graph.attach-tool:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"graphId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000},"toolConfigFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","graphId","nodeId","toolConfigFile"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"attach-tool"},{"field":"agentId","kind":"value"},{"field":"graphId","kind":"value"},{"field":"nodeId","kind":"value"},{"field":"toolConfigFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder attach-tool <agentId> <graphId> <nodeId> <toolConfigFile>
     postRead: graph.readiness
     status: ready
   graph.update-node:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"graphId":{"type":"string","maxLength":200000},"nodeFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","graphId","nodeFile"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"update-node"},{"field":"agentId","kind":"value"},{"field":"graphId","kind":"value"},{"field":"nodeFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-node <agentId> <graphId> <nodeFile>
@@ -269,18 +309,21 @@ operations:
     status: ready
     notes: "For a step's model or other configuration. Read the full node first and send it back whole."
   graph.update-edge:
+    execution: {"inputSchema":{"type":"object","properties":{"edgeId":{"type":"string","maxLength":200000},"condition":{"type":"string","maxLength":200000}},"required":["edgeId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"update-edge"},{"field":"edgeId","kind":"value"},{"field":"condition","kind":"value","optional":true,"flag":"--condition"}]]}
     safety: reversible-write
     mcp: null
     cli: beam agent-builder update-edge <edgeId> [--condition TEXT]
     postRead: graph.readiness
     status: ready
   graph.trigger-actions:
+    execution: {"inputSchema":{"type":"object","properties":{"integrationIdentifier":{"type":"string","maxLength":200000}},"required":["integrationIdentifier"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"trigger-actions"},{"field":"integrationIdentifier","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam agent-builder trigger-actions <integrationIdentifier>
     status: ready
     notes: "Actions differ per workspace; always look them up. Gives the integrationProviderId for an integration trigger; a timer needs none."
   graph.create-trigger:
+    execution: {"inputSchema":{"type":"object","properties":{"triggerFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["triggerFile"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"create-trigger"},{"field":"triggerFile","kind":"json-file"}]]}
     safety: external-effect
     confirmation: explicit
     mcp: null
@@ -289,6 +332,7 @@ operations:
     status: ready
     notes: "Once active, the agent starts runs on its own. One trigger per agent: delete the old one first. Add it last, after the graph is settled, because a graph rewrite deletes it."
   graph.update-trigger:
+    execution: {"inputSchema":{"type":"object","properties":{"triggerId":{"type":"string","maxLength":200000},"triggerFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["triggerId","triggerFile"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"update-trigger"},{"field":"triggerId","kind":"value"},{"field":"triggerFile","kind":"json-file"}]]}
     safety: external-effect
     confirmation: explicit
     mcp: null
@@ -296,6 +340,7 @@ operations:
     postRead: graph.trigger-readiness
     status: ready
   graph.toggle-trigger:
+    execution: {"inputSchema":{"type":"object","properties":{"triggerId":{"type":"string","maxLength":200000}},"required":["triggerId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"toggle-trigger"},{"field":"triggerId","kind":"value"}]]}
     safety: external-effect
     confirmation: explicit
     mcp: null
@@ -304,6 +349,7 @@ operations:
     status: ready
     notes: "Switching a trigger on makes the agent start runs on its own; say which way it is switching."
   graph.delete-trigger:
+    execution: {"inputSchema":{"type":"object","properties":{"triggerId":{"type":"string","maxLength":200000}},"required":["triggerId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"delete-trigger"},{"field":"triggerId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -311,6 +357,7 @@ operations:
     postRead: graph.triggers
     status: ready
   graph.create-webhook:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"create-webhook"},{"field":"agentId","kind":"value"}]]}
     safety: external-effect
     confirmation: explicit
     mcp: null
@@ -319,6 +366,7 @@ operations:
     status: ready
     notes: "Anyone with the URL can start runs; treat it as a secret."
   graph.delete-webhook:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"delete-webhook"},{"field":"agentId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -326,6 +374,7 @@ operations:
     postRead: graph.webhook
     status: ready
   graph.webhook-readiness:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"entryNodeId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"agent-builder"},{"literal":"validate-webhook"},{"field":"agentId","kind":"value"},{"field":"entryNodeId","kind":"value","optional":true,"flag":"--entry-node-id"}]]}
     safety: read
     mcp: null
     cli: beam agent-builder validate-webhook <agentId> [--entry-node-id ID]
@@ -333,35 +382,41 @@ operations:
     notes: "Run after every webhook create; do not call a webhook working until it passes."
 
   task.list:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"list"}]]}
     safety: read
     mcp: listAgentTasks
     cli: beam tasks list
     status: ready
     notes: "For a count read totalCount, never the number of rows returned. isDraftTask true means test runs and false means real runs; without it the list mixes both. The agent id is at agentGraph.agent.id. Use a small page size."
   task.statuses:
+    execution: {"inputSchema":{"type":"object","properties":{"agentIds":{"type":"string","maxLength":200000}},"required":[],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"statuses"},{"field":"agentIds","kind":"value","optional":true}]]}
     safety: read
     mcp: beam_get_task_statuses
     cli: beam tasks statuses [agentIds]
     status: ready
     notes: "Counts by status; pass agent ids to narrow. There is no single success rate across all agents, so never invent one."
   task.agents:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"agents"}]]}
     safety: read
     mcp: beam_list_task_agents
     cli: beam tasks agents
     status: ready
   task.latest:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"pageSize":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"latest"},{"field":"agentId","kind":"value"},{"field":"pageSize","kind":"value","optional":true}]]}
     safety: read
     mcp: beam_get_latest_task_executions
     cli: beam tasks latest <agentId> [pageSize]
     status: ready
     notes: "Preferred over task.list for 'show me the latest runs' on one agent."
   task.get:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000}},"required":["taskId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"get"},{"field":"taskId","kind":"value"}]]}
     safety: read
     mcp: getTaskDetails
     cli: beam tasks get <taskId>
     status: ready
     notes: "Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId."
   task.create-live:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"input":{"type":"string","maxLength":200000}},"required":["agentId","input"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"create"},{"field":"agentId","kind":"value"},{"field":"input","kind":"value"}]]}
     safety: external-effect
     confirmation: required-if-production-side-effect
     mcp: createAgentTask
@@ -370,6 +425,7 @@ operations:
     status: ready
     notes: "Needs a concrete agent id; send the input as an object, not a pre-stringified value. Check the returned graph is the active graph."
   task.create-draft:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"input":{"type":"string","maxLength":200000}},"required":["agentId","input"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"test"},{"field":"agentId","kind":"value"},{"field":"input","kind":"value"}]]}
     safety: reversible-write
     mcp: null
     cli: beam tasks test <agentId> <input>
@@ -377,6 +433,7 @@ operations:
     status: ready
     notes: "Runs the unpublished draft. For a batch, check the first task's agentGraphId before sending the rest."
   task.submit-input:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"taskNodeId":{"type":"string","maxLength":200000},"parameter":{"type":"string","maxLength":200000},"answer":{"type":"string","maxLength":200000}},"required":["taskId","taskNodeId","parameter","answer"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"submit-input"},{"field":"taskId","kind":"value"},{"field":"taskNodeId","kind":"value"},{"field":"parameter","kind":"value"},{"field":"answer","kind":"value"}]]}
     safety: reversible-write
     confirmation: confirm-proposed-values
     mcp: submitUserInput
@@ -385,6 +442,7 @@ operations:
     status: ready
     notes: "Answer the paused step's userQuestions. Never guess a value; propose it and get it confirmed."
   task.retry:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"taskNodeId":{"type":"string","maxLength":200000},"text":{"type":"string","maxLength":200000}},"required":["taskId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"retry"},{"field":"taskId","kind":"value"},{"field":"taskNodeId","kind":"value","optional":true,"flag":"--task-node-id"},{"field":"text","kind":"value","optional":true,"flag":"--feedback"}]]}
     safety: external-effect
     confirmation: required-if-production-side-effect
     mcp: retryTaskExecution
@@ -393,6 +451,7 @@ operations:
     status: ready
     notes: "Retry from a step needs one task id plus the taskNodeId and feedback text. Confirm before retrying more than five."
   task.approve:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"taskNodeId":{"type":"string","maxLength":200000}},"required":["taskId","taskNodeId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"approve"},{"field":"taskId","kind":"value"},{"field":"taskNodeId","kind":"value"},{"literal":"--confirm"},{"field":"taskNodeId","kind":"value"}]]}
     safety: external-effect
     confirmation: always
     mcp: approveTaskExecution
@@ -401,6 +460,7 @@ operations:
     status: ready
     notes: "Before asking, show what the agent is about to do: the tool and its parameters from the paused step."
   task.reject:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"taskNodeId":{"type":"string","maxLength":200000},"text":{"type":"string","maxLength":200000}},"required":["taskId","taskNodeId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"reject"},{"field":"taskId","kind":"value"},{"field":"taskNodeId","kind":"value"},{"literal":"--confirm"},{"field":"taskNodeId","kind":"value"},{"field":"text","kind":"value","optional":true,"flag":"--reason"}]]}
     safety: destructive-write
     confirmation: always
     mcp: rejectTaskExecution
@@ -409,6 +469,7 @@ operations:
     status: ready
     notes: "Ends the task."
   task.abort:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"text":{"type":"string","maxLength":200000}},"required":["taskId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"abort"},{"field":"taskId","kind":"value"},{"literal":"--confirm"},{"field":"taskId","kind":"value"},{"field":"text","kind":"value","optional":true,"flag":"--reason"}]]}
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -417,6 +478,7 @@ operations:
     status: ready
     notes: "Stops a running task; different from task.cancel-wait."
   task.delete:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000}},"required":["taskId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"delete"},{"field":"taskId","kind":"value"},{"literal":"--confirm"},{"field":"taskId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -424,11 +486,13 @@ operations:
     postRead: task.list
     status: ready
   task.rate:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"rating":{"type":"string","maxLength":200000,"enum":["up","down"]},"feedback":{"type":"string","maxLength":200000}},"required":["taskId","rating"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"rate"},{"field":"taskId","kind":"value"},{"field":"rating","kind":"value"},{"field":"feedback","kind":"value","optional":true}]]}
     safety: reversible-write
     mcp: rateTaskOutput
     cli: beam tasks rate <taskId> <up|down> [feedback]
     status: ready
   task.cancel-wait:
+    execution: {"inputSchema":{"type":"object","properties":{"taskNodeId":{"type":"string","maxLength":200000},"agentId":{"type":"string","maxLength":200000}},"required":["taskNodeId","agentId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"cancel-wait"},{"field":"taskNodeId","kind":"value"},{"field":"agentId","kind":"value"},{"literal":"--confirm"},{"field":"taskNodeId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: task_cancel_wait_node
@@ -437,6 +501,7 @@ operations:
     status: ready
     notes: "Only for a step whose status is WAITING. The agent id is agentGraph.agentId from task.get."
   task.update-tool:
+    execution: {"inputSchema":{"type":"object","properties":{"toolFunctionName":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["toolFunctionName","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"update-tool"},{"field":"toolFunctionName","kind":"value"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: task_update_agent_tool
     cli: beam tasks update-tool <toolFunctionName> <payloadFile>
@@ -444,22 +509,26 @@ operations:
     status: ready
 
   inbox.list:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"inbox"},{"literal":"list"}]]}
     safety: read
     mcp: null
     cli: beam inbox list
     status: ready
     notes: "Each row carries agentId and agentTaskId; resolve the task from those."
   inbox.unread-count:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"inbox"},{"literal":"unread-count"}]]}
     safety: read
     mcp: null
     cli: beam inbox unread-count
     status: ready
   inbox.mark-read:
+    execution: {"inputSchema":{"type":"object","properties":{"notificationId":{"type":"string","maxLength":200000}},"required":["notificationId"],"additionalProperties":false},"commands":[[{"literal":"inbox"},{"literal":"mark-read"},{"field":"notificationId","kind":"value"}]]}
     safety: reversible-write
     mcp: null
     cli: beam inbox mark-read <notificationId>
     status: ready
   inbox.delete:
+    execution: {"inputSchema":{"type":"object","properties":{"notificationId":{"type":"string","maxLength":200000}},"required":["notificationId"],"additionalProperties":false},"commands":[[{"literal":"inbox"},{"literal":"delete"},{"field":"notificationId","kind":"value"},{"literal":"--confirm"},{"field":"notificationId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -468,35 +537,41 @@ operations:
     notes: "Confirm every delete, and especially a sweep of many notifications."
 
   integration.list:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"list"}]]}
     safety: read
     mcp: null
     cli: beam integrations list
     status: ready
     notes: "The catalog can be large; filter and use a small page size."
   integration.categories:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"categories"}]]}
     safety: read
     mcp: beam_list_integration_categories
     cli: beam integrations categories
     status: ready
   integration.connected:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"connected"}]]}
     safety: read
     mcp: null
     cli: beam integrations connected
     status: ready
     notes: "Only status 'active' counts as connected; pending and inactive do not."
   integration.connections:
+    execution: {"inputSchema":{"type":"object","properties":{"integrationId":{"type":"string","maxLength":200000}},"required":["integrationId"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"connections"},{"field":"integrationId","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam integrations connections <integrationId>
     status: ready
     notes: "Needs the integration UUID from integration.connected, not a slug such as 'gmail' (that returns 400). Offer to tidy up when a provider has two or more active connections."
   integration.is-connected:
+    execution: {"inputSchema":{"type":"object","properties":{"toolFunctionName":{"type":"string","maxLength":200000}},"required":["toolFunctionName"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"is-connected"},{"field":"toolFunctionName","kind":"value"}]]}
     safety: read
     mcp: beam_is_integration_connected
     cli: beam integrations is-connected <toolFunctionName>
     status: ready
     notes: "Workspace connection state. A step's own isIntegrationConnected is per-agent wiring; never infer one from the other."
   integration.connect:
+    execution: {"inputSchema":{"type":"object","properties":{"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["payloadFile"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"connect"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: external-effect
     confirmation: required-if-credentials-or-external-effect
     mcp: null
@@ -504,6 +579,7 @@ operations:
     status: ready
     notes: "OAuth providers must be finished by the user in the browser: link beam://integrations?provider=<name>. Never ask for a secret in chat or echo one back; credentials go only in a local payload file. A custom integration uses provider custom with identifier httpCustomAuth (token) or httpBasicAuth (basic)."
   integration.update:
+    execution: {"inputSchema":{"type":"object","properties":{"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["payloadFile"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"update"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: integration_update_connection
     cli: beam integrations update <payloadFile>
@@ -511,6 +587,7 @@ operations:
     status: ready
     notes: "providerId is the connection row id, not the catalog integrationId."
   integration.remove:
+    execution: {"inputSchema":{"type":"object","properties":{"providerId":{"type":"string","maxLength":200000}},"required":["providerId"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"remove"},{"field":"providerId","kind":"value"},{"literal":"--confirm"},{"field":"providerId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -518,24 +595,28 @@ operations:
     status: ready
     notes: "providerId is the connection row id, not the catalog integrationId."
   integration.set-default:
+    execution: {"inputSchema":{"type":"object","properties":{"providerId":{"type":"string","maxLength":200000},"integrationId":{"type":"string","maxLength":200000}},"required":["providerId","integrationId"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"set-default"},{"field":"providerId","kind":"value"},{"field":"integrationId","kind":"value"}]]}
     safety: reversible-write
     mcp: null
     cli: beam integrations set-default <providerId> <integrationId>
     status: ready
     notes: "providerId is the connection row id, not the catalog integrationId."
   integration.custom-create:
+    execution: {"inputSchema":{"type":"object","properties":{"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["payloadFile"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"custom-create"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam integrations custom-create <payloadFile>
     status: ready
     notes: "Creates an unconnected definition; follow with integration.connect. authType is none, token, basic or oauth (there is no 'apiKey'); token also needs apiKeyType. Resolve the category with integration.categories; never invent its id."
   integration.custom-update:
+    execution: {"inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["id","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"custom-update"},{"field":"id","kind":"value"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: null
     cli: beam integrations custom-update <id> <payloadFile>
     status: ready
     notes: "A full replace, not a partial change."
   integration.custom-remove:
+    execution: {"inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":200000}},"required":["id"],"additionalProperties":false},"commands":[[{"literal":"integrations"},{"literal":"custom-remove"},{"field":"id","kind":"value"},{"literal":"--confirm"},{"field":"id","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: null
@@ -543,35 +624,41 @@ operations:
     status: ready
 
   template.list:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"list"}]]}
     safety: read
     mcp: null
     cli: beam templates list
     status: ready
     notes: "Rows use title and shortDescription. count is the full library total: page with pageNum and never present one page as the whole library."
   template.categories:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"categories"}]]}
     safety: read
     mcp: beam_list_template_categories
     cli: beam templates categories
     status: ready
     notes: "Resolve a category name to its id before filtering."
   template.get:
+    execution: {"inputSchema":{"type":"object","properties":{"templateId":{"type":"string","maxLength":200000}},"required":["templateId"],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"get"},{"field":"templateId","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam templates get <templateId>
     status: ready
   template.prerequisites:
+    execution: {"inputSchema":{"type":"object","properties":{"templateId":{"type":"string","maxLength":200000}},"required":["templateId"],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"get"},{"field":"templateId","kind":"value"}],[{"literal":"integrations"},{"literal":"connected"}]]}
     safety: read
     mcp: beam_get_template_with_prerequisites
     cli: beam templates get <templateId> + beam integrations connected
     status: ready
     notes: "missingIntegrations is the 'what do I connect first' answer."
   template.recommend:
+    execution: {"inputSchema":{"type":"object","properties":{"categoryId":{"type":"string","maxLength":200000}},"required":[],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"recommend"},{"field":"categoryId","kind":"value","optional":true}]]}
     safety: read
     mcp: null
     cli: beam templates recommend [categoryId]
     status: ready
     notes: "Prefer this over keyword search for 'what should I build?'."
   template.create-agent:
+    execution: {"inputSchema":{"type":"object","properties":{"templateId":{"type":"string","maxLength":200000}},"required":["templateId"],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"create-agent"},{"field":"templateId","kind":"value"}]]}
     safety: reversible-write
     mcp: null
     cli: beam templates create-agent <templateId>
@@ -580,12 +667,14 @@ operations:
     notes: "Read the full template first and pass its graph as is (a nested graph-and-tools object). The new agent is a draft."
 
   analytics.get:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"startDate":{"type":"string","maxLength":200000},"endDate":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"analytics"},{"literal":"get"},{"field":"agentId","kind":"value"},{"field":"startDate","kind":"value","optional":true},{"field":"endDate","kind":"value","optional":true}]]}
     safety: read
     mcp: getAgentAnalytics
     cli: beam analytics get <agentId> [startDate] [endDate]
     status: ready
     notes: "Dates as Y-m-d. With no range given, use the agent's createdAt to today, not the current month. Read figures from currentPeriod and changes from metricsDelta. There is no per-tool failure figure; it has to be worked out from failed runs."
   analytics.export:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"startDate":{"type":"string","maxLength":200000},"endDate":{"type":"string","maxLength":200000}},"required":["agentId","startDate","endDate"],"additionalProperties":false},"commands":[[{"literal":"analytics"},{"literal":"export"},{"field":"agentId","kind":"value"},{"field":"startDate","kind":"value"},{"field":"endDate","kind":"value"}]]}
     safety: reversible-write
     mcp: null
     cli: beam analytics export <agentId> <startDate> <endDate>
@@ -593,39 +682,46 @@ operations:
     notes: "Returns a shareable file link."
 
   view.list:
+    execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"list"}]]}
     safety: read
     mcp: null
     cli: beam views list
     status: ready
   view.get:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000}},"required":["viewId"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"get"},{"field":"viewId","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam views get <viewId>
     status: ready
     notes: "Read the column schema before explaining records."
   view.records:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000}},"required":["viewId"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"records"},{"field":"viewId","kind":"value"}]]}
     safety: read
     mcp: null
     cli: beam views records <viewId>
     status: ready
     notes: "pageSize at most 100; supports where, sort and fields."
   view.export:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000}},"required":["viewId"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"export"},{"field":"viewId","kind":"value"}]]}
     safety: reversible-write
     mcp: null
     cli: beam views export <viewId>
     status: ready
   view.linked-records:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000},"columnId":{"type":"string","maxLength":200000},"numericRecordId":{"type":"string","maxLength":200000}},"required":["viewId","columnId","numericRecordId"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"linked-records"},{"field":"viewId","kind":"value"},{"field":"columnId","kind":"value"},{"field":"numericRecordId","kind":"value"}]]}
     safety: read
     mcp: beam_list_linked_records
     cli: beam views linked-records <viewId> <columnId> <numericRecordId>
     status: ready
     notes: "Needs the link column id and the numeric record id."
   view.create:
+    execution: {"inputSchema":{"type":"object","properties":{"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["payloadFile"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"create"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: view_create
     cli: beam views create <payloadFile>
     status: ready
   view.delete:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000}},"required":["viewId"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"delete"},{"field":"viewId","kind":"value"},{"literal":"--confirm"},{"field":"viewId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: view_delete
@@ -633,6 +729,7 @@ operations:
     postRead: view.list
     status: ready
   view.add-column:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["viewId","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"add-column"},{"field":"viewId","kind":"value"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: view_create_column
     cli: beam views add-column <viewId> <payloadFile>
@@ -640,6 +737,7 @@ operations:
     status: ready
     notes: "Name: letters, numbers and underscore, up to 60 characters. A non-link column needs the feeding agent's node id and parameter; if they cannot be resolved with confidence, do not guess: link beam://views?viewId=<id>."
   view.update-column:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000},"columnId":{"type":"string","maxLength":200000},"fullPayloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["viewId","columnId","fullPayloadFile"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"update-column"},{"field":"viewId","kind":"value"},{"field":"columnId","kind":"value"},{"field":"fullPayloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: view_update_column
     cli: beam views update-column <viewId> <columnId> <fullPayloadFile>
@@ -647,6 +745,7 @@ operations:
     status: ready
     notes: "Send the full column, keeping the required mapping fields."
   view.delete-column:
+    execution: {"inputSchema":{"type":"object","properties":{"viewId":{"type":"string","maxLength":200000},"columnId":{"type":"string","maxLength":200000}},"required":["viewId","columnId"],"additionalProperties":false},"commands":[[{"literal":"views"},{"literal":"delete-column"},{"field":"viewId","kind":"value"},{"field":"columnId","kind":"value"},{"literal":"--confirm"},{"field":"columnId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always
     mcp: view_delete_column
@@ -655,72 +754,85 @@ operations:
     status: ready
 
   learning.issues:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"issues"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: optimizeTool
     cli: beam learning issues <agentId>
     status: ready
     notes: "Tabs: issues (active), review (completed jobs awaiting a decision), archived. Default to issues."
   learning.issue:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"issueId":{"type":"string","maxLength":200000}},"required":["agentId","issueId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"issue"},{"field":"agentId","kind":"value"},{"field":"issueId","kind":"value"}]]}
     safety: read
     mcp: getToolOptimizationStatus
     cli: beam learning issue <agentId> <issueId>
     status: ready
     notes: "Name the tool and its bucket when reporting an issue."
   learning.list-issues:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"toolFunctionName":{"type":"string","maxLength":200000},"sortBy":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"list-issues"},{"field":"agentId","kind":"value"},{"field":"toolFunctionName","kind":"value","optional":true},{"field":"sortBy","kind":"value","optional":true}]]}
     safety: read
     mcp: lh_list_issues
     cli: beam learning list-issues <agentId> [toolFunctionName] [sortBy]
     status: ready
     notes: "Issues for one tool, optionally sorted; use learning.issues for the tabbed overview."
   learning.feedbacks:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"issueId":{"type":"string","maxLength":200000}},"required":["agentId","issueId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"feedbacks"},{"field":"agentId","kind":"value"},{"field":"issueId","kind":"value"}]]}
     safety: read
     mcp: lh_get_issue_feedbacks
     cli: beam learning feedbacks <agentId> <issueId>
     status: ready
   learning.feedback-summary:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"taskNodeId":{"type":"string","maxLength":200000}},"required":["agentId","taskNodeId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"feedback-summary"},{"field":"agentId","kind":"value"},{"field":"taskNodeId","kind":"value"}]]}
     safety: read
     mcp: lh_get_feedback_node_summary
     cli: beam learning feedback-summary <agentId> <taskNodeId>
     status: ready
     notes: "Feedback summary for one step of a run (taskNodeId from task.get)."
   learning.update-feedback:
+    execution: {"inputSchema":{"type":"object","properties":{"feedbackId":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["feedbackId","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"update-feedback"},{"field":"feedbackId","kind":"value"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: reversible-write
     mcp: lh_update_feedback
     cli: beam learning update-feedback <feedbackId> <payloadFile>
     status: ready
   learning.issue-jobs:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"issueId":{"type":"string","maxLength":200000}},"required":["agentId","issueId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"issue-jobs"},{"field":"agentId","kind":"value"},{"field":"issueId","kind":"value"}]]}
     safety: read
     mcp: lh_get_issue_jobs
     cli: beam learning issue-jobs <agentId> <issueId>
     status: ready
   learning.job-activity:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"threadId":{"type":"string","maxLength":200000}},"required":["agentId","threadId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"job-activity"},{"field":"agentId","kind":"value"},{"field":"threadId","kind":"value"}]]}
     safety: read
     mcp: lh_get_job_activity
     cli: beam learning job-activity <agentId> <threadId>
     status: ready
     notes: "What a job did, step by step; use it to explain a failed or slow job."
   learning.trend:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"startDate":{"type":"string","maxLength":200000},"endDate":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"trend"},{"field":"agentId","kind":"value"},{"field":"startDate","kind":"value","optional":true},{"field":"endDate","kind":"value","optional":true}]]}
     safety: read
     mcp: lh_get_accuracy_trend
     cli: beam learning trend <agentId> [startDate endDate]
     status: ready
     notes: "The default answer to 'how accurate is it?'."
   learning.tools:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"startDate":{"type":"string","maxLength":200000},"endDate":{"type":"string","maxLength":200000},"nodesFilter":{"type":"string","maxLength":200000}},"required":["agentId","startDate","endDate"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"tools"},{"field":"agentId","kind":"value"},{"field":"startDate","kind":"value"},{"field":"endDate","kind":"value"},{"field":"nodesFilter","kind":"value","optional":true}]]}
     safety: read
     mcp: lh_get_learning_tools
     cli: beam learning tools <agentId> <startDate> <endDate> [nodesFilter]
     status: ready
   learning.tool:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"toolFunctionName":{"type":"string","maxLength":200000},"startDate":{"type":"string","maxLength":200000},"endDate":{"type":"string","maxLength":200000},"nodesFilter":{"type":"string","maxLength":200000}},"required":["agentId","toolFunctionName","startDate","endDate"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"tool"},{"field":"agentId","kind":"value"},{"field":"toolFunctionName","kind":"value"},{"field":"startDate","kind":"value"},{"field":"endDate","kind":"value"},{"field":"nodesFilter","kind":"value","optional":true}]]}
     safety: read
     mcp: lh_get_tool_detail
     cli: beam learning tool <agentId> <toolFunctionName> <startDate> <endDate> [nodesFilter]
     status: ready
   learning.config:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"config"},{"field":"agentId","kind":"value"}]]}
     safety: read
     mcp: lh_get_tuner_config
     cli: beam learning config <agentId>
     status: ready
   learning.set-config:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["agentId","payloadFile"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"set-config"},{"field":"agentId","kind":"value"},{"field":"payloadFile","kind":"json-file"},{"literal":"--confirm"},{"field":"agentId","kind":"value"}]]}
     safety: reversible-write
     confirmation: always-two-turn
     mcp: lh_set_tuner_config
@@ -729,17 +841,20 @@ operations:
     status: ready
     notes: "autoApply true means future jobs skip manual review."
   learning.submit-feedback:
+    execution: {"inputSchema":{"type":"object","properties":{"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["payloadFile"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"submit-feedback"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: additive-write
     mcp: lh_submit_feedback
     cli: beam learning submit-feedback <payloadFile>
     status: ready
   learning.submit-task-feedback:
+    execution: {"inputSchema":{"type":"object","properties":{"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["payloadFile"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"submit-task-feedback"},{"field":"payloadFile","kind":"json-file"}]]}
     safety: additive-write
     mcp: lh_submit_task_feedback
     cli: beam learning submit-task-feedback <payloadFile>
     status: ready
     notes: "May return isAmbiguous true; if so, say which steps it could apply to."
   learning.merge:
+    execution: {"inputSchema":{"type":"object","properties":{"payloadFile":{"type":["object","array"],"description":"JSON payload staged by the host into a private file"}},"required":["payloadFile"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"merge"},{"field":"payloadFile","kind":"json-file"},{"literal":"--confirm"},{"literal":"merge"}]]}
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_merge_issues
@@ -747,6 +862,7 @@ operations:
     status: ready
     notes: "Only issues on the same tool can be merged."
   learning.optimize:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"issueId":{"type":"string","maxLength":200000}},"required":["agentId","issueId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"optimize"},{"field":"agentId","kind":"value"},{"field":"issueId","kind":"value"},{"literal":"--confirm"},{"field":"issueId","kind":"value"}]]}
     safety: external-effect
     confirmation: always
     mcp: optimizeTool
@@ -754,6 +870,7 @@ operations:
     status: ready
     notes: "Costs credits. Needs workspaceId and userId (from user.current)."
   learning.discard:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"issueId":{"type":"string","maxLength":200000}},"required":["agentId","issueId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"discard"},{"field":"agentId","kind":"value"},{"field":"issueId","kind":"value"},{"literal":"--confirm"},{"field":"issueId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_discard_issue
@@ -761,12 +878,14 @@ operations:
     status: ready
     notes: "Archives the feedback and closes the issue. Needs workspaceId and userId (from user.current)."
   learning.job:
+    execution: {"inputSchema":{"type":"object","properties":{"threadId":{"type":"string","maxLength":200000}},"required":["threadId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"job"},{"field":"threadId","kind":"value"}]]}
     safety: read
     mcp: getToolOptimizationStatus
     cli: beam learning job <threadId>
     status: ready
     notes: "Always report the job status, and scoreChange when completed."
   learning.approve-job:
+    execution: {"inputSchema":{"type":"object","properties":{"threadId":{"type":"string","maxLength":200000}},"required":["threadId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"approve-job"},{"field":"threadId","kind":"value"},{"literal":"--confirm"},{"field":"threadId","kind":"value"}]]}
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_approve_job
@@ -775,6 +894,7 @@ operations:
     status: ready
     notes: "Applies the proposed prompt to the live tool; not directly reversible. Show the prompt before and after first."
   learning.reject-job:
+    execution: {"inputSchema":{"type":"object","properties":{"threadId":{"type":"string","maxLength":200000},"enabled":{"type":"string","maxLength":200000,"enum":["true","false"]}},"required":["threadId","enabled"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"reject-job"},{"field":"threadId","kind":"value"},{"literal":"--keep-feedbacks"},{"field":"enabled","kind":"value"},{"literal":"--confirm"},{"field":"threadId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_reject_job
@@ -783,6 +903,7 @@ operations:
     status: ready
     notes: "keepFeedbacks true reuses the feedback; false archives it."
   learning.reoptimize-job:
+    execution: {"inputSchema":{"type":"object","properties":{"threadId":{"type":"string","maxLength":200000},"text":{"type":"string","maxLength":200000}},"required":["threadId","text"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"reoptimize-job"},{"field":"threadId","kind":"value"},{"literal":"--feedback"},{"field":"text","kind":"value"},{"literal":"--confirm"},{"field":"threadId","kind":"value"}]]}
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_reoptimize_job
@@ -791,6 +912,7 @@ operations:
     status: ready
     notes: "Costs credits."
   learning.cancel-job:
+    execution: {"inputSchema":{"type":"object","properties":{"threadId":{"type":"string","maxLength":200000}},"required":["threadId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"cancel-job"},{"field":"threadId","kind":"value"},{"literal":"--confirm"},{"field":"threadId","kind":"value"}]]}
     safety: destructive-write
     confirmation: always-two-turn
     mcp: lh_cancel_job
@@ -799,6 +921,7 @@ operations:
     status: ready
     notes: "Releases the feedback back to its issue."
   learning.run-job:
+    execution: {"inputSchema":{"type":"object","properties":{"threadId":{"type":"string","maxLength":200000}},"required":["threadId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"run-job"},{"field":"threadId","kind":"value"},{"literal":"--confirm"},{"field":"threadId","kind":"value"}]]}
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_run_job
@@ -807,6 +930,7 @@ operations:
     status: ready
     notes: "Costs credits."
   learning.resume:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"learning"},{"literal":"resume"},{"field":"agentId","kind":"value"},{"literal":"--confirm"},{"field":"agentId","kind":"value"}]]}
     safety: external-effect
     confirmation: always-two-turn
     mcp: lh_resume_on_hold_jobs

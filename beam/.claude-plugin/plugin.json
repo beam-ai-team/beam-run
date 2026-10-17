@@ -1,6 +1,8 @@
 {
   "name": "beam",
   "description": "Universally operate Beam from Claude Code",
-  "version": "0.7.0",
-  "author": { "name": "Beam AI" }
+  "version": "0.7.1-prism.2",
+  "author": {
+    "name": "Beam AI"
+  }
 }
