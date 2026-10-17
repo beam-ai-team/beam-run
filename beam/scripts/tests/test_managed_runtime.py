@@ -1,11 +1,13 @@
 import importlib.util
 import copy
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 CLI = ROOT / 'beam/bin/beam'
@@ -41,6 +43,32 @@ class ManagedRuntimeTests(unittest.TestCase):
         result = self.run_cli('checkout', env=env)
         self.assertEqual(result.returncode, 3)
         self.assertIn('managed_context_missing', result.stderr)
+
+    def test_successful_bearer_read_replaces_an_initial_permission_status(self):
+        curl = self.config / 'curl'
+        curl.write_text('#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\na=sys.argv[1:]\n'
+                        'success=a[-1].endswith("/auth/access-token") or "Authorization: Bearer synthetic-bearer" in a\n'
+                        'body={"idToken":"synthetic-bearer"} if a[-1].endswith("/auth/access-token") else {"id":"agent-a"}\n'
+                        'Path(a[a.index("-o")+1]).write_text(json.dumps(body))\nprint("200" if success else "403",end="")\n')
+        curl.chmod(0o755)
+        status = self.config / 'http-status'
+        env = {**self.env, 'PATH': str(self.config) + os.pathsep + self.env['PATH'], 'BEAM_MANAGED_HTTP_STATUS_FILE': str(status)}
+        result = self.run_cli('agents', 'get', 'agent-a', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['id'], 'agent-a')
+        self.assertEqual(status.read_text(), '200')
+
+    def test_python_api_success_replaces_a_previous_auth_status(self):
+        spec = importlib.util.spec_from_file_location('beam_managed_builder', ROOT / 'beam/internal/agent-builder/scripts/beam.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        status = self.config / 'http-status'
+        status.write_text('401')
+        response = io.BytesIO(b'{"id":"agent-a"}')
+        response.status = 200
+        with patch.dict(os.environ, {**self.env, 'BEAM_MANAGED_HTTP_STATUS_FILE': str(status)}), patch.object(module.urllib.request, 'urlopen', return_value=response):
+            self.assertEqual(module._http('GET', 'https://instance.example/agent/agent-a', {})['id'], 'agent-a')
+        self.assertEqual(status.read_text(), '200')
     def test_manifest_has_complete_closed_executable_contract(self):
         result = subprocess.run(['python3', str(ROOT / 'beam/bin/operation_manifest.py')], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

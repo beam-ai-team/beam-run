@@ -18,8 +18,8 @@ incomplete mapping. Pin this CLI, exporter, Python builder, skill and playbooks
 from the same source revision. The host stages JSON/text files and resolves
 artifact handles before invoking the generated argument array without a shell.
 
-`BEAM_MANAGED_HTTP_STATUS_FILE`, when supplied by the host, receives only a numeric
-401 or 403 response status. This lets hosts distinguish reconnect-required
+`BEAM_MANAGED_HTTP_STATUS_FILE`, when supplied by the host, receives only the latest numeric
+API response status, including successful fallback responses. This lets hosts distinguish reconnect-required
 credentials from insufficient permissions without exposing HTTP headers.
 
 Run managed boundary checks with:

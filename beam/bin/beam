@@ -510,7 +510,7 @@ elif isinstance(ws, list) and ws:
 
 record_managed_http_status() {
   if [ "${BEAM_MANAGED_CONTEXT:-}" = "1" ] && [ -n "${BEAM_MANAGED_HTTP_STATUS_FILE:-}" ]; then
-    case "$1" in 401|403) printf '%s' "$1" > "$BEAM_MANAGED_HTTP_STATUS_FILE" ;; esac
+    case "$1" in [0-9][0-9][0-9]) printf '%s' "$1" > "$BEAM_MANAGED_HTTP_STATUS_FILE" ;; esac
   fi
 }
 
@@ -702,6 +702,7 @@ api_upload() {
       -o "$tmp" -w '%{http_code}' "$API_BASE$path" 2>/dev/null)"; then cx=0; else cx=$?; fi
   fi
   if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
+  record_managed_http_status "$code"
   case "$code" in 2*) cat "$tmp"; rm -f "$tmp"; return 0 ;; 401|403) rm -f "$tmp"; return 3 ;; *) rm -f "$tmp"; return 5 ;; esac
 }
 

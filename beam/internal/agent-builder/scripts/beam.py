@@ -238,9 +238,9 @@ def resolve_creds():
 # ===========================================================================
 
 def _record_managed_http_status(status):
-    """Numeric auth result only; the host owns this ephemeral file."""
+    """Latest numeric API response only; the host owns this ephemeral file."""
     path = os.environ.get("BEAM_MANAGED_HTTP_STATUS_FILE")
-    if os.environ.get("BEAM_MANAGED_CONTEXT") == "1" and path and status in (401, 403):
+    if os.environ.get("BEAM_MANAGED_CONTEXT") == "1" and path and isinstance(status, int) and 100 <= status <= 599:
         with open(path, "w", encoding="ascii") as stream:
             stream.write(str(status))
 
@@ -258,6 +258,7 @@ def _http(method, url, headers, body=None, params=None, timeout=HTTP_TIMEOUT):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            _record_managed_http_status(resp.status)
             text = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         _record_managed_http_status(exc.code)
@@ -355,6 +356,7 @@ class Api:
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=30) as resp:
+                _record_managed_http_status(resp.status)
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             _record_managed_http_status(exc.code)
@@ -1877,7 +1879,6 @@ def _fetch_text(url, timeout=HTTP_TIMEOUT):
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
-        _record_managed_http_status(exc.code)
         raise BeamError(f"GET {url} failed ({exc.code}).", code="api_error",
                         next_step="Check the page against the index: beam agent-builder docs <query>.")
     except urllib.error.URLError as exc:
