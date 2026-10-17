@@ -15,7 +15,7 @@ beam agent-builder <command> [args]
   `BEAM_LOCAL_DEV=1`, so inherited developer-shell settings cannot redirect a
   production install. There is no `.env` file. Never ask the user to
   paste a key into the chat — if nothing resolves, the fix is `beam login
-  <workspace URL>` (browser Connect; poll `beam login --wait` until it says connected).
+  <instance>` (browser Connect; poll `beam login --wait <instanceId>` until it says connected).
 - **Output**: every command prints one JSON object to **stdout**. Success →
   `{"ok": true, "command": "...", ...}`. Failure → `{"ok": false, "code": "...",
   "error": "...", "next": "..."}` plus a categorical exit code: 1 internal,

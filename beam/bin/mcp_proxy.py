@@ -204,9 +204,9 @@ def connections_text():
             "🚀 Beam session setup\n"
             "✅ Beam Run ready\n"
             "⬜ Connect Beam\n\n"
-            "Next: run `beam login <workspace URL>`, using any URL from the user's Beam workspace.\n"
+            "Next: ask which Beam instance to connect (Beam App, Beam Staging, a regional one such as Beam ANZ, or Beam Enterprise), then run `beam login <instance>` with app, staging, enterprise or the region code (a workspace URL also works).\n"
             "1. Show the Connect link it prints as a clickable link; the user approves it in their browser\n"
-            "2. Run `beam login --wait` every few seconds until it reports connected (each call returns quickly)\n"
+            "2. Run `beam login --wait <instanceId>` every few seconds until it reports connected (each call returns quickly)\n"
             "3. If it reports sandbox_blocked, re-run the same command with network access approved, or add --paste\n"
             "4. If it lists workspaces, ask which one to use; if there are none, ask the user to create one in Beam first"
         )
@@ -219,7 +219,7 @@ def connections_text():
         "⬜ Instance\n"
         "⬜ Workspace\n\n"
         "Saved instances:\n%s\n"
-        "%s. + Add another\n\n"
+        "%s. + Add another (run `beam login <instance>`: app, staging, enterprise or a region code)\n\n"
         "Which instance would you like to use?"
     ) % ("\n".join(rows), len(rows) + 1)
 

@@ -2,7 +2,7 @@
 """A fake Beam (Studio + API) for test/connect.sh. Paths are /<host>/<real path>.
 
 Control files in <dir>: ws.json {host: [{id, name}]}, old (hosts without Connect, one per
-line), deny (exists: the browser step returns error=access_denied). Writes port, revoked
+line), bad ("<host> <status>" probe answers), slow (hosts whose probe stalls), deny (exists: the browser step returns error=access_denied). Writes port, revoked
 (host key), lastcode and tokens (host key) back into <dir>.
 """
 import base64
@@ -11,6 +11,7 @@ import http.server
 import json
 import os
 import sys
+import time
 import urllib.parse
 
 DIR = sys.argv[1]
@@ -51,6 +52,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         host, path, query = self.split()
         if path == "/api/cli/authorize":
+            for line in read("bad").splitlines():  # "<host> <status>": answer the probe with that status
+                bad_host, _, status = line.partition(" ")
+                if bad_host == host:
+                    return self.send(int(status), {})
+            if host in read("slow").split():  # longer than the CLI's probe timeout
+                time.sleep(7)
             if host in read("old").split():
                 return self.send(404, {"error": "not found"})
             if not query:

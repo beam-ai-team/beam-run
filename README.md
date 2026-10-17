@@ -59,7 +59,7 @@ external software.
 Learning Hub commands cover the documented issue, feedback, job, tuner, and
 accuracy APIs. Use `beam learning` to access them; the public contract is
 available at [Beam API docs](https://api.beamstudio.ai/public-docs).
-`beam login <workspace URL>` derives Beam App, Beam Enterprise, or Beam `{Region}`,
+`beam login <instance>` (`app`, `staging`, `enterprise`, a region such as `anz`, or a workspace URL) selects Beam App, Beam Staging, Beam Enterprise, or Beam `{Region}`,
 prints a Connect link to approve in the browser (no API key to copy), and saves
 that connection locally. `beam logout` deletes the key in Beam. Each
 conversation checks out and locks one instance and workspace; parallel

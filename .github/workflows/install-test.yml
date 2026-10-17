@@ -18,7 +18,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck beam/bin/beam test/smoke.sh test/e2e.sh test/e2e-agent-builder.sh test/playbook-contract.sh
+          shellcheck beam/bin/beam test/smoke.sh test/e2e.sh test/e2e-agent-builder.sh test/playbook-contract.sh test/connect.sh
 
   smoke:
     needs: lint
@@ -49,6 +49,10 @@ jobs:
 
       - name: session checkout safety
         run: sh test/session-checkout.sh
+
+      # Browser Connect (beam login) against a fake Beam: real listener, simulated browser.
+      - name: browser connect
+        run: sh test/connect.sh
 
       # agent-builder CLI: path resolution, credential sourcing, error contract.
       # All deploys are --dry-run, so no agent is ever created.

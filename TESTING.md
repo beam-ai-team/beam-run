@@ -1,6 +1,6 @@
 # Testing Beam Run locally (dev)
 
-`v0.7.0`. `beam login <workspace URL>` derives the instance, connects through the
+`v0.7.0`. `beam login <instance or workspace URL>` derives the instance, connects through the
 browser, then selects and locks one workspace for the session. See
 [`specs/browser-connect.md`](specs/browser-connect.md); the key flow it falls back to
 is in [`specs/api-key-login.md`](specs/api-key-login.md).
@@ -34,7 +34,7 @@ confirmation gates, context continuity, and response quality.
 
 ### Playbook evals
 
-`test/evals/playbook-evals.json` holds 30 realistic requests covering all 16
+`test/evals/playbook-evals.json` holds 33 realistic requests covering all 16
 playbooks, multi-step work, safety traps and a non-Beam request. Each records the
 actions a correct plan must include, must never do, and must stop before.
 
@@ -69,8 +69,8 @@ the two Beam messages above and below it are the portable visibility contract.
 ## 3. Manual end-to-end
 ```sh
 beam doctor            # green/red checklist with plain-language fixes
-beam login <workspace URL>   # prints the Connect link; approve it in the browser
-beam login --wait            # repeat until it says connected
+beam login app               # or staging, enterprise, a region such as anz, or a workspace URL; prints the Connect link
+beam login --wait app        # repeat until it says connected
 beam whoami
 beam checkout          # choose and lock this session
 beam workspace list    # narrow by name or ID when needed
@@ -87,7 +87,7 @@ Then ask *"list my Beam agents."* (restart Claude Code only if the entry was jus
 ## Notes
 - **Never** pass the key as `beam login --api-key <key>` — it leaks to shell history. Connect needs no key; for the older flow use the masked prompt (`--api-key`), `BEAM_API_KEY`, or `--api-key -`.
 - No restart is required after connecting: the MCP bridge re-reads the saved connection on every message. It is needed only when the plugin itself was just installed.
-- Local dev: `BEAM_LOCAL_DEV=1 beam login http://localhost:3000/...` (API from `BEAM_LOCAL_API_URL`, default `http://localhost:4000`).
+- Local dev: `BEAM_LOCAL_DEV=1 beam login http://localhost:3000` (API from `BEAM_LOCAL_API_URL`, default `http://localhost:4000`).
 - The committed `beam/.mcp.json` uses the stdio bridge, now backed by the vendored
   `beam/bin/mcp_proxy.py` (stdlib only — no npx/uvx). Signed out, it serves a live
   `beam_setup_status` tool instead of failing to start. `beam register` additionally wires

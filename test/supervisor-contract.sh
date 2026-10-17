@@ -64,6 +64,10 @@ bearer=false
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="${2:-}"; shift 2 ;;
+    -K)
+      grep -q '^header = "x-api-key:' "$2" && api_key=true
+      grep -q '^header = "Authorization: Bearer ' "$2" && bearer=true
+      shift 2 ;;
     -H)
       case "${2:-}" in
         x-api-key:*) api_key=true ;;

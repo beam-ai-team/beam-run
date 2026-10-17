@@ -23,7 +23,7 @@ Keep skill, tool, and fallback mechanics out of the user-facing reply.
 If the host requires a skill announcement, say "I’ll use Beam to help with that."
 Never call it a skill or narrate loading its instructions.
 
-- No saved instance: show the returned setup checklist, run `beam login <workspace URL>`, show its Connect link as a clickable link, then poll `beam login --wait` (the setup skill has the steps).
+- No saved instance: show the returned setup checklist, ask which Beam instance, run `beam login <instance>`, show its Connect link as a clickable link, then poll `beam login --wait <instanceId>` (the setup skill has the steps).
 - One saved instance: show it and relay the workspace question from status.
 - Multiple saved instances: run `beam checkout` without choosing for the user.
   Beam presents the instance selector and includes “Add another.”

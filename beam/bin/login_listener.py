@@ -3,7 +3,7 @@
 
   pkce              print code_verifier, state, S256 challenge and a spare port (one per line)
   start <pending>   bind 127.0.0.1, detach, print the port; serve /callback once, then exit
-  query <url>       print code, state and error from a pasted callback address (one per line)
+  query             read a pasted callback address on stdin; print code, state and error (one per line)
 
 The listener writes CODE=... or ERROR=... into the pending file; it never prints them.
 """
@@ -17,7 +17,7 @@ import sys
 import time
 import urllib.parse
 
-TTL = 300  # seconds the listener stays up
+TTL = int(os.environ.get("BEAM_TEST_LISTENER_TTL") or 300)  # seconds the listener stays up (override is for tests)
 SAFE = re.compile(r"^[A-Za-z0-9._~-]{1,512}$")
 GOOD = "Connected — you can close this tab and return to your coding tool."
 BAD = "Sign-in did not complete — go back to your tool and try again."
@@ -35,7 +35,8 @@ def pkce():
     print(49152 + secrets.randbelow(16000))
 
 
-def query(url):
+def query():
+    url = sys.stdin.read().strip()  # read from stdin: the code stays off the command line
     values = urllib.parse.parse_qs(urllib.parse.urlparse(url).query or url)
     for name in ("code", "state", "error"):
         print(values.get(name, [""])[0])
@@ -57,6 +58,8 @@ def start(path):
     done = []
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        timeout = 5  # an idle or half-open connection must not stall the listener
+
         def log_message(self, *args):
             pass
 
@@ -113,7 +116,7 @@ if __name__ == "__main__":
         pkce()
     elif command == "start" and len(sys.argv) == 3:
         start(sys.argv[2])
-    elif command == "query" and len(sys.argv) == 3:
-        query(sys.argv[2])
+    elif command == "query" and len(sys.argv) == 2:
+        query()
     else:
-        sys.exit("usage: login_listener.py pkce | start <pending-file> | query <url>")
+        sys.exit("usage: login_listener.py pkce | start <pending-file> | query")

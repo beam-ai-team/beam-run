@@ -34,27 +34,29 @@ It installs `beam`, puts it on PATH (and your shell rc), and, in an interactive 
 
 ### 3 · Connect
 
-> "Open Beam and copy any URL from your workspace, then paste it here. I'll send you a link to approve in your browser."
+> "Which Beam instance do you use: Beam App, Beam Staging, a regional one such as Beam ANZ, or Beam Enterprise? I'll send you a link to approve in your browser."
 
-A workspace URL is not secret; it can go in the chat. Run:
+No workspace URL is needed: the workspace is chosen after sign-in. Run `beam login` with `app`,
+`staging`, `enterprise` or the region code (`anz`, `us`, `eu`...). If the user pastes a workspace
+URL instead, pass that; its workspace is preselected.
 
 ```bash
-beam login <workspace URL>
+beam login <instance>
 ```
 
-It returns at once with `"status":"waiting"` and a `connectUrl`. Show that link to the
-user as a clickable link and ask them to approve it in their browser. Then run
-`beam login --wait` every few seconds (each call returns within about two seconds) and
-branch on `status`:
+It returns at once with `"status":"waiting"`, an `instanceId` and a `connectUrl`. Show that link
+to the user as a clickable link and ask them to approve it in their browser. Then run
+`beam login --wait <instanceId>` every few seconds (each call returns within about two seconds)
+and branch on `status`:
 
-- `waiting` → keep polling. After about five minutes the link expires; run `beam login <workspace URL>` again.
+- `waiting` → keep polling. After about five minutes the link expires; run `beam login <instance>` again.
 - `connected` → go to step 4.
 - `choose_workspace` → ask which workspace from `workspaces`, then run `beam checkout <instanceId> <workspace>`.
-- `no_workspace` → the connection is kept. Tell the user to create a workspace in Beam first (the `message` has the link), then run `beam checkout <instanceId> <workspace>`.
-- `failed` → say sign-in did not complete and offer to run `beam login <workspace URL>` again. For `api_keys_manage_required`, ask them to request API key access from a workspace admin.
-- `sandbox_blocked` (command exit 2) → this environment blocks the local listener. Re-run the same `beam login <workspace URL>` with network access approved (escalated permissions). If that is not possible, run it with `--paste`, have the user approve the link, then paste the address the browser ends on (it may show "can't connect"; that is expected) and run `beam login --callback '<address>'`. Never loop.
+- `no_workspace` → the connection is kept. Tell the user to create a workspace in Beam first (the `message` has the link) and do not create one for them; then run `beam checkout <instanceId> <workspace>`.
+- `failed` → say sign-in did not complete and offer to run `beam login <instance>` again. For `api_keys_manage_required`, ask them to request API key access from a workspace admin.
+- `sandbox_blocked` (command exit 2) → this environment blocks the local listener. Re-run the same `beam login <instance>` with network access approved (escalated permissions). If that is not possible, run it with `--paste`, have the user approve the link, then paste the address the browser ends on (it may show "can't connect"; that is expected) and run `beam login --callback '<address>'`. Never loop.
 
-To reconnect an instance run `beam login <workspace URL> --replace` (the old key is deleted in Beam first). `beam logout` disconnects the instance and deletes its key in Beam.
+To reconnect an instance run `beam login <instance> --replace` (the old key is deleted in Beam once the new one works). `beam logout` disconnects the instance and deletes its key in Beam.
 
 `beam login` registers the MCP connection itself, including on the Claude desktop app, which has no `claude` CLI. Only if it prints **"Could not auto-register"** do you relay the manual local-command fallback printed by the CLI. Never put the key in host configuration.
 
@@ -104,9 +106,9 @@ Render it as a warm chat message with **emoji** — never a raw diagnostic dump.
 ⬜ Sign in
 
 **Next steps:**
-🔑 1. Copy a URL from your Beam workspace and run:
+🔑 1. Tell me which Beam instance you use (Beam App, Staging, a region, or Enterprise) and run:
 ```bash
-beam login <that URL>
+beam login <instance>
 ```
 🚀 2. Approve the link in your browser, select or create a workspace, then ask "list my Beam agents."
 

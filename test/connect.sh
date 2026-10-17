@@ -31,6 +31,7 @@ PORT="$(cat "$fake/port")"
 # curl that sends every Beam host to the fake; `open` records the link instead of opening a browser.
 cat > "$tmp/bin/curl" <<SH
 #!/bin/sh
+printf '%s\\n' "\$*" >> "$tmp/argv"
 [ -z "\${FAKE_OFFLINE:-}" ] || exit 7
 n=\$#
 while [ "\$n" -gt 0 ]; do
@@ -88,7 +89,7 @@ SID=s1; b login "$APP"
 url="$(jget connectUrl)"
 case "$url" in "https://app.beam.ai/api/cli/authorize?code_challenge="*"&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A"*"%2Fcallback&state="*) ;; *) fail "unexpected connect link: $url" ;; esac
 saw "Connect Beam: $url" || fail "human Connect line missing"
-grep -qF "$url" "$tmp/opened" || fail "browser was not opened"
+n=0; until grep -qF "$url" "$tmp/opened" 2>/dev/null; do n=$((n + 1)); [ "$n" -lt 30 ] || fail "browser was not opened"; sleep 0.1; done
 [ "$(wc -c < "$CFG/pending/app" | tr -d ' ')" -gt 0 ] && [ "$(ls -l "$CFG/pending/app" | cut -c1-10)" = "-rw-------" ] || fail "pending file is not private"
 verifier="$(pend app VERIFIER)"
 b login --wait
@@ -152,15 +153,19 @@ b login --callback "$final"
 key2="$(prof app BEAM_API_KEY)"
 ok "a pasted final address completes the sign-in"
 
-printf '\n=== reconnecting deletes the old key first ===\n'
+printf '\n=== reconnecting deletes the old key only once the new one works ===\n'
 b login "$APP"
 [ "$rc" -eq 2 ] && saw instance_exists || fail "re-login without --replace should refuse"
 b login "$APP" --replace
-[ "$(revoked "$key2")" -eq 1 ] || fail "old key was not deleted when reconnecting"
+[ "$(revoked "$key2")" -eq 0 ] || fail "old key was deleted before the new sign-in was approved"
+b whoami
+[ "$rc" -eq 0 ] || fail "an abandoned reconnect broke the old key"
+b login "$APP" --replace
 browse "$(jget connectUrl)"; b login --wait
 key3="$(prof app BEAM_API_KEY)"
-[ "$(jget status)" = connected ] && [ "$key3" != "$key2" ] && [ "$(revoked "$key3")" -eq 0 ] || fail "reconnect did not issue a new key"
-ok "--replace revokes the old key and keeps the new one"
+[ "$(jget status)" = connected ] && [ "$key3" != "$key2" ] || fail "reconnect did not issue a new key"
+[ "$(revoked "$key2")" -eq 1 ] && [ "$(revoked "$key3")" -eq 0 ] || fail "old key was not deleted after the new one worked"
+ok "--replace keeps the old key until the new one works, then revokes it"
 
 printf '\n=== two instances stay connected side by side ===\n'
 SID=s2; b login https://app.us.beam.ai/x --paste
@@ -222,5 +227,117 @@ rm -rf "$CFG"; mkdir -p "$CFG"
 b login https://app.us.beam.ai/x
 [ "$rc" -eq 0 ] && [ "$(jget status)" = connected ] && ! grep -q '^BEAM_CONNECT=' "$CFG/instances/us" || fail "BEAM_API_KEY did not keep the key flow"
 ok "old profiles derive the app address; BEAM_API_KEY still skips Connect"
+
+printf '\n=== a workspace chosen after sign-in; a missing preselection never loses the key ===\n'
+CFG="$tmp/config3"; KEY=""; mkdir -p "$CFG"
+printf '{"api.beamstudio.ai": [{"id":"w1","name":"Alpha"},{"id":"w2","name":"Beta"}]}' > "$fake/ws.json"
+b login app
+[ "$(jget instanceId)" = app ] || fail "a bare instance name did not start Connect"
+browse "$(jget connectUrl)"; b login --wait app
+[ "$(jget status)" = choose_workspace ] && saw '"name": "Alpha"' || fail "workspace was not left for after sign-in"
+b logout
+b login https://app.beam.ai/w2/agents
+browse "$(jget connectUrl)"; b login --wait app
+[ "$(jget status)" = connected ] && [ "$(jget workspaceId)" = w2 ] || fail "a workspace URL did not preselect its workspace"
+b logout
+export BEAM_WORKSPACE_ID=nope
+b login app; browse "$(jget connectUrl)"; b login --wait app
+unset BEAM_WORKSPACE_ID
+[ "$(jget status)" = choose_workspace ] && [ -f "$CFG/instances/app" ] || fail "a workspace that does not exist cost the user the new key"
+b logout; reset_ws
+ok "bare instance, workspace URL preselect, and unknown workspace falls back to a choice"
+
+printf '\n=== instance names and bare addresses ===\n'
+CFG="$tmp/config4"; mkdir -p "$CFG"
+app_of() { b login "$@" --paste; jget connectUrl | sed 's#/api/cli/authorize.*##'; }
+for pair in "app=https://app.beam.ai" "staging=https://app.staging.beamstudio.ai" "enterprise=https://enterprise.beamstudio.ai" \
+  "anz=https://app.anz.beam.ai" "Beam ANZ=https://app.anz.beam.ai" "Beam Staging=https://app.staging.beamstudio.ai" \
+  "https://app.beam.ai=https://app.beam.ai" "https://app.staging.beamstudio.ai=https://app.staging.beamstudio.ai" \
+  "https://app.anz.beam.ai/=https://app.anz.beam.ai" "https://enterprise.beamstudio.ai=https://enterprise.beamstudio.ai" \
+  "https://app.enterprise.beam.ai=https://app.enterprise.beam.ai"; do
+  [ "$(app_of "${pair%%=*}")" = "${pair#*=}" ] || fail "instance '${pair%%=*}' did not open ${pair#*=}"
+done
+export BEAM_LOCAL_DEV=1
+[ "$(app_of http://localhost:3000)" = http://localhost:3000 ] || fail "bare local address"
+unset BEAM_LOCAL_DEV
+b login http://localhost:3000 --paste
+[ "$rc" -eq 2 ] && saw workspace_url_invalid || fail "a local address was accepted without BEAM_LOCAL_DEV"
+printf 'app.us.beam.ai\n' > "$fake/old"
+b login us
+[ "$rc" -eq 2 ] && saw 'does not support browser sign-in yet' || fail "bare instance without Connect should explain the key needs a workspace URL"
+: > "$fake/old"
+b login --api-key https://app.beam.ai/x
+[ "$rc" -eq 2 ] && saw 'not a URL' || fail "--api-key <url> was not refused"
+ok "instance ids and names, bare origins, local dev, and clear refusals"
+
+printf '\n=== probe: 404 falls back; other failures are network errors ===\n'
+CFG="$tmp/config5"; mkdir -p "$CFG"
+printf 'app.eu.beam.ai 502\n' > "$fake/bad"
+b login https://app.eu.beam.ai/x
+[ "$rc" -eq 5 ] && saw network_error && saw 'HTTP 502' && saw 'Could not reach' || fail "502 on the probe was not a plain network error"
+: > "$fake/bad"; printf 'app.eu.beam.ai\n' > "$fake/slow"
+start="$(date +%s)"; b login https://app.eu.beam.ai/x; elapsed=$(( $(date +%s) - start ))
+[ "$rc" -eq 5 ] && saw 'no response' && [ "$elapsed" -le 6 ] || fail "a stalled probe was not cut off at one short attempt (rc=$rc, ${elapsed}s)"
+: > "$fake/slow"; sleep 3
+[ ! -e "$CFG/pending/eu" ] && [ ! -f "$CFG/instances/eu" ] || fail "a failed probe left state behind"
+printf 'app.eu.beam.ai\n' > "$fake/old"; b login https://app.eu.beam.ai/x
+[ "$rc" -eq 3 ] && saw auth_missing || fail "404 should fall back to the key prompt"
+: > "$fake/old"
+ok "404 falls back; 502 and a stalled probe say they could not reach Beam"
+
+printf '\n=== pending sign-ins: stale ones ignored, newest wins ===\n'
+CFG="$tmp/config6"; mkdir -p "$CFG/pending"
+printf 'INSTANCE_ID=zz\nSTARTED_AT=1\n' > "$CFG/pending/zz"
+b login --wait
+[ "$rc" -eq 2 ] && saw no_pending_login && [ ! -e "$CFG/pending/zz" ] || fail "a stale pending sign-in blocked --wait"
+b login "$APP"; first_url="$(jget connectUrl)"; sleep 1
+b login https://app.eu.beam.ai/x --paste
+b login --wait
+[ "$(jget status)" = waiting ] || fail "--wait with no instance should follow the newest sign-in"
+browse "$first_url"
+b login --wait
+[ "$(jget status)" = waiting ] || fail "--wait with no instance picked an older sign-in"
+b login --wait app
+[ "$(jget status)" = connected ] || fail "--wait <instance> did not finish its own sign-in"
+ok "stale files are dropped, the newest wins, an instance id picks its own"
+
+printf '\n=== an idle connection cannot stall the listener or outlive its time limit ===\n'
+CFG="$tmp/config7"; mkdir -p "$CFG"
+b login "$APP"; url="$(jget connectUrl)"; port="$(pend app PORT)"
+python3 -c 'import socket,sys,time; s=socket.create_connection(("127.0.0.1", int(sys.argv[1]))); time.sleep(12)' "$port" &
+idle1=$!
+sleep 1
+browse "$url"
+b login --wait app
+[ "$(jget status)" = connected ] || fail "an idle connection blocked the callback"
+b logout
+export BEAM_TEST_LISTENER_TTL=2
+b login "$APP"; port="$(pend app PORT)"
+unset BEAM_TEST_LISTENER_TTL
+python3 -c 'import socket,sys,time; s=socket.create_connection(("127.0.0.1", int(sys.argv[1]))); time.sleep(10)' "$port" &
+idle2=$!
+sleep 9
+if python3 -c 'import socket,sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2)' "$port" 2>/dev/null; then fail "the listener outlived its time limit"; fi
+kill "$idle1" "$idle2" 2>/dev/null || true
+ok "callback served past an idle connection; listener exits at its limit"
+
+printf '\n=== a stuck browser opener cannot hang login ===\n'
+CFG="$tmp/config8"; mkdir -p "$CFG"
+printf '#!/bin/sh\nsleep 20\n' > "$tmp/bin/open"; cp "$tmp/bin/open" "$tmp/bin/xdg-open"
+start="$(date +%s)"; b login "$APP" --paste; elapsed=$(( $(date +%s) - start ))
+[ "$rc" -eq 0 ] && [ "$elapsed" -le 8 ] || fail "login waited for the browser opener (${elapsed}s)"
+printf '#!/bin/sh\nprintf "%%s\\n" "$1" >> "%s/opened"\n' "$tmp" > "$tmp/bin/open"; cp "$tmp/bin/open" "$tmp/bin/xdg-open"
+ok "opener runs detached"
+
+printf '\n=== no key on any command line ===\n'
+[ -s "$tmp/argv" ] || fail "curl calls were not recorded"
+if grep -n 'curl -sS' "$BEAM" | grep -v beam_curl | grep -q .; then fail "a curl call bypasses beam_curl"; fi
+grep -q 'login_listener.py" query "' "$BEAM" && fail "the pasted address is on python's command line"
+{ cut -d' ' -f2 "$fake/tokens"; printf 'legacy-key\n'; } > "$tmp/keys"
+while IFS= read -r secret; do
+  if grep -qF -- "$secret" "$tmp/argv"; then fail "a key was on a curl command line"; fi
+done < "$tmp/keys"
+grep -q -- '-K ' "$tmp/argv" || fail "headers are not passed through a config file"
+ok "headers travel in a private config file; no key in any recorded argv"
 
 printf '\nBrowser Connect checks PASSED.\n'

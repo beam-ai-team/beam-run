@@ -38,7 +38,7 @@ fi
 if grep -ihE 'restart' "$setup" GETTING_STARTED.md TESTING.md | grep -iE 'afterward([^s]|$)|after (you )?(connect|sign|log)' | grep -viE 'no restart|not needed|not required|only' | grep -q .; then
   fail "a restart is described as required after connecting"
 fi
-for needle in 'beam login <workspace URL>' 'beam login --wait' 'sandbox_blocked' 'no_workspace' 'choose_workspace' 'clickable link' 'beam login --callback'; do
+for needle in 'beam login <instance>' 'beam login --wait <instanceId>' 'sandbox_blocked' 'no_workspace' 'choose_workspace' 'clickable link' 'beam login --callback'; do
   grep -qF "$needle" "$setup" || fail "the setup skill omits: $needle"
 done
 ok "the setup skill drives Connect, never asks for a key on that path, and needs no restart"

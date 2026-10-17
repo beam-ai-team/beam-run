@@ -1,20 +1,21 @@
 # SPEC — Browser Connect for `beam login`
 
-`beam login <workspace URL>` signs the user in through their browser and saves a
+`beam login <instance>` signs the user in through their browser and saves a
 Beam Run key for them. Nobody copies an API key. Supersedes the key-first part of
 [`api-key-login.md`](api-key-login.md), which stays as the fallback.
 
 ## Flow
 
-1. Derive the instance from the URL as before, plus its **app address** (stored as
+1. Accept an instance id or name (`app`, `staging`, `enterprise`, a region such as `anz`, "Beam ANZ"), a bare instance address (no workspace needed; the workspace is chosen after sign-in) or a workspace URL (its workspace is preselected). Derive the instance and its **app address** (stored as
    `BEAM_APP_URL` in the profile). A typed app address is used as typed; a typed API
    address is mapped (`api.beamstudio.ai` to `app.beam.ai`, `api.staging.beamstudio.ai`
    to `app.staging.beamstudio.ai`, `api.enterprise.beamstudio.ai` to
    `enterprise.beamstudio.ai`, `api.<region>.beamstudio.ai` to `app.<region>.beam.ai`).
    Custom API hosts need `--app-url`. Local development (`BEAM_LOCAL_DEV=1`): the typed
    address is the app, the API is `BEAM_LOCAL_API_URL` (default `http://localhost:4000`).
-2. Probe `GET <app>/api/cli/authorize`. `200 {"ok":true,"version":1}` means Connect is
-   available. Anything else (including `404`) falls back to the key prompt.
+2. Probe `GET <app>/api/cli/authorize`. one 5-second attempt, no retries. `200 {"ok":true,"version":1}` means Connect is
+   available; `404` falls back to the key prompt (a bare address cannot, since a key needs a workspace URL);
+   anything else is reported as a network error.
 3. `beam login` generates a PKCE verifier and state, starts a one-shot listener on
    `127.0.0.1` (`beam/bin/login_listener.py`, gone after the first callback or 300 s),
    writes `~/.config/beam/pending/<instance-id>` (mode 0600), prints
@@ -22,7 +23,7 @@ Beam Run key for them. Nobody copies an API key. Supersedes the key-first part o
    `Connect Beam: <url>`, tries to open the browser and exits 0.
 4. The browser ends at `http://127.0.0.1:<port>/callback?code=..&state=..` (or
    `?error=..`). The listener checks `state` and records the code or error.
-5. `beam login --wait [instance]` returns within about two seconds with one status:
+5. `beam login --wait [instanceId]` (with no id, the newest pending sign-in; ones older than 330 s are dropped) returns within about two seconds with one status:
    `waiting`, `connected`, `choose_workspace` (with `workspaces`), `no_workspace`
    (message: "Create a workspace in Beam first: <app address>"; the connection is kept),
    or `failed` (with `reason`, exit 2). On a code it calls `POST <api>/auth/cli/token`,
@@ -40,6 +41,10 @@ Beam Run key for them. Nobody copies an API key. Supersedes the key-first part o
   counts as already gone). If Beam cannot be reached the key is still removed locally and
   the CLI prints: Delete the key named 'Beam Run · …' under API keys in Beam.
 - Keys the user pasted (`--api-key`, `BEAM_API_KEY`, the prompt) are never revoked.
+- No key is ever on a command line: every request goes through `beam_curl`, which passes headers
+  in a private temporary config file (`curl -K`). The pasted callback address is read on stdin.
+- A reconnect (`--replace`) deletes the old key only after the new key has been issued and works,
+  so an abandoned reconnect changes nothing. A listener that cannot be started never costs the old key.
 - The key, verifier and code are never printed. `BEAM_API_KEY`, `--api-key -` and bare
   `--api-key` keep today's behaviour and skip Connect.
 

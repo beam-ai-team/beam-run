@@ -116,7 +116,7 @@ chmod +x "$HOME/.config/beam-plugin/beam/bin/beam"
 }
 ```
 
-3. Run `beam login <workspace URL>` and approve the Connect link in your browser, then fully restart Cursor (needed only because the plugin was just installed).
+3. Run `beam login <instance>` and approve the Connect link in your browser, then fully restart Cursor (needed only because the plugin was just installed).
 
 ## Don't run two paths at once
 
