@@ -5,7 +5,7 @@ description: Beam setup — a guided, near-zero-prompt install. Run when the use
 
 # Beam setup (guided)
 
-Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, shares any URL from their Beam workspace, approves a Connect link in their browser, then selects or creates a workspace. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
+Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, shares any URL from their Beam workspace, opens a Connect link in their browser (signs in if asked, then clicks Allow), then selects or creates a workspace. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
 
 Setup is a user-facing initialization flow, not a narration of agent mechanics.
 Never add an explanation, file link, or citation for a setup question. Keep skill,
@@ -34,7 +34,7 @@ It installs `beam`, puts it on PATH (and your shell rc), and, in an interactive 
 
 ### 3 · Connect
 
-> "Which Beam instance do you use: Beam App, Beam Staging, a regional one such as Beam ANZ, or Beam Enterprise? I'll send you a link to approve in your browser."
+> "Which Beam instance do you use: Beam App, Beam Staging, a regional one such as Beam ANZ, or Beam Enterprise? I'll send you a link to open in your browser: sign in if asked, then click Allow."
 
 No workspace URL is needed: the workspace is chosen after sign-in. Run `beam login` with `app`,
 `staging`, `enterprise` or the region code (`anz`, `us`, `eu`...). If the user pastes a workspace
@@ -45,7 +45,7 @@ beam login <instance>
 ```
 
 It returns at once with `"status":"waiting"`, an `instanceId` and a `connectUrl`. Show that link
-to the user as a clickable link and ask them to approve it in their browser. Then run
+to the user as a clickable link and ask them to open it, sign in if asked, then click Allow. Then run
 `beam login --wait <instanceId>` every few seconds (each call returns within about two seconds)
 and branch on `status`:
 
@@ -53,8 +53,9 @@ and branch on `status`:
 - `connected` → go to step 4.
 - `choose_workspace` → ask which workspace from `workspaces`, then run `beam checkout <instanceId> <workspace>`.
 - `no_workspace` → the connection is kept. Tell the user to create a workspace in Beam first (the `message` has the link) and do not create one for them; then run `beam checkout <instanceId> <workspace>`.
+- `failed` with `access_denied` → they clicked Cancel; say "You cancelled the connection in the browser. Run Connect again when ready." and run `beam login <instance>` only when they ask.
 - `failed` → say sign-in did not complete and offer to run `beam login <instance>` again. For `api_keys_manage_required`, ask them to request API key access from a workspace admin.
-- `sandbox_blocked` (command exit 2) → this environment blocks the local listener. Re-run the same `beam login <instance>` with network access approved (escalated permissions). If that is not possible, run it with `--paste`, have the user approve the link, then paste the address the browser ends on (it may show "can't connect"; that is expected) and run `beam login --callback '<address>'`. Never loop.
+- `sandbox_blocked` (command exit 2) → this environment blocks the local listener. Re-run the same `beam login <instance>` with network access approved (escalated permissions). If that is not possible, run it with `--paste`, have the user open the link (sign in if asked, then click Allow), then paste the address the browser ends on (it may show "can't connect"; that is expected) and run `beam login --callback '<address>'`. Never loop.
 
 To reconnect an instance run `beam login <instance> --replace` (the old key is deleted in Beam once the new one works). `beam logout` disconnects the instance and deletes its key in Beam.
 
@@ -110,7 +111,7 @@ Render it as a warm chat message with **emoji** — never a raw diagnostic dump.
 ```bash
 beam login <instance>
 ```
-🚀 2. Approve the link in your browser, select or create a workspace, then ask "list my Beam agents."
+🚀 2. Open the link in your browser, sign in if asked, click Allow, select or create a workspace, then ask "list my Beam agents."
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
 

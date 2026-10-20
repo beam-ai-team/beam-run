@@ -21,6 +21,7 @@ TTL = int(os.environ.get("BEAM_TEST_LISTENER_TTL") or 300)  # seconds the listen
 SAFE = re.compile(r"^[A-Za-z0-9._~-]{1,512}$")
 GOOD = "Connected — you can close this tab and return to your coding tool."
 BAD = "Sign-in did not complete — go back to your tool and try again."
+DENIED = "You cancelled the connection in the browser. Run Connect again when ready."
 
 
 def b64(raw):
@@ -86,7 +87,8 @@ def start(path):
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
             done.append(1)
-            self.reply(200 if line.startswith("CODE=") else 400, GOOD if line.startswith("CODE=") else BAD)
+            self.reply(200 if line.startswith("CODE=") else 400,
+                       GOOD if line.startswith("CODE=") else DENIED if error == "access_denied" else BAD)
 
     try:
         if os.environ.get("BEAM_TEST_BIND_BLOCKED"):  # test hook: simulate a sandbox that blocks binds

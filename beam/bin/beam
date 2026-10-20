@@ -971,7 +971,7 @@ cmd_checkout() {
           printf '✅ Beam Run ready\n' >&2
           printf '⬜ Connect Beam\n\n' >&2
           printf 'Next: run beam login <instance> (app, staging, enterprise, or a region such as anz), then:\n' >&2
-          printf '1. Approve the Connect link in your browser\n' >&2
+          printf '1. Open the Connect link in your browser, sign in if asked, then click Allow\n' >&2
           printf '2. Run beam login --wait <instance> until it says connected\n' >&2
           printf '3. Select or create a workspace\n' >&2
           die "auth_missing" "Beam connection is required before work can begin" 3 ;;
@@ -1295,11 +1295,17 @@ login_probe() {
   die "network_error" "Could not reach $DETECTED_INSTANCE_NAME to start sign-in ($probe_why). Check your connection and try again." 5
 }
 
+connect_client_name() {
+  # This computer's name, trimmed to 64 characters: shown on Beam's Allow page and sent with the token request.
+  printf '%s' "$(hostname 2>/dev/null || uname -n)" | cut -c1-64
+}
+
 login_failed() {
   # $1 = reason; drops the pending sign-in. Never echoes the code or verifier.
   reason="$(printf '%s' "${1:-unknown}" | tr -c 'A-Za-z0-9_.-' '_')"; [ -n "$reason" ] || reason="unknown"
   if [ -n "${pending:-}" ]; then rm -f "${pending:?}"; fi
   case "$reason" in
+    access_denied) hint="You cancelled the connection in the browser. Run Connect again when ready." ;;
     api_keys_manage_required) hint="Your Beam role cannot create API keys. Ask a workspace admin to grant API key access, then run beam login again." ;;
     *) hint="Sign-in did not complete ($reason). Run beam login <instance> to try again." ;;
   esac
@@ -1328,13 +1334,14 @@ login_connect() {
     printf 'VERIFIER=%s\nSTATE=%s\nPORT=%s\nREDIRECT_URI=%s\nREPLACE=%s\nWORKSPACE_HINT=%s\nSTARTED_AT=%s\n' "$verifier" "$state" "$port" "$redirect_uri" "$replace" "$workspace_hint" "$(date +%s)"
   } > "$pending"
   chmod 600 "$pending"
-  connect_url="$DETECTED_APP_URL/api/cli/authorize?code_challenge=$challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A$port%2Fcallback&state=$state"
+  client_name_q="$(printf '%s' "$(connect_client_name)" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')"
+  connect_url="$DETECTED_APP_URL/api/cli/authorize?code_challenge=$challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A$port%2Fcallback&state=$state&client_name=$client_name_q"
   printf '{"ok":true,"status":"waiting","mode":"%s","instanceId":"%s","connectUrl":%s}\n' "$mode" "$DETECTED_INSTANCE_ID" "$(json_quote "$connect_url")"
   printf 'Connect Beam: %s\n' "$connect_url" >&2
   if [ "$mode" = "paste" ]; then
-    printf "Approve it in your browser, then copy the address the browser ends on and run: beam login --callback '<address>'\n" >&2
+    printf "Sign in if asked, then click Allow in your browser. Then copy the address the browser ends on and run: beam login --callback '<address>'\n" >&2
   else
-    printf 'Approve it in your browser, then run: beam login --wait %s\n' "$DETECTED_INSTANCE_ID" >&2
+    printf 'Sign in if asked, then click Allow in your browser. Then run: beam login --wait %s\n' "$DETECTED_INSTANCE_ID" >&2
   fi
   for opener in open xdg-open; do  # detached: a stuck opener must never hang this command
     if command -v "$opener" >/dev/null 2>&1; then ( "$opener" "$connect_url" </dev/null >/dev/null 2>&1 & ); break; fi
@@ -1382,7 +1389,7 @@ login_collect() {
   DETECTED_API_URL="$(file_value "$pending" API_URL)"; DETECTED_APP_URL="$(file_value "$pending" APP_URL)"
   DETECTED_MCP_URL="$(file_value "$pending" MCP_URL)"; replace="$(file_value "$pending" REPLACE)"
   workspace_hint="$(file_value "$pending" WORKSPACE_HINT 2>/dev/null || true)"
-  body="$(printf '{"code":"%s","code_verifier":"%s","redirect_uri":"%s","client_name":%s}' "$code" "$(file_value "$pending" VERIFIER)" "$(file_value "$pending" REDIRECT_URI)" "$(json_quote "$(hostname 2>/dev/null || uname -n)")")"
+  body="$(printf '{"code":"%s","code_verifier":"%s","redirect_uri":"%s","client_name":%s}' "$code" "$(file_value "$pending" VERIFIER)" "$(file_value "$pending" REDIRECT_URI)" "$(json_quote "$(connect_client_name)")")"
   tmp="$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")"
   if http_code="$(printf '%s' "$body" | beam_curl -sS --connect-timeout 5 --max-time 30 -X POST -H "Content-Type: application/json" --data-binary @- -o "$tmp" -w '%{http_code}' "$DETECTED_API_URL/auth/cli/token" 2>/dev/null)"; then :; else http_code=000; fi
   token_body="$(cat "$tmp")"; rm -f "$tmp"

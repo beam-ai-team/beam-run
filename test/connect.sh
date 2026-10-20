@@ -88,7 +88,10 @@ printf '\n=== connect: link, wait, connected ===\n'
 SID=s1; b login "$APP"
 [ "$rc" -eq 0 ] && [ "$(jget status)" = waiting ] && [ "$(jget mode)" = listener ] || fail "login did not return a waiting status"
 url="$(jget connectUrl)"
-case "$url" in "https://app.beam.ai/api/cli/authorize?code_challenge="*"&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A"*"%2Fcallback&state="*) ;; *) fail "unexpected connect link: $url" ;; esac
+case "$url" in "https://app.beam.ai/api/cli/authorize?code_challenge="*"&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A"*"%2Fcallback&state="*"&client_name="*) ;; *) fail "unexpected connect link: $url" ;; esac
+want_name="$(hostname 2>/dev/null || uname -n)"
+got_name="$(python3 -c 'import sys,urllib.parse as u; print(u.parse_qs(u.urlparse(sys.argv[1]).query)["client_name"][0])' "$url")"
+[ "$got_name" = "$(printf '%s' "$want_name" | cut -c1-64)" ] || fail "connect link client_name is not this computer's name"
 saw "Connect Beam: $url" || fail "human Connect line missing"
 n=0; until grep -qF "$url" "$tmp/opened" 2>/dev/null; do n=$((n + 1)); [ "$n" -lt 30 ] || fail "browser was not opened"; sleep 0.1; done
 [ "$(wc -c < "$CFG/pending/app" | tr -d ' ')" -gt 0 ] && [ "$(ls -l "$CFG/pending/app" | cut -c1-10)" = "-rw-------" ] || fail "pending file is not private"
@@ -124,11 +127,18 @@ if grep -q '^CODE=' "$CFG/pending/app"; then fail "wrong state wrote a code"; fi
 touch "$fake/deny"; browse "$(jget connectUrl)"; rm -f "$fake/deny"
 b login --wait
 [ "$rc" -eq 2 ] && [ "$(jget status)" = failed ] && [ "$(jget reason)" = access_denied ] && [ ! -e "$CFG/pending/app" ] || fail "refused sign-in did not report failed"
+[ "$(jget message)" = "You cancelled the connection in the browser. Run Connect again when ready." ] || fail "cancel did not give the plain reason"
 b login --wait
 [ "$rc" -eq 2 ] && saw no_pending_login || fail "--wait with nothing pending should say so"
 b login --callback 'http://127.0.0.1:1/callback?code=abc&state=nope'
 [ "$rc" -eq 2 ] && [ "$(jget reason)" = state_mismatch ] || fail "--callback accepted a foreign state"
-ok "state mismatch rejected; error and nothing-pending reported"
+b login "$APP"
+port="$(pend app PORT)"; state="$(pend app STATE)"
+page="$("$REAL_CURL" -s --noproxy '*' "http://127.0.0.1:$port/callback?error=access_denied&state=$state")"
+case "$page" in *"You cancelled the connection in the browser. Run Connect again when ready."*) ;; *) fail "listener page did not say the sign-in was cancelled" ;; esac
+b login --wait
+[ "$(jget reason)" = access_denied ] && [ ! -e "$CFG/pending/app" ] || fail "cancel from the listener page was not reported"
+ok "state mismatch rejected; cancel, error and nothing-pending reported"
 
 printf '\n=== no workspace yet / several workspaces ===\n'
 printf '{"api.beamstudio.ai": []}' > "$fake/ws.json"
