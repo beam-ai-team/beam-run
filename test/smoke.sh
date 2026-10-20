@@ -6,6 +6,7 @@ set -eu
 
 BEAM="${BEAM_BIN:-$(cd "$(dirname "$0")/.." && pwd)/beam/bin/beam}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 VERSION_FILE="$ROOT/beam/VERSION"
 say() { printf '\n=== %s ===\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
@@ -13,8 +14,10 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 # developer's real ~/.config/beam. A unique temporary directory also prevents
 # authenticated smoke tests from overwriting saved credentials.
 SMOKE_CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/beam-smoke.XXXXXX")" || fail "could not create temporary config directory"
-trap 'rm -rf -- "$SMOKE_CONFIG_DIR"' EXIT HUP INT TERM
-export BEAM_CONFIG_DIR="$SMOKE_CONFIG_DIR"
+# A scratch HOME too: `beam login` registers the MCP connection in HOME's host configs.
+SMOKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/beam-smoke-home.XXXXXX")" || fail "could not create temporary home"
+trap 'rm -rf -- "$SMOKE_CONFIG_DIR" "$SMOKE_HOME"' EXIT HUP INT TERM
+export BEAM_CONFIG_DIR="$SMOKE_CONFIG_DIR" HOME="$SMOKE_HOME"
 
 say "version contract"
 [ -r "$VERSION_FILE" ] || fail "missing beam/VERSION"

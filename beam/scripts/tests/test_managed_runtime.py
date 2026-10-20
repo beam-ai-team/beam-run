@@ -41,11 +41,17 @@ class ManagedRuntimeTests(unittest.TestCase):
                 self.assertIn('managed_context_locked', result.stderr)
         self.assertEqual(list(self.config.iterdir()), [])
     def test_managed_mode_cannot_fall_back_to_saved_credentials(self):
-        env = dict(self.env)
-        del env['BEAM_API_KEY']
-        result = self.run_cli('checkout', env=env)
-        self.assertEqual(result.returncode, 3)
-        self.assertIn('managed_context_missing', result.stderr)
+        for key in ('BEAM_API_KEY', 'BEAM_API_URL', 'BEAM_SESSION_ID'):
+            for value in (None, ''):
+                with self.subTest(key=key, value=value):
+                    env = dict(self.env)
+                    if value is None:
+                        del env[key]
+                    else:
+                        env[key] = value
+                    result = self.run_cli('checkout', env=env)
+                    self.assertEqual(result.returncode, 3)
+                    self.assertIn('managed_context_missing', result.stderr)
 
     def test_saved_connect_profiles_and_pending_login_cannot_override_host(self):
         profiles = self.config / 'instances'

@@ -1,5 +1,8 @@
 # SPEC — API-key login for the `beam` CLI
 
+> Superseded as the default by [`browser-connect.md`](browser-connect.md). This key flow remains
+> the fallback for instances without Connect and for automation (`BEAM_API_KEY`, `--api-key -`).
+
 `beam login` takes a Beam workspace URL, then stores an API key locally after
 validating it against that instance's `GET /v2/user/me`. The user enters the key
 only in their own terminal.
@@ -32,5 +35,4 @@ origin as `api.{region}.beamstudio.ai`, so adding a region requires no registry
 change in Beam Run.
 
 The CLI uses `x-api-key` for Beam API requests; the MCP endpoint uses Bearer
-authentication. No callback listener, OAuth endpoint, instance registry, or
-Studio change is part of this flow.
+authentication. This flow itself has no callback listener or Studio change.

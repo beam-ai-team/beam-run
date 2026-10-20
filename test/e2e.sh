@@ -8,6 +8,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="$ROOT/test/fixtures/stub-bin:$PATH"; export PATH; unset CLAUDE_CONFIG_DIR  # host CLIs are stubbed: a test never edits a real config
 BEAM="${BEAM_BIN:-$ROOT/beam/bin/beam}"
 PROXY="$ROOT/beam/bin/mcp_proxy.py"
 FAKE="${TMPDIR:-/tmp}/beam-e2e-$$"
@@ -92,7 +93,9 @@ printf '%s' "$NETWORK_LIST" | grep -q '"code":"network_error"' && ok "workspace 
 group "API-key login guidance"
 if NO_KEY="$(sandbox BEAM_API_KEY= sh "$BEAM" login </dev/null 2>&1)"; then no_key_rc=0; else no_key_rc=$?; fi
 [ "$no_key_rc" -eq 3 ] && printf '%s' "$NO_KEY" | grep -q 'BEAM_API_KEY' && ok "non-interactive login gives secure options" || bad "missing API-key login guidance"
-printf '%s' "$(sh "$BEAM" --help)" | grep -q 'workspace URL + masked key' && ok "help documents URL-led masked login" || bad "help omits the connection flow"
+sh "$BEAM" --help > "$FAKE/help.txt"
+grep -q 'beam login <instance>.*browser' "$FAKE/help.txt" && ok "help documents browser Connect" || bad "help omits the connection flow"
+grep -q 'beam login --wait' "$FAKE/help.txt" && ok "help documents --wait and the key fallback" || bad "help omits --wait"
 
 group "new-login endpoint safety"
 mkdir -p "$FAKE/bin"
