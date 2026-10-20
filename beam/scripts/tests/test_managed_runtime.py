@@ -20,7 +20,7 @@ class ManagedRuntimeTests(unittest.TestCase):
         self.env = {**os.environ, 'BEAM_MANAGED_CONTEXT': '1', 'BEAM_API_KEY': 'host-key',
                     'BEAM_API_URL': 'https://instance.example', 'BEAM_WORKSPACE_ID': 'host-workspace',
                     'BEAM_SESSION_ID': 'prism-thread', 'BEAM_INSTANCE_ID': 'host-instance',
-                    'BEAM_CONFIG_DIR': str(self.config)}
+                    'BEAM_CONFIG_DIR': str(self.config), 'HOME': str(self.config)}
     def run_cli(self, *args, env=None):
         return subprocess.run(['sh', str(CLI), *args], env=env or self.env, capture_output=True, text=True)
     def test_checkout_is_locked_without_writing_local_state(self):
@@ -31,7 +31,10 @@ class ManagedRuntimeTests(unittest.TestCase):
         self.assertEqual(checkout['workspaceId'], 'host-workspace')
         self.assertEqual(list(self.config.iterdir()), [])
     def test_connection_and_target_management_is_disabled(self):
-        for args in [('login',), ('logout',), ('instance', 'add'), ('workspace', 'use', 'other'), ('checkout', 'other')]:
+        for args in [('login',), ('login', '--wait', 'app'), ('login', '--paste', 'app'),
+                     ('login', '--callback', 'http://127.0.0.1:53682/callback?code=synthetic'),
+                     ('login', '--replace', 'app'), ('logout',), ('instance', 'add'),
+                     ('workspace', 'use', 'other'), ('checkout', 'other')]:
             with self.subTest(args=args):
                 result = self.run_cli(*args)
                 self.assertNotEqual(result.returncode, 0)
@@ -44,10 +47,27 @@ class ManagedRuntimeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
         self.assertIn('managed_context_missing', result.stderr)
 
+    def test_saved_connect_profiles_and_pending_login_cannot_override_host(self):
+        profiles = self.config / 'instances'
+        profiles.mkdir()
+        (profiles / 'app').write_text('BEAM_API_KEY=local-key\nBEAM_WORKSPACE_ID=local-workspace\nBEAM_CONNECT=1\n')
+        pending = self.config / 'pending'
+        pending.mkdir()
+        (pending / 'app').write_text('{"code":"local-code","state":"local-state"}')
+        before = {str(p.relative_to(self.config)): p.read_bytes() for p in self.config.rglob('*') if p.is_file()}
+        result = self.run_cli('checkout')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['workspaceId'], 'host-workspace')
+        result = self.run_cli('login', '--wait', 'app')
+        self.assertIn('managed_context_locked', result.stderr)
+        after = {str(p.relative_to(self.config)): p.read_bytes() for p in self.config.rglob('*') if p.is_file()}
+        self.assertEqual(after, before)
+
     def test_successful_bearer_read_replaces_an_initial_permission_status(self):
         curl = self.config / 'curl'
         curl.write_text('#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\na=sys.argv[1:]\n'
-                        'success=a[-1].endswith("/auth/access-token") or "Authorization: Bearer synthetic-bearer" in a\n'
+                        'headers=Path(a[a.index("-K")+1]).read_text() if "-K" in a else "\\n".join(a)\n'
+                        'success=a[-1].endswith("/auth/access-token") or "Authorization: Bearer synthetic-bearer" in headers\n'
                         'body={"idToken":"synthetic-bearer"} if a[-1].endswith("/auth/access-token") else {"id":"agent-a"}\n'
                         'Path(a[a.index("-o")+1]).write_text(json.dumps(body))\nprint("200" if success else "403",end="")\n')
         curl.chmod(0o755)

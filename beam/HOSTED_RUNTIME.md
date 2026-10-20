@@ -28,3 +28,19 @@ Run managed boundary checks with:
 python3 -m unittest discover -s beam/scripts/tests -p test_managed_runtime.py
 python3 beam/scripts/check_playbooks.py
 ```
+
+## Standalone browser Connect compatibility
+
+The standalone Connect flow in [PR #21](https://github.com/beam-ai-team/beam-run/pull/21)
+uses Studio's `/api/cli/authorize` and Platform's `/auth/cli/*` endpoints with a
+loopback callback. It owns local profiles, pending login state and key revocation.
+Managed execution must never invoke that flow, including `login --wait`,
+`--paste`, `--callback` or `--replace`; the host owns authorization and revocation.
+Prism's registered HTTPS callback and confidential application grant remain a
+separate adapter over Platform's existing API-key service. Do not widen the
+standalone loopback allowlist to arbitrary hosted callbacks.
+
+The managed regression curl fixture supports both direct headers and Connect's
+private `curl -K` header transport. Compose the managed changes with PR #21,
+rerun both suites, then pin the combined immutable revision in Prism's source
+lock and runner image. The existing Prism pin does not advance automatically.
