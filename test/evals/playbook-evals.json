@@ -750,6 +750,18 @@
       "no_stop_before": [
         "graph.test-node"
       ]
+    },
+    {
+      "id": "zero-workspace-after-connect",
+      "request": "I just connected Beam. Build me my first agent.",
+      "situation": "Signed in through Connect, but the account has no workspace yet. `beam login --wait` reported status no_workspace with the message 'Create a workspace in Beam first: https://app.beam.ai'. The right reply tells the user to create a workspace in Beam first and gives that link; it does not create or invent a workspace.",
+      "playbooks": [
+        "get-oriented"
+      ],
+      "required": [],
+      "forbidden": [
+        "workspace.create"
+      ]
     }
   ]
 }

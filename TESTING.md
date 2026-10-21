@@ -1,8 +1,9 @@
 # Testing Beam Run locally (dev)
 
-`v0.7.0`. API-key login derives the instance from a Beam workspace URL, then
-selects and locks one workspace for the session. See
-[`specs/api-key-login.md`](specs/api-key-login.md).
+`v0.7.0`. `beam login <instance or workspace URL>` derives the instance, connects through the
+browser, then selects and locks one workspace for the session. See
+[`specs/browser-connect.md`](specs/browser-connect.md); the key flow it falls back to
+is in [`specs/api-key-login.md`](specs/api-key-login.md).
 
 > **Reporting to the user:** this is a dev runbook, but the *message you show the user* should still feel like onboarding. Show `beam setup`'s output (success line + emoji checklist + next steps) — do **not** rewrite it into a "what I did" table or status report. Report their remaining steps, not your actions.
 
@@ -22,6 +23,8 @@ python3 beam/scripts/check_playbooks.py --write   # refresh each playbook's Acti
 sh test/cross-host-contract.sh          # same public skill surface on every host
 sh test/activity-ux-contract.sh         # grouped, user-facing operation narration
 sh test/supervisor-contract.sh          # CLI fallback and safety contracts
+sh test/connect.sh                      # browser Connect against a fake Beam (offline)
+sh test/no-real-config.sh               # guard: no suite edits a real ~/.claude.json or ~/.cursor config
 BEAM_WORKSPACE_URL='<url>' BEAM_API_KEY='<your key>' sh test/smoke.sh
 ```
 
@@ -32,7 +35,7 @@ confirmation gates, context continuity, and response quality.
 
 ### Playbook evals
 
-`test/evals/playbook-evals.json` holds 30 realistic requests covering all 16
+`test/evals/playbook-evals.json` holds 33 realistic requests covering all 16
 playbooks, multi-step work, safety traps and a non-Beam request. Each records the
 actions a correct plan must include, must never do, and must stop before.
 
@@ -67,7 +70,8 @@ the two Beam messages above and below it are the portable visibility contract.
 ## 3. Manual end-to-end
 ```sh
 beam doctor            # green/red checklist with plain-language fixes
-beam login             # workspace URL, masked key, workspace selection
+beam login app               # or staging, enterprise, a region such as anz, or a workspace URL; prints the Connect link
+beam login --wait app        # repeat until it says connected
 beam whoami
 beam checkout          # choose and lock this session
 beam workspace list    # narrow by name or ID when needed
@@ -79,11 +83,12 @@ beam agents list
 claude mcp add --transport http beam https://api.beamstudio.ai/mcp \
   --header "Authorization: Bearer <your key>"
 ```
-Then **fully restart Claude Code** and ask *"list my Beam agents."*
+Then ask *"list my Beam agents."* (restart Claude Code only if the entry was just added and the tools do not appear).
 
 ## Notes
-- **Never** pass the key as `beam login --api-key <key>` — it leaks to shell history. Use the masked prompt, `BEAM_API_KEY`, or `--api-key -`.
-- MCP reads the key at **startup** — any auth/config change needs a full agent restart.
+- **Never** pass the key as `beam login --api-key <key>` — it leaks to shell history. Connect needs no key; for the older flow use the masked prompt (`--api-key`), `BEAM_API_KEY`, or `--api-key -`.
+- No restart is required after connecting: the MCP bridge re-reads the saved connection on every message. It is needed only when the plugin itself was just installed.
+- Local dev: `BEAM_LOCAL_DEV=1 beam login http://localhost:3000` (API from `BEAM_LOCAL_API_URL`, default `http://localhost:4000`).
 - The committed `beam/.mcp.json` uses the stdio bridge, now backed by the vendored
   `beam/bin/mcp_proxy.py` (stdlib only — no npx/uvx). Signed out, it serves a live
   `beam_setup_status` tool instead of failing to start. `beam register` additionally wires

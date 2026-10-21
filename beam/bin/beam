@@ -86,8 +86,11 @@ LEGACY_CREDS_FILE="$CONFIG_DIR/credentials"
 INSTANCES_DIR="$CONFIG_DIR/instances"
 SESSIONS_DIR="$CONFIG_DIR/sessions"
 CREDS_FILE="$CONFIG_DIR/no-checkout"
+PENDING_DIR="$CONFIG_DIR/pending"
 ACTIVE_INSTANCE_ID=""
 ACTIVE_INSTANCE_NAME=""
+APP_URL=""
+APP_URL_FLAG=""
 
 session_id() {
   raw="${BEAM_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-${CURSOR_SESSION_ID:-shell-$PPID}}}}}}"
@@ -145,6 +148,36 @@ profile_for_api() {
   return 1
 }
 
+app_url_from_api() {
+  # $1 = API origin; prints the matching app origin, or nothing for a custom host.
+  case "${1%/}" in
+    https://api.beamstudio.ai) printf 'https://app.beam.ai' ;;
+    https://api.enterprise.beamstudio.ai) printf 'https://app.enterprise.beam.ai' ;;
+    https://api.staging.beamstudio.ai) printf 'https://app.staging.beamstudio.ai' ;;
+    https://api.*.beamstudio.ai) region="${1#https://api.}"; printf 'https://app.%s.beam.ai' "${region%%.beamstudio.ai*}" ;;
+    http://localhost:*|http://127.0.0.1:*) if [ "${BEAM_LOCAL_DEV:-}" = "1" ]; then printf 'http://localhost:3000'; fi ;;
+  esac
+  return 0
+}
+
+instance_origin() {
+  # $1 = an instance id or name (app, staging, enterprise, a region such as anz, "Beam ANZ"); prints its app origin.
+  wanted="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^beam[ -]*//; s/ //g')"
+  case "$wanted" in ""|*[!a-z0-9-]*) return 0 ;; esac
+  if [ -f "$(profile_file "$wanted")" ]; then
+    file_value "$(profile_file "$wanted")" BEAM_APP_URL 2>/dev/null || app_url_from_api "$(file_value "$(profile_file "$wanted")" BEAM_API_URL 2>/dev/null || true)"
+    return 0
+  fi
+  case "$wanted" in
+    app) printf 'https://app.beam.ai' ;;
+    staging) printf 'https://app.staging.beamstudio.ai' ;;
+    enterprise) printf 'https://app.enterprise.beam.ai' ;;
+    local) if [ "${BEAM_LOCAL_DEV:-}" = "1" ]; then printf 'http://localhost:3000'; fi ;;
+    *) printf 'https://app.%s.beam.ai' "$wanted" ;;
+  esac
+  return 0
+}
+
 derive_instance_from_url() {
   # Accept the workspace URL a user knows, or an API URL supplied by automation.
   raw="${1%/}"
@@ -156,7 +189,7 @@ derive_instance_from_url() {
     *) return 2 ;;
   esac
   location="${raw#*://}"
-  if [ "${2:-workspace}" = "workspace" ]; then
+  if [ "${2:-workspace}" = "workspace" ]; then  # kind "origin" accepts a bare instance address
     case "$location" in */?*) ;; *) return 2 ;; esac
   fi
   authority="${location%%/*}"
@@ -169,6 +202,10 @@ derive_instance_from_url() {
       DETECTED_INSTANCE_ID="app"
       DETECTED_INSTANCE_NAME="Beam App"
       DETECTED_API_URL="$PRODUCTION_API_BASE" ;;
+    app.staging.beamstudio.ai|api.staging.beamstudio.ai)
+      DETECTED_INSTANCE_ID="staging"
+      DETECTED_INSTANCE_NAME="Beam Staging"
+      DETECTED_API_URL="https://api.staging.beamstudio.ai" ;;
     app.*.beam.ai)
       region="${host#app.}"; region="${region%.beam.ai}"
       [ -n "$region" ] || return 2
@@ -196,7 +233,8 @@ derive_instance_from_url() {
       [ "${BEAM_LOCAL_DEV:-}" = "1" ] || return 2
       DETECTED_INSTANCE_ID="local"
       DETECTED_INSTANCE_NAME="Beam Local"
-      DETECTED_API_URL="$scheme://$authority" ;;
+      DETECTED_API_URL="$scheme://$authority"
+      [ "${2:-workspace}" = "api" ] || DETECTED_API_URL="${BEAM_LOCAL_API_URL:-http://localhost:4000}" ;;
     *)
       # An explicit API URL remains supported for private/custom deployments.
       [ "${2:-workspace}" = "api" ] || return 2
@@ -205,6 +243,17 @@ derive_instance_from_url() {
       DETECTED_API_URL="$scheme://$authority" ;;
   esac
   DETECTED_MCP_URL="${DETECTED_API_URL%/}/mcp"
+  # Sign-in address: as typed when an app address was given; derived from an API address.
+  # Local development: the typed address is the app, the API is BEAM_LOCAL_API_URL.
+  case "$host" in
+    localhost|127.0.0.1|::1) DETECTED_APP_URL="$scheme://$authority"
+      [ "${2:-workspace}" != "api" ] || DETECTED_APP_URL="$(app_url_from_api "$DETECTED_API_URL")" ;;
+    api.*) DETECTED_APP_URL="$(app_url_from_api "$DETECTED_API_URL")" ;;
+    *) if [ "${2:-workspace}" = "api" ]; then DETECTED_APP_URL="$(app_url_from_api "$DETECTED_API_URL")"
+       else DETECTED_APP_URL="$scheme://$authority"; fi ;;
+  esac
+  [ -z "$APP_URL_FLAG" ] || DETECTED_APP_URL="${APP_URL_FLAG%/}"
+  return 0
 }
 
 profile_count() {
@@ -237,6 +286,7 @@ write_session() {
 
 write_profile() {
   instance="$1"; name="$2"; api="$3"; mcp="$4"; key="$5"; workspace="${6:-}"; workspace_name="${7:-}"
+  app="${8:-}"; connect="${9:-}"
   ensure_config_dir
   mkdir -p "$INSTANCES_DIR"
   chmod 700 "$INSTANCES_DIR" 2>/dev/null || true
@@ -248,6 +298,8 @@ write_profile() {
     printf 'BEAM_INSTANCE_NAME=%s\n' "$name"
     printf 'BEAM_API_URL=%s\n' "$api"
     printf 'BEAM_MCP_URL=%s\n' "$mcp"
+    [ -z "$app" ] || printf 'BEAM_APP_URL=%s\n' "$app"
+    [ -z "$connect" ] || printf 'BEAM_CONNECT=1\n'
     printf 'BEAM_API_KEY=%s\n' "$key"
     [ -z "$workspace" ] || printf 'BEAM_WORKSPACE_ID=%s\n' "$workspace"
     [ -z "$workspace_name" ] || printf 'BEAM_WORKSPACE_NAME=%s\n' "$workspace_name"
@@ -264,6 +316,7 @@ activate_profile_file() {
   ACTIVE_INSTANCE_NAME="$(file_value "$profile" BEAM_INSTANCE_NAME 2>/dev/null || printf '%s' "$ACTIVE_INSTANCE_ID")"
   API_BASE="$(file_value "$profile" BEAM_API_URL 2>/dev/null || printf '%s' "$PRODUCTION_API_BASE")"
   MCP_URL="$(file_value "$profile" BEAM_MCP_URL 2>/dev/null || printf '%s/mcp' "${API_BASE%/}")"
+  APP_URL="$(file_value "$profile" BEAM_APP_URL 2>/dev/null || app_url_from_api "$API_BASE")"
 }
 
 load_session_context() {
@@ -305,7 +358,7 @@ write_creds() {
   workspace="${2:-}"
   if [ -n "$ACTIVE_INSTANCE_ID" ]; then
     workspace_name="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_NAME 2>/dev/null || creds_value BEAM_WORKSPACE_NAME 2>/dev/null || true)"
-    write_profile "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$API_BASE" "$MCP_URL" "$key" "$workspace" "$workspace_name"
+    write_profile "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$API_BASE" "$MCP_URL" "$key" "$workspace" "$workspace_name" "$APP_URL" "$(creds_value BEAM_CONNECT 2>/dev/null || true)"
     write_session "$ACTIVE_INSTANCE_ID" "$workspace" "$workspace_name" "$(file_value "$SESSION_FILE" BEAM_SESSION_LOCKED 2>/dev/null || printf '0')"
     return
   fi
@@ -497,6 +550,32 @@ elif isinstance(ws, list) and ws:
 }
 
 # --- resilient HTTP ------------------------------------------------------------
+
+_NL='
+'
+_CR="$(printf '\r')"
+
+beam_curl() {
+  # curl with every -H value moved into a private config file, so keys never appear in `ps`.
+  # A value with a line break could add curl options to that file, so it is refused.
+  _bc_cfg="$(umask 077; mktemp 2>/dev/null || { _bc_f="${TMPDIR:-/tmp}/beam.cfg.$$"; : > "$_bc_f"; printf '%s' "$_bc_f"; })"
+  trap 'rm -f "${_bc_cfg:?}"; exit 130' INT TERM HUP
+  _bc_n=$#
+  while [ "$_bc_n" -gt 0 ]; do
+    _bc_a="$1"; shift; _bc_n=$((_bc_n - 1))
+    if [ "$_bc_a" = "-H" ] && [ "$_bc_n" -gt 0 ]; then
+      case "$1" in *"$_NL"*|*"$_CR"*) rm -f "${_bc_cfg:?}"; die "validation_error" "refusing to send a credential or header that contains a line break" 2 ;; esac
+      printf 'header = "%s"\n' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')" >> "$_bc_cfg"
+      shift; _bc_n=$((_bc_n - 1))
+    else
+      set -- "$@" "$_bc_a"
+    fi
+  done
+  if curl -K "$_bc_cfg" "$@"; then _bc_rc=0; else _bc_rc=$?; fi
+  rm -f "${_bc_cfg:?}"; trap - INT TERM HUP
+  return "$_bc_rc"
+}
+
 # Returns: 0 ok (body on stdout) - 3 auth - 5 network/other. Bounded retry+backoff.
 
 _http_get() {
@@ -511,7 +590,7 @@ _http_get() {
     # Ask for a compressed response.  /v2/user/me can include thousands of
     # workspaces; without this, a valid key can look rejected when the large
     # uncompressed profile cannot finish inside the timeout.
-    if code=$(curl -sS --compressed --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then
+    if code=$(beam_curl -sS --compressed --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then
       cx=0
     else
       cx=$?
@@ -629,11 +708,11 @@ _http_send() {
   tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")
   # As in _http_get: never toggle errexit here — it leaks to the caller.
   if [ -n "$body" ]; then
-    if code=$(printf '%s' "$body" | curl -sS --compressed --connect-timeout 5 --max-time 60 \
+    if code=$(printf '%s' "$body" | beam_curl -sS --compressed --connect-timeout 5 --max-time 60 \
       -X "$method" -H "Content-Type: application/json" --data-binary @- \
       -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then cx=0; else cx=$?; fi
   else
-    if code=$(curl -sS --compressed --connect-timeout 5 --max-time 60 \
+    if code=$(beam_curl -sS --compressed --connect-timeout 5 --max-time 60 \
       -X "$method" -o "$tmp" -w '%{http_code}' "$@" "$url" 2>/dev/null); then cx=0; else cx=$?; fi
   fi
   if [ "$cx" -ne 0 ]; then rm -f "$tmp"; return 5; fi
@@ -676,11 +755,11 @@ api_upload() {
   tmp="$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")"
   mime="$(file -b --mime-type "$file" 2>/dev/null || printf 'application/octet-stream')"
   if [ -n "$ws" ]; then
-    if code="$(curl -sS --compressed --connect-timeout 5 --max-time 120 -X POST \
+    if code="$(beam_curl -sS --compressed --connect-timeout 5 --max-time 120 -X POST \
       -H "x-api-key: $key" -H "current-workspace-id: $ws" \
       -F "$field=@$file;type=$mime" -o "$tmp" -w '%{http_code}' "$API_BASE$path" 2>/dev/null)"; then cx=0; else cx=$?; fi
   else
-    if code="$(curl -sS --compressed --connect-timeout 5 --max-time 120 -X POST \
+    if code="$(beam_curl -sS --compressed --connect-timeout 5 --max-time 120 -X POST \
       -H "x-api-key: $key" -F "$field=@$file;type=$mime" \
       -o "$tmp" -w '%{http_code}' "$API_BASE$path" 2>/dev/null)"; then cx=0; else cx=$?; fi
   fi
@@ -862,7 +941,7 @@ cmd_instance() {
   done
   printf '%s. + Add another\n\n' "$((number + 1))" >&2
   printf 'Choose for this session: beam checkout <instance-name>\n' >&2
-  printf 'Add another: beam login\n' >&2
+  printf 'Add another: beam login <instance>\n' >&2
 }
 
 cmd_checkout() {
@@ -891,9 +970,9 @@ cmd_checkout() {
           printf '🚀 Beam session setup\n' >&2
           printf '✅ Beam Run ready\n' >&2
           printf '⬜ Connect Beam\n\n' >&2
-          printf 'Next: run beam login, then:\n' >&2
-          printf '1. Paste a Beam workspace URL\n' >&2
-          printf '2. Enter the API key in the hidden prompt\n' >&2
+          printf 'Next: run beam login <instance> (app, staging, enterprise, or a region such as anz), then:\n' >&2
+          printf '1. Open the Connect link in your browser, sign in if asked, then click Allow\n' >&2
+          printf '2. Run beam login --wait <instance> until it says connected\n' >&2
           printf '3. Select or create a workspace\n' >&2
           die "auth_missing" "Beam connection is required before work can begin" 3 ;;
         7) cmd_login; return ;;
@@ -955,7 +1034,7 @@ cmd_checkout() {
   fi
   workspace="$SELECTED_WORKSPACE_ID"; workspace_name="$SELECTED_WORKSPACE_NAME"
 
-  write_profile "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$API_BASE" "$MCP_URL" "$key" "$workspace" "$workspace_name"
+  write_profile "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$API_BASE" "$MCP_URL" "$key" "$workspace" "$workspace_name" "$APP_URL" "$(file_value "$profile" BEAM_CONNECT 2>/dev/null || true)"
   write_session "$ACTIVE_INSTANCE_ID" "$workspace" "$workspace_name" 1
   printf '{"ok":true,"instanceId":"%s","instanceName":"%s","workspaceId":"%s","workspaceName":%s,"locked":%s}\n' \
     "$ACTIVE_INSTANCE_ID" "$ACTIVE_INSTANCE_NAME" "$workspace" "$(if [ -n "$workspace_name" ]; then json_quote "$workspace_name"; else printf null; fi)" \
@@ -971,9 +1050,11 @@ Usage:
   beam setup                 guided install: PATH + auth + MCP registration
   beam register              register the Beam MCP server with your agent
   beam doctor                self-diagnose install/auth/connection (human checklist)
-  beam login                 connect from a workspace URL, then select a workspace
-  beam login --replace       replace the key for that workspace URL's instance
-  beam logout
+  beam login <instance>      connect in your browser (app, staging, enterprise, a region such as anz, or a workspace URL)
+  beam login --wait [inst]   finish a pending connect (returns within ~2s; repeat until it says connected)
+  beam login --callback URL  finish a connect from the address the browser ended on (remote machines)
+  beam login --replace       reconnect an instance; a Connect key is deleted in Beam first
+  beam logout                disconnect this instance (a Connect key is also deleted in Beam)
   beam instance list         show saved Beam instances and the add-new option
   beam checkout <instance> [workspace]
                              choose one instance + workspace for this session
@@ -1016,7 +1097,9 @@ Usage:
   beam --version | --help
 
 Auth:
-  beam login                   # workspace URL + masked key prompts (recommended)
+  beam login <instance>        # Connect: sign in in your browser (recommended); a workspace URL also works
+  beam login <url> --paste     # Connect without a local listener (sandboxes, remote machines)
+  beam login <url> --api-key   # older instances without Connect: workspace URL + masked key prompt
   BEAM_WORKSPACE_URL=... BEAM_API_KEY=... beam login
   printf '%s' "\$KEY" | beam login --url "\$WORKSPACE_URL" --api-key -
 
@@ -1027,39 +1110,68 @@ EOF
 cmd_login() {
   load_session_context
   key=""; workspace=""; workspace_url="${BEAM_WORKSPACE_URL:-}"; url_kind="workspace"; replace=0
+  force_key=0; paste=0; wait_mode=0; callback_url=""; positional=""; connect=""; workspace_hint=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --api-key) key="${2:-}"; shift 2 ;;
+      --api-key) case "${2:-}" in
+          ""|--*) force_key=1; shift ;;
+          http://*|https://*) die "validation_error" "--api-key takes a key (or - to read it from stdin), not a URL. Put the URL first: beam login <url>" 2 ;;
+          *) key="$2"; shift 2 ;;
+        esac ;;
       --workspace-id) workspace="${2:-}"; shift 2 ;;
       --workspace-url|--url) workspace_url="${2:-}"; url_kind="workspace"; shift 2 ;;
       --api-url) workspace_url="${2:-}"; url_kind="api"; shift 2 ;;
       --replace) replace=1; shift ;;
-      --paste) shift ;;
+      --app-url) APP_URL_FLAG="${2:-}"; shift 2 ;;
+      --paste) paste=1; shift ;;
+      --wait) wait_mode=1; shift ;;
+      --callback) callback_url="${2:-}"; [ -n "$callback_url" ] || die "validation_error" "--callback needs the address the browser ended on" 2; shift 2 ;;
       -h|--help) cmd_help; exit 0 ;;
-      *) die "validation_error" "unknown flag: $1 (try beam login --help)" 2 ;;
+      -*) die "validation_error" "unknown flag: $1 (try beam login --help)" 2 ;;
+      *) positional="$1"; shift ;;
     esac
   done
+  case "$APP_URL_FLAG" in
+    ""|https://*) ;;
+    http://localhost*|http://127.0.0.1*) [ "${BEAM_LOCAL_DEV:-}" = "1" ] || die "validation_error" "--app-url must be an https:// address" 2 ;;
+    *) die "validation_error" "--app-url must be an https:// address" 2 ;;
+  esac
+  if [ "$wait_mode" -eq 1 ] || [ -n "$callback_url" ]; then login_collect "$positional" "$callback_url"; return; fi
+  [ -z "$positional" ] || { workspace_url="$positional"; url_kind="workspace"; }
 
   if [ -z "$workspace_url" ] && [ "$replace" -eq 1 ] && [ -n "$ACTIVE_INSTANCE_ID" ]; then
     workspace_url="$API_BASE"; url_kind="api"
   fi
   if [ -z "$workspace_url" ]; then
     if can_prompt; then
-      printf 'Paste your Beam workspace URL: ' >&2
+      printf 'Which Beam instance (app, staging, enterprise, or a region such as anz)? Or paste a workspace URL: ' >&2
       IFS= read -r workspace_url || true
     else
-      die "workspace_url_missing" "no workspace URL — use BEAM_WORKSPACE_URL=https://… with beam login; the API key must be supplied securely through BEAM_API_KEY or --api-key -" 3
+      die "workspace_url_missing" "no Beam instance — run: beam login <instance> (app, staging, enterprise, or a region such as anz) or beam login <workspace URL>. For automation use BEAM_WORKSPACE_URL=https://… with a key supplied securely through BEAM_API_KEY or --api-key -" 3
     fi
   fi
-  [ -n "$workspace_url" ] || die "workspace_url_missing" "workspace URL cannot be empty" 2
-  derive_instance_from_url "$workspace_url" "$url_kind" || die "workspace_url_invalid" "use a Beam workspace URL such as https://app.us.beam.ai/<workspace>" 2
+  [ -n "$workspace_url" ] || die "workspace_url_missing" "instance or workspace URL cannot be empty" 2
+  if [ "$url_kind" = "workspace" ]; then
+    case "$workspace_url" in *://*) ;; *) known_origin="$(instance_origin "$workspace_url")"; [ -z "$known_origin" ] || workspace_url="$known_origin" ;; esac
+    case "$workspace_url" in *://*/*) hint_path="${workspace_url#*://}"; workspace_hint="${hint_path#*/}"; workspace_hint="${workspace_hint%%[/?#]*}" ;; esac
+    case "$workspace_hint" in *[!A-Za-z0-9._-]*) workspace_hint="" ;; esac
+  fi
+  if ! derive_instance_from_url "$workspace_url" "$url_kind"; then
+    # A bare instance address is enough (the workspace is chosen after sign-in), with Connect or with a key.
+    if [ "$url_kind" = "workspace" ] && derive_instance_from_url "$workspace_url" origin; then url_kind="origin"
+    else die "workspace_url_invalid" "use a Beam instance (app, staging, enterprise, or a region such as anz) or a workspace URL such as https://app.us.beam.ai/<workspace>" 2; fi
+  fi
   existing_profile="$(profile_for_api "$DETECTED_API_URL" 2>/dev/null || true)"
+  [ -z "$existing_profile" ] || [ -n "$DETECTED_APP_URL" ] || DETECTED_APP_URL="$(file_value "$existing_profile" BEAM_APP_URL 2>/dev/null || true)"
   if [ -n "$existing_profile" ] && [ "$replace" -ne 1 ]; then
     die "instance_exists" "$DETECTED_INSTANCE_NAME is already connected. Nothing changed. Use beam login --replace to update its saved key." 2
   fi
   if [ -z "$existing_profile" ] && [ "$replace" -eq 1 ]; then
     die "instance_not_found" "$DETECTED_INSTANCE_NAME is not connected, so there is no saved key to replace. Run beam login to add it." 2
   fi
+
+  if [ -z "$key" ] && [ -z "${BEAM_API_KEY:-}" ] && [ "$force_key" -eq 0 ] && login_probe; then login_connect; return; fi
+
 
   if [ "$key" = "-" ]; then IFS= read -r key || true; fi
   if [ -z "$key" ] && [ -n "${BEAM_API_KEY:-}" ]; then key="$BEAM_API_KEY"; fi
@@ -1082,6 +1194,11 @@ cmd_login() {
   if [ "$vc" -eq 3 ]; then die "auth_invalid" "the API key was rejected by $DETECTED_INSTANCE_NAME — nothing was saved" 3; fi
   if [ "$vc" -eq 5 ]; then die "network_error" "could not reach $DETECTED_INSTANCE_NAME — nothing was saved" 5; fi
 
+  login_save
+}
+
+login_save() {
+  # Saves the verified key (globals: key, DETECTED_*, existing_profile, connect, replace), selects a workspace, reports.
   if [ -n "$existing_profile" ]; then
     DETECTED_INSTANCE_ID="$(file_value "$existing_profile" BEAM_INSTANCE_ID 2>/dev/null || basename "$existing_profile")"
   fi
@@ -1097,22 +1214,36 @@ cmd_login() {
   if [ "$current_locked" = "1" ] && [ "$current_instance" = "$DETECTED_INSTANCE_ID" ]; then
     selection_request="$(file_value "$SESSION_FILE" BEAM_WORKSPACE_ID 2>/dev/null || true)"
   fi
+  if [ -z "$selection_request" ] && [ -n "$connect" ]; then selection_request="$workspace_hint"; fi  # a workspace URL preselects its workspace
   if select_workspace "$resp" "$selection_request"; then select_rc=0; else select_rc=$?; fi
+  if [ "$select_rc" -eq 4 ] && [ -n "$connect" ]; then
+    # The key already exists: never lose it over a workspace that is not there. Offer the choice instead.
+    if select_workspace "$resp" ""; then select_rc=0; else select_rc=$?; fi
+  fi
   if [ "$select_rc" -eq 4 ]; then die "workspace_not_found" "choose one workspace available in $DETECTED_INSTANCE_NAME" 2; fi
   if [ "$select_rc" -eq 6 ]; then
     SELECTED_WORKSPACE_ID=""; SELECTED_WORKSPACE_NAME=""
   fi
   unset LOGIN_KEY
 
-  write_profile "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_MCP_URL" "$key" "$SELECTED_WORKSPACE_ID" "$SELECTED_WORKSPACE_NAME"
+  write_profile "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_MCP_URL" "$key" "$SELECTED_WORKSPACE_ID" "$SELECTED_WORKSPACE_NAME" "$DETECTED_APP_URL" "$connect"
   if [ "$current_locked" != "1" ] || [ "$current_instance" = "$DETECTED_INSTANCE_ID" ]; then
     write_session "$DETECTED_INSTANCE_ID" "$SELECTED_WORKSPACE_ID" "$SELECTED_WORKSPACE_NAME" "$(if [ -n "$SELECTED_WORKSPACE_ID" ]; then printf 1; else printf 0; fi)"
     activate_profile_file "$target_profile"
   fi
   emit_event auth_ok
-  printf '{"ok":true,"instanceId":"%s","instanceName":"%s","workspaceId":%s,"workspaceCount":%s}\n' \
-    "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" \
-    "$(if [ -n "$SELECTED_WORKSPACE_ID" ]; then printf '"%s"' "$SELECTED_WORKSPACE_ID"; else printf 'null'; fi)" "$workspace_count"
+  login_extra=""
+  if [ -n "$SELECTED_WORKSPACE_ID" ]; then login_status="connected"
+  elif [ "$workspace_count" -eq 0 ]; then
+    login_status="no_workspace"; login_extra=",\"message\":$(json_quote "Create a workspace in Beam first: $DETECTED_APP_URL")"
+  else
+    login_status="choose_workspace"
+    login_extra=",\"workspaces\":$(printf '%s' "$resp" | workspaces_tsv | head -n 25 | python3 -c 'import json,sys
+print(json.dumps([dict(zip(("id", "name"), l.rstrip("\n").split("\t", 1))) for l in sys.stdin]))' 2>/dev/null || printf '[]')"
+  fi
+  printf '{"ok":true,"status":"%s","instanceId":"%s","instanceName":"%s","workspaceId":%s,"workspaceCount":%s%s}\n' \
+    "$login_status" "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" \
+    "$(if [ -n "$SELECTED_WORKSPACE_ID" ]; then printf '"%s"' "$SELECTED_WORKSPACE_ID"; else printf 'null'; fi)" "$workspace_count" "$login_extra"
 
   # Wire the MCP connection now that the key is stored (all supported hosts).
   if cmd_register >/dev/null 2>&1; then reg=0; else reg=$?; fi
@@ -1128,6 +1259,8 @@ cmd_login() {
     printf 'To use %s, start a new session and run: beam checkout %s [workspace]\n' "$DETECTED_INSTANCE_NAME" "$DETECTED_INSTANCE_ID" >&2
   elif [ -n "$SELECTED_WORKSPACE_ID" ]; then
     print_session_ready "$DETECTED_INSTANCE_NAME" "${SELECTED_WORKSPACE_NAME:-$SELECTED_WORKSPACE_ID}"
+  elif [ "$workspace_count" -eq 0 ]; then
+    printf 'Create a workspace in Beam first: %s\n' "$DETECTED_APP_URL" >&2
   else
     printf '\n🚀 Beam session setup\n' >&2
     printf '✅ Instance: %s\n' "$DETECTED_INSTANCE_NAME" >&2
@@ -1138,10 +1271,172 @@ cmd_login() {
   fi
 }
 
+json_field() {
+  # $1 = top-level field of the JSON on stdin; prints it, or nothing.
+  python3 -c 'import json,sys
+try: v=json.load(sys.stdin).get(sys.argv[1])
+except Exception: v=None
+print("" if v is None else v)' "$1" 2>/dev/null || true
+}
+
+login_probe() {
+  # One short attempt. 0 = Connect is available; 1 = this instance has no Connect (404), so the key flow applies;
+  # anything else is a network problem, said plainly.
+  [ -n "$DETECTED_APP_URL" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  probe_tmp="$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")"
+  if probe_code="$(beam_curl -sS --connect-timeout 5 --max-time 5 -o "$probe_tmp" -w '%{http_code}' "$DETECTED_APP_URL/api/cli/authorize" 2>/dev/null)"; then :; else probe_code=000; fi
+  probe="$(cat "$probe_tmp")"; rm -f "${probe_tmp:?}"
+  case "$probe_code" in
+    404) return 1 ;;
+    200) if [ "$(printf '%s' "$probe" | json_field version)" = "1" ]; then return 0; fi; return 1 ;;
+  esac
+  if [ "$probe_code" = "000" ]; then probe_why="no response"; else probe_why="HTTP $probe_code"; fi
+  die "network_error" "Could not reach $DETECTED_INSTANCE_NAME to start sign-in ($probe_why). Check your connection and try again." 5
+}
+
+connect_client_name() {
+  # This computer's name, trimmed to 64 characters: shown on Beam's Allow page and sent with the token request.
+  printf '%s' "$(hostname 2>/dev/null || uname -n)" | cut -c1-64
+}
+
+login_failed() {
+  # $1 = reason; drops the pending sign-in. Never echoes the code or verifier.
+  reason="$(printf '%s' "${1:-unknown}" | tr -c 'A-Za-z0-9_.-' '_')"; [ -n "$reason" ] || reason="unknown"
+  if [ -n "${pending:-}" ]; then rm -f "${pending:?}"; fi
+  case "$reason" in
+    access_denied) hint="You cancelled the connection in the browser. Run Connect again when ready." ;;
+    api_keys_manage_required) hint="Your Beam role cannot create API keys. Ask a workspace admin to grant API key access, then run beam login again." ;;
+    *) hint="Sign-in did not complete ($reason). Run beam login <instance> to try again." ;;
+  esac
+  printf '{"ok":false,"status":"failed","reason":"%s","message":"%s"}\n' "$reason" "$hint"
+  exit 2
+}
+
+login_connect() {
+  listener="$(script_dir)/login_listener.py"
+  pk="$(python3 "$listener" pkce)"
+  verifier="$(printf '%s\n' "$pk" | sed -n 1p)"; state="$(printf '%s\n' "$pk" | sed -n 2p)"
+  challenge="$(printf '%s\n' "$pk" | sed -n 3p)"; port="$(printf '%s\n' "$pk" | sed -n 4p)"
+  ensure_config_dir; mkdir -p "$PENDING_DIR"; chmod 700 "$PENDING_DIR" 2>/dev/null || true
+  pending="$PENDING_DIR/$DETECTED_INSTANCE_ID"
+  umask 077
+  if [ "$paste" -eq 1 ]; then mode="paste"; else
+    mode="listener"
+    if port="$(python3 "$listener" start "$pending" 2>/dev/null)"; then :; else
+      printf '{"ok":false,"status":"sandbox_blocked","message":"This environment blocks the local sign-in listener. Re-run this same command with network access approved (escalated permissions), or add --paste to sign in without a listener."}\n'
+      exit 2
+    fi
+  fi
+  redirect_uri="http://127.0.0.1:$port/callback"
+  {
+    printf 'INSTANCE_ID=%s\nINSTANCE_NAME=%s\nAPI_URL=%s\nAPP_URL=%s\nMCP_URL=%s\n' "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_APP_URL" "$DETECTED_MCP_URL"
+    printf 'VERIFIER=%s\nSTATE=%s\nPORT=%s\nREDIRECT_URI=%s\nREPLACE=%s\nWORKSPACE_HINT=%s\nSTARTED_AT=%s\n' "$verifier" "$state" "$port" "$redirect_uri" "$replace" "$workspace_hint" "$(date +%s)"
+  } > "$pending"
+  chmod 600 "$pending"
+  client_name_q="$(printf '%s' "$(connect_client_name)" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')"
+  connect_url="$DETECTED_APP_URL/api/cli/authorize?code_challenge=$challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A$port%2Fcallback&state=$state&client_name=$client_name_q"
+  printf '{"ok":true,"status":"waiting","mode":"%s","instanceId":"%s","connectUrl":%s}\n' "$mode" "$DETECTED_INSTANCE_ID" "$(json_quote "$connect_url")"
+  printf 'Connect Beam: %s\n' "$connect_url" >&2
+  if [ "$mode" = "paste" ]; then
+    printf "Sign in if asked, then click Allow in your browser. Then copy the address the browser ends on and run: beam login --callback '<address>'\n" >&2
+  else
+    printf 'Sign in if asked, then click Allow in your browser. Then run: beam login --wait %s\n' "$DETECTED_INSTANCE_ID" >&2
+  fi
+  for opener in open xdg-open; do  # detached: a stuck opener must never hang this command
+    if command -v "$opener" >/dev/null 2>&1; then ( "$opener" "$connect_url" </dev/null >/dev/null 2>&1 & ); break; fi
+  done
+}
+
+login_collect() {
+  # beam login --wait [instance] | --callback '<address>': finish a pending Connect sign-in.
+  selector="$1"; callback="$2"; pending=""; code=""; err=""
+  if [ -n "$callback" ]; then
+    parsed="$(printf '%s' "$callback" | python3 "$(script_dir)/login_listener.py" query)"
+    code="$(printf '%s\n' "$parsed" | sed -n 1p)"; state="$(printf '%s\n' "$parsed" | sed -n 2p)"; err="$(printf '%s\n' "$parsed" | sed -n 3p)"
+    for candidate in "$PENDING_DIR"/*; do
+      if [ -n "$state" ] && [ -f "$candidate" ] && [ "$(file_value "$candidate" STATE 2>/dev/null || true)" = "$state" ]; then pending="$candidate"; break; fi
+    done
+    [ -n "$pending" ] || login_failed "state_mismatch"
+    case "$code" in *[!A-Za-z0-9._~-]*) login_failed "invalid_callback" ;; esac
+  else
+    if [ -n "$selector" ]; then pending="$PENDING_DIR/$(printf '%s' "$selector" | tr -c 'A-Za-z0-9._-' '_')"
+    else
+      # Newest fresh sign-in wins; leftovers older than the listener's lifetime are dropped.
+      newest=0
+      for candidate in "$PENDING_DIR"/*; do
+        [ -f "$candidate" ] || continue
+        started="$(file_value "$candidate" STARTED_AT 2>/dev/null || true)"; started="${started:-0}"
+        if [ $(( $(date +%s) - started )) -gt 330 ]; then rm -f "${candidate:?}"; continue; fi
+        if [ "$started" -ge "$newest" ]; then newest="$started"; pending="$candidate"; fi
+      done
+    fi
+    if [ ! -f "$pending" ]; then pending=""; die "no_pending_login" "no Beam sign-in is in progress. Run: beam login <instance>" 2; fi
+    waited=0
+    while :; do
+      code="$(file_value "$pending" CODE 2>/dev/null || true)"; err="$(file_value "$pending" ERROR 2>/dev/null || true)"
+      if [ -n "$code$err" ]; then break; fi
+      started="$(file_value "$pending" STARTED_AT 2>/dev/null || printf 0)"
+      if [ $(( $(date +%s) - started )) -gt 330 ]; then login_failed "expired"; fi
+      if [ "$waited" -ge 2 ]; then printf '{"ok":true,"status":"waiting"}\n'; return 0; fi
+      waited=$((waited + 1)); sleep 1
+    done
+  fi
+  if [ -n "$err" ]; then login_failed "$err"; fi
+  [ -n "$code" ] || login_failed "invalid_callback"
+
+  DETECTED_INSTANCE_ID="$(file_value "$pending" INSTANCE_ID)"; DETECTED_INSTANCE_NAME="$(file_value "$pending" INSTANCE_NAME)"
+  DETECTED_API_URL="$(file_value "$pending" API_URL)"; DETECTED_APP_URL="$(file_value "$pending" APP_URL)"
+  DETECTED_MCP_URL="$(file_value "$pending" MCP_URL)"; replace="$(file_value "$pending" REPLACE)"
+  workspace_hint="$(file_value "$pending" WORKSPACE_HINT 2>/dev/null || true)"
+  body="$(printf '{"code":"%s","code_verifier":"%s","redirect_uri":"%s","client_name":%s}' "$code" "$(file_value "$pending" VERIFIER)" "$(file_value "$pending" REDIRECT_URI)" "$(json_quote "$(connect_client_name)")")"
+  tmp="$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/beam.$$")"
+  if http_code="$(printf '%s' "$body" | beam_curl -sS --connect-timeout 5 --max-time 30 -X POST -H "Content-Type: application/json" --data-binary @- -o "$tmp" -w '%{http_code}' "$DETECTED_API_URL/auth/cli/token" 2>/dev/null)"; then :; else http_code=000; fi
+  token_body="$(cat "$tmp")"; rm -f "$tmp"
+  case "$http_code" in
+    2*) ;;
+    000) login_failed "network_error" ;;
+    429) login_failed "rate_limited" ;;
+    *) login_failed "$(printf '%s' "$token_body" | json_field errorCode)" ;;
+  esac
+  key="$(printf '%s' "$token_body" | json_field api_key)"; unset token_body body code
+  case "$key" in ""|*"$_NL"*|*"$_CR"*) login_failed "invalid_response" ;; esac
+  if DETECTED_PROFILE="$(_http_get "$DETECTED_API_URL/v2/user/me" -H "x-api-key: $key")"; then :; else
+    _http_send POST "$DETECTED_API_URL/auth/cli/revoke" "" -H "x-api-key: $key" >/dev/null || true  # do not leave an unusable key behind
+    login_failed "profile_unavailable"
+  fi
+  rm -f "${pending:?}"
+  workspace=""; connect=1; existing_profile="$(profile_for_api "$DETECTED_API_URL" 2>/dev/null || true)"
+  # Reconnecting: remember the old Connect key, save the new profile, and only then delete the old key.
+  old_key=""; old_api=""
+  if [ "$replace" = "1" ] && [ -n "$existing_profile" ] && [ "$(file_value "$existing_profile" BEAM_CONNECT 2>/dev/null || true)" = "1" ]; then
+    old_key="$(file_value "$existing_profile" BEAM_API_KEY 2>/dev/null || true)"; old_api="$(file_value "$existing_profile" BEAM_API_URL 2>/dev/null || true)"
+  fi
+  login_save </dev/null
+  if [ -n "$old_key" ] && [ "$old_key" != "$key" ]; then revoke_key "$old_api" "$old_key"; fi
+}
+
+revoke_connected() {
+  # $1 = profile. Deletes a Connect-issued key in Beam; keys the user pasted are left alone.
+  REVOKED=0
+  [ "$(file_value "$1" BEAM_CONNECT 2>/dev/null || true)" = "1" ] || return 0
+  revoke_key "$(file_value "$1" BEAM_API_URL)" "$(file_value "$1" BEAM_API_KEY)"
+}
+
+revoke_key() {
+  # $1 = API origin, $2 = key. A key that is already gone counts as done.
+  REVOKED=0
+  if _http_send POST "$1/auth/cli/revoke" "" -H "x-api-key: $2" >/dev/null; then rc=0; else rc=$?; fi
+  if [ "$rc" -eq 0 ] || [ "$rc" -eq 3 ]; then REVOKED=1
+  else printf "Beam could not be reached, so the key was removed only on this computer. Delete the key named 'Beam Run · …' under API keys in Beam.\n" >&2; fi
+}
+
 cmd_logout() {
+  REVOKED=0
   if [ "$ACTIVE_INSTANCE_ID" != "" ] && [ -f "$(profile_file "$ACTIVE_INSTANCE_ID")" ]; then
-    rm -f "$(profile_file "$ACTIVE_INSTANCE_ID")" "$SESSION_FILE"
-    printf '{"ok":true,"loggedOut":true,"instanceId":"%s"}\n' "$ACTIVE_INSTANCE_ID"
+    revoke_connected "$(profile_file "$ACTIVE_INSTANCE_ID")"
+    rm -f "$(profile_file "$ACTIVE_INSTANCE_ID")" "$SESSION_FILE" "${PENDING_DIR:?}/${ACTIVE_INSTANCE_ID:?}"
+    printf '{"ok":true,"loggedOut":true,"instanceId":"%s","revoked":%s}\n' "$ACTIVE_INSTANCE_ID" "$(if [ "$REVOKED" = 1 ]; then printf true; else printf false; fi)"
   elif [ -f "$LEGACY_CREDS_FILE" ]; then
     rm -f "$LEGACY_CREDS_FILE"
     printf '{"ok":true,"loggedOut":true}\n'
@@ -2289,7 +2584,7 @@ mcp_handshake() {
   # auth failures come back as HTTP 200 + isError text, never as 401/403.
   body='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"getCurrentUser","arguments":{}}}'
   # Capture via `if` — see _http_get: toggling errexit here leaks to the caller.
-  if out="$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 20 \
+  if out="$(printf '%s' "$body" | beam_curl -sS --connect-timeout 5 --max-time 20 \
     -X POST -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $1" --data-binary @- "$MCP_URL" 2>/dev/null)"; then
@@ -2311,7 +2606,7 @@ mcp_handshake() {
 mcp_tools_list() {
   # $1 = key. Print the raw JSON/SSE response from tools/list.
   body='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-  if out="$(printf '%s' "$body" | curl -sS --connect-timeout 5 --max-time 20 \
+  if out="$(printf '%s' "$body" | beam_curl -sS --connect-timeout 5 --max-time 20 \
     -X POST -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $1" --data-binary @- "$MCP_URL" 2>/dev/null)"; then rc=0; else rc=$?; fi
@@ -2626,7 +2921,7 @@ cmd_setup() {
     path_line
     printf '  ⬜ Sign in\n'
     printf '\nNext:\n'
-    printf '  🔑 Copy a URL from your Beam workspace, create an API key there, then run: beam login\n'
+    printf '  🔑 Copy a URL from your Beam workspace, then run: beam login <that URL>\n'
     return 3
   fi
 

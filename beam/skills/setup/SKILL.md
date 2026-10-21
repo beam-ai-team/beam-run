@@ -5,7 +5,7 @@ description: Beam setup — a guided, near-zero-prompt install. Run when the use
 
 # Beam setup (guided)
 
-Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, pastes a normal Beam workspace URL, enters their API key in their own terminal, then selects or creates a workspace. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
+Get the user from nothing to "talking to Beam" with the fewest prompts. **You drive.** The user gives clear approval, shares any URL from their Beam workspace, opens a Connect link in their browser (signs in if asked, then clicks Allow), then selects or creates a workspace. Narrate each step in plain language with `✓` checkmarks — don't dump raw command output.
 
 Setup is a user-facing initialization flow, not a narration of agent mechanics.
 Never add an explanation, file link, or citation for a setup question. Keep skill,
@@ -13,7 +13,8 @@ tool, and fallback mechanics out of the user-facing reply. Show one compact
 checklist and one clear next action at a time.
 
 **Two rules that must hold:**
-- **Never** ask the user to paste an API key into chat or pass it as `--api-key <key>`. They enter it in `beam login`'s masked terminal prompt.
+- **Never** ask the user to paste an API key into chat or pass it as `--api-key <key>`. On Connect there is no key to handle at all.
+- **No restart** is needed after connecting. Restart the agent only when the plugin itself was just installed and its tools or skills do not appear.
 
 ## Flow
 
@@ -26,29 +27,39 @@ Wait for clear natural-language approval.
 ```bash
 beam setup
 ```
-It installs `beam`, puts it on PATH (and your shell rc), and, in an interactive terminal, immediately opens the masked sign-in prompt. If the caller has no terminal (as in an agent or CI), it prints the secure next step instead. Once signed in, it registers the Beam MCP server. Branch on the exit code:
+It installs `beam`, puts it on PATH (and your shell rc), and, in an interactive terminal, immediately starts sign-in. If the caller has no terminal (as in an agent or CI), it prints the next step instead. Once signed in, it registers the Beam MCP server. Branch on the exit code:
 - **0** → installed, signed in, registered → go to step 4.
 - **3** (non-interactive and not signed in) → do step 3, then re-run `beam setup`.
 - **127 / `beam` not found** → resolve the launcher (see Fallbacks) and re-run with its absolute path.
 
-### 3 · Sign in
+### 3 · Connect
 
-> "Open Beam and copy any URL from your workspace. Then run `beam login`; paste the workspace URL first and your API key when asked (the key stays hidden). Tell me when it says the session is locked."
+> "Which Beam instance do you use: Beam App, Beam Staging, a regional one such as Beam ANZ, or Beam Enterprise? I'll send you a link to open in your browser: sign in if asked, then click Allow."
+
+No workspace URL is needed: the workspace is chosen after sign-in. Run `beam login` with `app`,
+`staging`, `enterprise` or the region code (`anz`, `us`, `eu`...). If the user pastes a workspace
+URL instead, pass that; its workspace is preselected.
 
 ```bash
-beam login
+beam login <instance>
 ```
 
-Wait for confirmation — do **not** take the key yourself. The command derives
-Beam App, Beam Enterprise, or Beam `{Region}` from the workspace URL, verifies
-the key only against that instance, and asks the user to select or create a
-workspace. If the instance already has a key, it changes nothing; use `beam
-login --replace` only when the user intends to replace it. Then re-run `beam
-setup` to verify the connection.
+It returns at once with `"status":"waiting"`, an `instanceId` and a `connectUrl`. Show that link
+to the user as a clickable link and ask them to open it, sign in if asked, then click Allow. Then run
+`beam login --wait <instanceId>` every few seconds (each call returns within about two seconds)
+and branch on `status`:
 
-`beam login` registers the MCP connection itself — including on the Claude desktop app,
-which has no `claude` CLI. Only if it prints **"Could not auto-register"** do you relay the
-manual local-command fallback printed by the CLI. Never put the key in host configuration.
+- `waiting` → keep polling. After about five minutes the link expires; run `beam login <instance>` again.
+- `connected` → go to step 4.
+- `choose_workspace` → ask which workspace from `workspaces`, then run `beam checkout <instanceId> <workspace>`.
+- `no_workspace` → the connection is kept. Tell the user to create a workspace in Beam first (the `message` has the link) and do not create one for them; then run `beam checkout <instanceId> <workspace>`.
+- `failed` with `access_denied` → they clicked Cancel; say "You cancelled the connection in the browser. Run Connect again when ready." and run `beam login <instance>` only when they ask.
+- `failed` → say sign-in did not complete and offer to run `beam login <instance>` again. For `api_keys_manage_required`, ask them to request API key access from a workspace admin.
+- `sandbox_blocked` (command exit 2) → this environment blocks the local listener. Re-run the same `beam login <instance>` with network access approved (escalated permissions). If that is not possible, run it with `--paste`, have the user open the link (sign in if asked, then click Allow), then paste the address the browser ends on (it may show "can't connect"; that is expected) and run `beam login --callback '<address>'`. Never loop.
+
+To reconnect an instance run `beam login <instance> --replace` (the old key is deleted in Beam once the new one works). `beam logout` disconnects the instance and deletes its key in Beam.
+
+`beam login` registers the MCP connection itself, including on the Claude desktop app, which has no `claude` CLI. Only if it prints **"Could not auto-register"** do you relay the manual local-command fallback printed by the CLI. Never put the key in host configuration.
 
 Instance and workspace choice happen per coding-agent conversation:
 
@@ -88,7 +99,7 @@ transport; the plumbing stays invisible.
 ## Presenting it — make it feel like onboarding
 **Rule: `beam setup` already prints the onboarding message — a success line, an emoji checklist, and next steps. Show *that* to the user. Never rewrite it into a "what I did" table, a build/status report, or a summary of the steps you performed.** Report the user's remaining steps, not your own actions.
 
-Render it as a warm chat message with **emoji** — never a raw diagnostic dump. Keep the **checklist** in plain text (not a code block): ✅ done, ⬜ pending, 🚀/🎉 to celebrate. But put any **runnable command** in a ```bash block so the app shows a one-click Run button, and make the key page a clickable link. Shape:
+Render it as a warm chat message with **emoji** — never a raw diagnostic dump. Keep the **checklist** in plain text (not a code block): ✅ done, ⬜ pending, 🚀/🎉 to celebrate. But put any **runnable command** in a ```bash block so the app shows a one-click Run button, and make the Connect link a clickable link. Shape:
 
 🚀 **Beam is installed — almost there!**
 ✅ Plugin installed
@@ -96,11 +107,11 @@ Render it as a warm chat message with **emoji** — never a raw diagnostic dump.
 ⬜ Sign in
 
 **Next steps:**
-🔑 1. Copy a URL from your Beam workspace and create an API key there, then run:
+🔑 1. Tell me which Beam instance you use (Beam App, Staging, a region, or Enterprise) and run:
 ```bash
-beam login
+beam login <instance>
 ```
-🚀 2. Select or create a workspace when prompted, then ask "list my Beam agents."
+🚀 2. Open the link in your browser, sign in if asked, click Allow, select or create a workspace, then ask "list my Beam agents."
 
 When fully connected and a tool call has succeeded, **celebrate** — 🎉 — and name what they can now do (list agents, run tasks, monitor progress, pull analytics). Keep the plumbing (MCP/CLI/paths/headers) out of it.
 
@@ -109,13 +120,15 @@ When fully connected and a tool call has succeeded, **celebrate** — 🎉 — a
   ```bash
   sh -c 'ls -1dt "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/beam/*/bin/beam "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/beam/*/bin/beam "$HOME"/.cursor/plugins/*/beam/bin/beam "$HOME"/.config/beam-plugin/beam/bin/beam 2>/dev/null | head -n1'
   ```
+- **Instance without Connect** — `beam login` answers `auth_missing`. Tell the user to run `beam login` in their own terminal and enter the key at its hidden prompt, then re-run `beam setup` to verify. Do not take the key yourself.
 - **Cursor plugin never appears / org policy** — read `cursor-install.md` (same folder) and follow it.
 - **Anything unclear** — `beam doctor` re-runs every check with a plain-language fix for each red.
 
 ## Notes
 - A workspace URL routes the key to exactly one instance. Regional hosts use
   `app.{region}.beam.ai`, from which Beam Run derives
-  `api.{region}.beamstudio.ai`; no static region registry is used. Connections
+  `api.{region}.beamstudio.ai`; no static region registry is used. Each saved
+  instance also stores its app address, where the Connect link opens. Connections
   are stored locally. Users upgrading from the old single-instance connection
   reconnect once. A conversation uses exactly one locked instance/workspace;
   hosts with conversation-scoped MCP processes share that context with the CLI.
