@@ -856,6 +856,9 @@
             "task.create-test"
           ]
         ]
+      ],
+      "must_stop_before": [
+        "task.create-test"
       ]
     },
     {
@@ -876,6 +879,26 @@
       ],
       "must_stop_before": [
         "connection.set"
+      ]
+    },
+    {
+      "id": "draft-run-is-not-test-mode",
+      "request": "Test the Support Router in test mode with this email: 'My order is late'.",
+      "situation": "Test mode is on for Support Router with 1 of 5 runs used and every test connection set. The last step replies by email.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "task.create-test"
+        ]
+      ],
+      "forbidden": [
+        "task.create-draft",
+        "task.create-live"
+      ],
+      "must_stop_before": [
+        "task.create-test"
       ]
     }
   ]

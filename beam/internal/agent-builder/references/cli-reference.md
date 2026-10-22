@@ -328,8 +328,8 @@ Pick nodes that: (a) do the core reasoning or extraction, (b) have the most comp
 
 ## Test mode and connections
 
-Reached as `beam test-mode …`, `beam connections …` and `beam tasks test <agentId> --input …`
-(the same commands as `beam agent-builder test-mode-start`, `connections-summary` and so on).
+Reached as `beam test-mode …` and `beam connections …` (the same commands as
+`beam agent-builder test-mode-start`, `test-mode-run`, `connections-summary` and so on).
 Test mode runs the **draft** graph; live connections are read from the **published** graph.
 `--connection` and `integrationProviderId` are a connection row id, not an integration id.
 
@@ -338,15 +338,19 @@ Test mode runs the **draft** graph; live connections are read from the **publish
 | `beam test-mode start <agentId> [--max-runs 2-200] [--trigger-connection triggerId=connId]… [--tool-connection nodeOrToolId=connId]…` | Turns test mode on (default 2 runs). Overrides can only be set here; a second start fails while a session runs. |
 | `beam test-mode stop <agentId>` | Turns it off and resets `runsUsed` to 0. |
 | `beam test-mode status <agentId>` | `testMode` on/off, `runsUsed`, `maxRuns`, `runsRemaining`, `startedAt`. |
-| `beam tasks test <agentId> --input <text> [--input …] \| --inputs-file <file.json>` | One test-mode run per input; returns the task ids and `runsUsed`/`runsRemaining`. Refuses before starting if the inputs exceed the runs left. Without `--input`, `beam tasks test <agentId> <text>` is still the draft test. |
+| `beam test-mode run <agentId> --input <text> [--input …] \| --inputs-file <file.json>` | One test-mode run per input; returns the task ids and `runsUsed`/`runsRemaining`. Refuses before starting if the inputs exceed the runs left. |
+| `beam tasks test <agentId> <text>` | Not test mode: a draft run on LIVE connections. It prints a warning pointing to `beam test-mode run` and refuses extra flags such as `--input` (exit 2). |
 | `beam connections summary <agentId> [--mode live\|test]` | One row per step tool, LLM-step tool, custom API tool, MCP integration and trigger, with `liveConnection`, `testConnection`, `candidates`, `missing` and `nextStep`, plus `missingCount`. |
 | `beam connections missing <agentId> [--mode live\|test]` | The missing rows only. Exit 0 when none, 10 when any. |
 | `beam connections options <agentId> --node <id> [--tool <toolId>] \| --trigger <triggerId>` | The active connections that can fill that slot. |
-| `beam connections set <agentId> --node <id> [--tool <toolId>] --mode live\|test --connection <connId>` | Reads the whole node, changes the one field, saves it back and re-reads it. Never sends an empty connection. |
+| `beam connections set <agentId> --node <id> [--tool <toolId>] --mode test --connection <connId>` | Reads the whole node, changes the one field, saves it back and re-reads it. Never sends an empty connection. |
+| `beam connections set <agentId> --node <id> [--tool <toolId>] --mode live --connection <connId> [--confirm-live]` | Changes the published agent, so without `--confirm-live` it explains and changes nothing (exit 2). It also writes the same connection to the matching draft step; when it cannot, the output says `nextPublishReverts: true`. |
 | `beam connections set <agentId> --trigger <triggerId> --mode test --connection <connId> [--confirm-restart]` | A trigger's test connection is set only at start, so this stops and restarts test mode; without `--confirm-restart` it explains that `runsUsed` resets to 0 and changes nothing. |
 
-A test connection that is not set is reported as missing, even where the platform still
-falls back to the live one today (INT-11779 removes that fallback). MCP integrations have no
+A test connection that is not set is reported as missing. LLM-step tools without one still
+fall back to their live connection until INT-11779, so their rows say `usesLiveInTest: true`.
+Candidates carry `isLive`, and a `nextStep` never suggests the live connection as a test
+connection: when it is the only one, the step is a `beam://integrations` link. MCP integrations have no
 test connection yet: their rows say `"testConnection": "not settable yet (INT-11779)"`,
 `"usesLiveInTest": true`, and they are not counted as missing.
 

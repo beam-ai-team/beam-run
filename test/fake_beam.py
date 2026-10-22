@@ -35,9 +35,9 @@ def _tool(fn, integration_id, identifier, live=None, test=None, kind="beam_tool"
 
 
 def _initial_state():
-    live_mail = {"id": "n-live-mail", "objective": "Send the reply",
+    live_mail = {"id": "n-live-mail", "customId": "c-mail", "objective": "Send the reply",
                  "toolConfiguration": _tool("GoogleMail_Send", "int-gmail", "google-mail", live="conn-gmail-1")}
-    draft_mail = {"id": "n-draft-mail", "objective": "Send the reply",
+    draft_mail = {"id": "n-draft-mail", "customId": "c-mail", "objective": "Send the reply",
                   "toolConfiguration": _tool("GoogleMail_Send", "int-gmail", "google-mail", live="conn-gmail-1",
                                              config_id="cfg-draft-mail")}
     draft_llm = {"id": "n-draft-llm", "objective": "Draft the answer",
@@ -47,6 +47,9 @@ def _initial_state():
                  "agentGraphNodeMcpIntegrations": [{"id": "mcp-1", "integrationId": "int-notion",
                                                     "integrationProviderId": "conn-notion-1", "tools": [],
                                                     "integration": {"name": "Notion"}}]}
+    draft_sheet = {"id": "n-draft-sheet", "customId": "c-sheet", "objective": "Log the ticket",
+                   "toolConfiguration": _tool("GoogleSheets_Append", "int-sheets", "google-sheets",
+                                              live="conn-sheets-1", config_id="cfg-sheet")}
     draft_api = {"id": "n-draft-api", "objective": "Call the CRM",
                  "toolConfiguration": _tool("CustomApiTool_Crm", "int-crm", "crm-api",
                                             kind="custom_integration_tool", config_id="cfg-crm")}
@@ -55,15 +58,21 @@ def _initial_state():
                               "nodes": [{"id": "n-live-entry", "objective": "Entry"}, live_mail]},
                    "g-draft": {"id": "g-draft", "agentId": TM_AGENT, "isActive": False, "isDraft": True,
                                "nodes": [{"id": "n-draft-entry", "objective": "Entry"}, draft_mail, draft_llm,
-                                         draft_api]}},
+                                         draft_sheet, draft_api]}},
         "connections": [
             {"id": "conn-gmail-1", "connectionName": "Support inbox", "integration": "google-mail",
              "integrationId": "int-gmail", "status": "active", "isDefault": True,
              "credentials": {"secret": "must-not-leak"}},
             {"id": "conn-gmail-2", "connectionName": "Test inbox", "integration": "google-mail",
              "integrationId": "int-gmail", "status": "active", "isDefault": False},
+            {"id": "conn-gmail-3", "connectionName": "QA inbox", "integration": "google-mail",
+             "integrationId": "int-gmail", "status": "active", "isDefault": False},
             {"id": "conn-slack-1", "connectionName": "Ops Slack", "integration": "slack",
              "integrationId": "int-slack", "status": "active", "isDefault": True},
+            {"id": "conn-slack-2", "connectionName": "Test Slack", "integration": "slack",
+             "integrationId": "int-slack", "status": "active", "isDefault": False},
+            {"id": "conn-sheets-1", "connectionName": "Ops sheet", "integration": "google-sheets",
+             "integrationId": "int-sheets", "status": "active", "isDefault": True},
             {"id": "conn-notion-1", "connectionName": "Wiki", "integration": "notion",
              "integrationId": "int-notion", "status": "active", "isDefault": True}],
         "triggers": [

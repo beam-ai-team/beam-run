@@ -3410,10 +3410,21 @@ def _active_connections(api):
     return connections
 
 
-def _candidates(connections, integration_id):
+ONLY_LIVE_NOTE = ("The only connection for this integration is the live one; ask the user to add a "
+                  "separate test connection in Beam.")
+
+
+def _candidates(connections, integration_id, live_id=None):
     found = [c for c in connections.values() if integration_id and c["integrationId"] == integration_id]
     found.sort(key=lambda c: (not c["isDefault"], (c["name"] or "").lower()))
-    return [{"id": c["id"], "name": c["name"], "isDefault": c["isDefault"]} for c in found]
+    return [{"id": c["id"], "name": c["name"], "isDefault": c["isDefault"], "isLive": c["id"] == live_id}
+            for c in found]
+
+
+def _suggest(candidates, mode):
+    if mode == "test":
+        return next((c["id"] for c in candidates if not c["isLive"]), None)
+    return candidates[0]["id"] if candidates else None
 
 
 def _connection_ref(connections, provider_id):
@@ -3452,19 +3463,19 @@ def _set_command(agent_id, mode, connection_id, node_id=None, tool_id=None, trig
 
 
 def _finish_row(row, agent_id, mode, connections, integration_name, missing, reason=None):
-    candidates = _candidates(connections, row["integrationId"])
+    live_id = (row.get("liveConnection") or {}).get("id")
+    candidates = _candidates(connections, row["integrationId"], live_id)
     row["candidates"] = candidates
     row["missing"] = missing
     if reason:
         row["reason"] = reason
-    live_id = (row.get("liveConnection") or {}).get("id")
-    suggested = candidates[0]["id"] if candidates else None
-    if mode == "test":
-        suggested = next((c["id"] for c in candidates if c["id"] != live_id), suggested)
+    suggested = _suggest(candidates, mode)
     if not missing:
         row["nextStep"] = None
-    elif not candidates:
+    elif suggested is None:
         row["nextStep"] = f"beam://integrations?provider={integration_name or row['integrationId']}"
+        if candidates:
+            row["note"] = ONLY_LIVE_NOTE
     elif row["kind"] == "trigger" and mode == "test":
         row["nextStep"] = row.pop("_trigger_next")(suggested)
     elif row["kind"] == "trigger":
@@ -3502,7 +3513,10 @@ def _tool_row(agent_id, mode, node, tool_config, kind, connections, tool_id=None
     else:
         missing = test is None or test.get("inactive", False)
         reason = None if not missing else ("test connection is inactive or removed" if test
-                                           else "no test connection; test runs never fall back to live")
+                                           else "no test connection set")
+        if missing and kind == "llm_tool":
+            row["usesLiveInTest"] = True
+            reason = "falls back to live until INT-11779"
     return _finish_row(row, agent_id, mode, connections, integration_name, missing, reason)
 
 
@@ -3520,7 +3534,7 @@ def _mcp_row(agent_id, mode, node, mcp, connections):
         "testConnection": MCP_TEST_NOTE,
         "usesLiveInTest": True,
         "required": False,
-        "candidates": _candidates(connections, mcp.get("integrationId")),
+        "candidates": _candidates(connections, mcp.get("integrationId"), mcp.get("integrationProviderId")),
         "missing": False,
         "nextStep": None,
     }
@@ -3752,17 +3766,19 @@ def cmd_connections_options(api, args):
             candidates.append({"id": row["id"], "name": row.get("connectionName") or row.get("integration"),
                                "isDefault": bool(row.get("isDefault"))})
     candidates.sort(key=lambda c: (not c["isDefault"], (c["name"] or "").lower()))
+    for candidate in candidates:
+        candidate["isLive"] = candidate["id"] == live_id
     result = {"agentId": args.agent_id, **target, "integrationId": integration_id,
               "integrationName": integration_name, "candidates": candidates}
     mode = target.get("mode", "test")
-    suggested = candidates[0]["id"] if candidates else None
-    if mode == "test":
-        suggested = next((c["id"] for c in candidates if c["id"] != live_id), suggested)
-    result["nextStep"] = (f"beam://integrations?provider={integration_name or integration_id}" if not candidates
+    suggested = _suggest(candidates, mode)
+    result["nextStep"] = (f"beam://integrations?provider={integration_name or integration_id}" if suggested is None
                           else _set_command(args.agent_id, mode, suggested, node_id=args.node,
                                             tool_id=args.tool, trigger_id=args.trigger))
     if not candidates:
         result["note"] = "The workspace has no active connection for this integration; add one in Beam first."
+    elif suggested is None:
+        result["note"] = ONLY_LIVE_NOTE
     return result
 
 
@@ -3807,30 +3823,92 @@ def _node_update_body(api, agent_id, graph, node_id, tool_id, field, connection_
     return {"agentId": agent_id, "graphId": graph["id"], "node": node}
 
 
-def _set_tool_connection(api, args, connections):
-    field = "integrationProviderId" if args.mode == "live" else "testIntegrationProviderId"
-    graph, _, tool_config = _resolve_target(api, args.agent_id, args.mode, args.node, args.tool)
-    integration_id, _, _ = _tool_integration(tool_config)
-    connection = _check_connection(connections, args.connection, integration_id, args.agent_id)
-    before = {"integrationProviderId": tool_config.get("integrationProviderId"),
-              "testIntegrationProviderId": tool_config.get("testIntegrationProviderId")}
-    body = _node_update_body(api, args.agent_id, graph, args.node, args.tool, field, args.connection)
+def _tool_in(graph, node_id, tool_id):
+    node = _find_node(graph, node_id)
+    if node is None:
+        return None
+    if tool_id:
+        return next((t for t in node.get("agentGraphNodeTools") or [] if t.get("id") == tool_id), None)
+    return node.get("toolConfiguration")
+
+
+def _write_connection(api, agent_id, graph, node_id, tool_id, field, connection_id):
+    current = _tool_in(graph, node_id, tool_id) or {}
+    before = {"integrationProviderId": current.get("integrationProviderId"),
+              "testIntegrationProviderId": current.get("testIntegrationProviderId")}
+    body = _node_update_body(api, agent_id, graph, node_id, tool_id, field, connection_id)
     api.patch_with_body("/agent-graphs/update-node", body)
-    _, _, saved = _resolve_target(api, args.agent_id, args.mode, args.node, args.tool)
+    saved = _tool_in(_load_graph(api, agent_id, graph["id"]), node_id, tool_id) or {}
     after = {"integrationProviderId": saved.get("integrationProviderId"),
              "testIntegrationProviderId": saved.get("testIntegrationProviderId")}
     other = "testIntegrationProviderId" if field == "integrationProviderId" else "integrationProviderId"
-    if after[field] != args.connection:
+    if after[field] != connection_id:
         raise BeamError("The connection did not persist; the re-read still shows the old value.",
                         code="internal_error", extra={"before": before, "after": after},
-                        next_step=f"Re-run `beam connections summary {args.agent_id}` before retrying.")
+                        next_step=f"Re-run `beam connections summary {agent_id}` before retrying.")
     if before[other] and after[other] != before[other]:
         raise BeamError(f"Saving changed {other} from {before[other]} to {after[other]}; report this before "
                         "making further changes.", code="internal_error", extra={"before": before, "after": after})
-    return {"updated": True, "verified": True, "agentId": args.agent_id, "graphId": graph["id"],
-            "nodeId": args.node, "toolId": args.tool, "mode": args.mode,
-            "connection": {"id": connection["id"], "name": connection["name"]},
-            "before": before, "after": after}
+    return before, after
+
+
+def _mirror_live_to_draft(api, agent_id, live_node, live_tool, tool_id, connection_id):
+    reverts = {"draftUpdated": False, "nextPublishReverts": True,
+               "warning": "The draft still has the old live connection, so the next publish reverts this change; "
+                          "set the same connection on the draft in Beam before publishing."}
+    _, draft_id = _agent_graph_ids(api, agent_id)
+    draft = _load_graph(api, agent_id, draft_id)
+    if draft is None:
+        return {"draftUpdated": False, "nextPublishReverts": False}
+    custom_id = live_node.get("customId")
+    matches = [n for n in draft.get("nodes") or [] if custom_id and n.get("customId") == custom_id]
+    if len(matches) != 1:
+        return reverts
+    draft_node = matches[0]
+    if tool_id:
+        tools = [t for t in draft_node.get("agentGraphNodeTools") or []
+                 if t.get("toolFunctionName") == live_tool.get("toolFunctionName")]
+        if len(tools) != 1:
+            return reverts
+        target, draft_tool_id = tools[0], tools[0].get("id")
+    else:
+        target, draft_tool_id = draft_node.get("toolConfiguration") or {}, None
+        if target.get("toolFunctionName") != live_tool.get("toolFunctionName"):
+            return reverts
+    result = {"draftUpdated": True, "draftGraphId": draft["id"], "draftNodeId": draft_node["id"],
+              "nextPublishReverts": False}
+    if target.get("integrationProviderId") == connection_id:
+        return result
+    try:
+        _write_connection(api, agent_id, draft, draft_node["id"], draft_tool_id, "integrationProviderId",
+                          connection_id)
+    except BeamError as exc:
+        return {**reverts, "draftError": str(exc)}
+    return result
+
+
+def _set_tool_connection(api, args, connections):
+    field = "integrationProviderId" if args.mode == "live" else "testIntegrationProviderId"
+    graph, node, tool_config = _resolve_target(api, args.agent_id, args.mode, args.node, args.tool)
+    integration_id, _, _ = _tool_integration(tool_config)
+    connection = _check_connection(connections, args.connection, integration_id, args.agent_id)
+    if args.mode == "live" and not args.confirm_live:
+        raise BeamError(
+            f"This changes the published agent: live runs of step '{node.get('objective') or args.node}' will use "
+            f"{connection['name']} ({connection['id']}) instead of {tool_config.get('integrationProviderId') or 'no connection'}, "
+            "and the draft gets the same connection so the next publish keeps it.",
+            code="confirmation_required",
+            extra={"currentLiveConnection": tool_config.get("integrationProviderId")},
+            next_step=_set_command(args.agent_id, "live", args.connection, node_id=args.node,
+                                   tool_id=args.tool) + " --confirm-live")
+    before, after = _write_connection(api, args.agent_id, graph, args.node, args.tool, field, args.connection)
+    result = {"updated": True, "verified": True, "agentId": args.agent_id, "graphId": graph["id"],
+              "nodeId": args.node, "toolId": args.tool, "mode": args.mode,
+              "connection": {"id": connection["id"], "name": connection["name"]},
+              "before": before, "after": after}
+    if args.mode == "live":
+        result.update(_mirror_live_to_draft(api, args.agent_id, node, tool_config, args.tool, args.connection))
+    return result
 
 
 def _restart_overrides(live_triggers, test_triggers, trigger_id, connection_id):
@@ -4014,12 +4092,12 @@ def _test_inputs(args):
     return inputs
 
 
-def cmd_tasks_test(api, args):
+def cmd_test_mode_run(api, args):
     agent_id = args.agent_id
     inputs = _test_inputs(args)
     status = _test_mode_status(api, agent_id)
     _require_test_mode_on(status)
-    if len(inputs) > status["runsRemaining"]:
+    if status["runsRemaining"] is not None and len(inputs) > status["runsRemaining"]:
         raise BeamError(
             f"{len(inputs)} inputs but only {status['runsRemaining']} of {status['maxRuns']} test runs remain; "
             "nothing was started.", code="validation_error", extra={"testMode": status},
@@ -4285,7 +4363,7 @@ def build_parser():
     s = sub.add_parser("test-mode-status", help="Show test mode: on/off, runs used, runs remaining.")
     s.add_argument("agent_id")
 
-    s = sub.add_parser("tasks-test", help="Start test-mode runs (one per input) against the draft graph.")
+    s = sub.add_parser("test-mode-run", help="Start test-mode runs (one per input) against the draft graph.")
     s.add_argument("agent_id")
     s.add_argument("--input", action="append", help="Task input. Repeatable.")
     s.add_argument("--inputs-file", help="JSON array of inputs (strings or {\"query\": ...}).")
@@ -4305,6 +4383,8 @@ def build_parser():
     s.add_argument("--connection", required=True, help="Connection row id (integrationProviderId).")
     s.add_argument("--confirm-restart", action="store_true",
                    help="Accept that a trigger's test connection restarts test mode and resets runsUsed to 0.")
+    s.add_argument("--confirm-live", action="store_true",
+                   help="Accept that --mode live changes the published agent (and the draft, so publish keeps it).")
 
     s = sub.add_parser("connections-options", help="List the connections that can fill one step, tool or trigger.")
     s.add_argument("agent_id")
@@ -4375,7 +4455,7 @@ COMMANDS = {
     "test-mode-start": _with_api_errors(cmd_test_mode_start),
     "test-mode-stop": _with_api_errors(cmd_test_mode_stop),
     "test-mode-status": _with_api_errors(cmd_test_mode_status),
-    "tasks-test": _with_api_errors(cmd_tasks_test),
+    "test-mode-run": _with_api_errors(cmd_test_mode_run),
     "connections-summary": _with_api_errors(cmd_connections_summary),
     "connections-missing": _with_api_errors(cmd_connections_missing),
     "connections-set": _with_api_errors(cmd_connections_set),
