@@ -762,6 +762,121 @@
       "forbidden": [
         "workspace.create"
       ]
+    },
+    {
+      "id": "turn-on-test-mode",
+      "request": "Turn on test mode for the Support Router with 5 runs and use the Test inbox Gmail connection.",
+      "situation": "Support Router has a draft and a published version. Its Gmail step has no test connection; the workspace has a Gmail connection called Test inbox. Test mode is off.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "testmode.status"
+        ],
+        [
+          "connection.missing",
+          "connection.summary"
+        ],
+        [
+          "testmode.start"
+        ]
+      ],
+      "forbidden": [
+        "task.create-draft",
+        "task.create-live",
+        "graph.publish"
+      ],
+      "must_stop_before": [
+        "testmode.start",
+        [
+          "connection.set"
+        ]
+      ],
+      "order": [
+        [
+          [
+            "connection.missing",
+            "connection.summary"
+          ],
+          [
+            "testmode.start"
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "which-connections-missing",
+      "request": "Which connections are missing on the Invoice Matcher?",
+      "situation": "Invoice Matcher has a published and a draft version. Two draft steps have no test connection and the live Slack step has no connection.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "connection.missing",
+          "connection.summary"
+        ]
+      ],
+      "forbidden": [
+        "connection.set",
+        "testmode.start",
+        "testmode.stop",
+        "task.create-test",
+        "task.create-draft"
+      ]
+    },
+    {
+      "id": "test-mode-batch-runs-left",
+      "request": "Run these three emails through the Support Router in test mode and tell me how many test runs are left.",
+      "situation": "Test mode is on for Support Router with 4 of 10 runs used, and every test connection is set. The last step replies by email.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "testmode.status"
+        ],
+        [
+          "task.create-test"
+        ]
+      ],
+      "forbidden": [
+        "task.create-draft",
+        "task.create-live",
+        "testmode.start",
+        "testmode.stop"
+      ],
+      "order": [
+        [
+          [
+            "testmode.status"
+          ],
+          [
+            "task.create-test"
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "trigger-test-connection-restart",
+      "request": "Switch the Support Router's Gmail trigger to the Test inbox connection for testing.",
+      "situation": "Test mode is on for Support Router with 3 of 10 runs used. Its Gmail trigger's test connection is the Support inbox; the workspace also has a Gmail connection called Test inbox.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "connection.set"
+        ]
+      ],
+      "forbidden": [
+        "graph.update-trigger",
+        "task.create-test"
+      ],
+      "must_stop_before": [
+        "connection.set"
+      ]
     }
   ]
 }

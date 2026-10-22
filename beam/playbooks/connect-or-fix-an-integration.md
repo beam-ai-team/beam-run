@@ -6,7 +6,8 @@
   connection", "make this the default Slack", "remove the duplicate Gmail",
   "add a custom integration for our internal API".
 - Workspace connections. Adding an integration step to a flow uses
-  `change-an-agents-flow.md`.
+  `change-an-agents-flow.md`. Which live or test connection each step of one agent
+  uses, and which are missing, is `use-test-mode.md`.
 
 ## What you need first
 

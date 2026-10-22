@@ -101,6 +101,7 @@ consent state before any write, test, publish, approval or other external effect
 | Who am I, which workspace, what agents exist; switch or create a workspace; any broad question about the workspace | `get-oriented.md` |
 | Start a real run of a published agent | `run-an-agent.md` |
 | Try unpublished changes, or test one step, without touching the live version | `test-a-draft.md` |
+| Turn test mode on or off, run a batch of test runs, runs left, or which test or live connections are missing | `use-test-mode.md` |
 | What ran, what failed and why — for one agent or across agents; counts by status | `find-out-what-happened.md` |
 | Retry, stop, cancel a wait, rate or delete runs | `retry-stop-or-clean-up-runs.md` |
 | Notifications; approve or reject a consent request; answer a question a run is waiting on | `clear-whats-waiting-on-me.md` |

@@ -40,7 +40,7 @@ Start with the smallest action that fits the job:
 
 Beam Run is one agent with playbooks. The single public `beam` skill is the
 agent's brief: how to start a Beam session, its standing rules (safety, grounding,
-how it reports progress) and a list of 16 playbooks. Each playbook covers one
+how it reports progress) and a list of 17 playbooks. Each playbook covers one
 situation — such as "find out what happened", "clear what's waiting on me" or
 "build a new agent" — with what to check first, the steps, where to stop and ask,
 and how to prove the job is done. Every step names an action from one shared action

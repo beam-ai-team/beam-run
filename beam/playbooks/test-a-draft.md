@@ -7,6 +7,8 @@
 - Right after building or changing a draft, or whenever the user wants a trial run
   that does not touch the live version.
 - Not for real runs: use `run-an-agent.md`.
+- "Turn on test mode", a batch of runs on test connections, or "which connections are
+  missing": use `use-test-mode.md`.
 
 ## What you need first
 

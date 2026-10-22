@@ -19,7 +19,8 @@ beam agent-builder <command> [args]
 - **Output**: every command prints one JSON object to **stdout**. Success →
   `{"ok": true, "command": "...", ...}`. Failure → `{"ok": false, "code": "...",
   "error": "...", "next": "..."}` plus a categorical exit code: 1 internal,
-  2 validation, 3 auth, 5 network. `next` names the command to run.
+  2 validation, 3 auth, 5 network (test mode and connections add more; see
+  [Exit codes](#exit-codes)). `next` names the command to run.
   Progress and diagnostics go to **stderr** — never merge them into stdout
   with `2>&1` before parsing, or the JSON will not parse.
 - **Files**: structured inputs (specs, node payloads, trigger configs) are
@@ -325,11 +326,48 @@ Pick nodes that: (a) do the core reasoning or extraction, (b) have the most comp
 
 ---
 
+## Test mode and connections
+
+Reached as `beam test-mode …`, `beam connections …` and `beam tasks test <agentId> --input …`
+(the same commands as `beam agent-builder test-mode-start`, `connections-summary` and so on).
+Test mode runs the **draft** graph; live connections are read from the **published** graph.
+`--connection` and `integrationProviderId` are a connection row id, not an integration id.
+
+| Command | What it does |
+|---|---|
+| `beam test-mode start <agentId> [--max-runs 2-200] [--trigger-connection triggerId=connId]… [--tool-connection nodeOrToolId=connId]…` | Turns test mode on (default 2 runs). Overrides can only be set here; a second start fails while a session runs. |
+| `beam test-mode stop <agentId>` | Turns it off and resets `runsUsed` to 0. |
+| `beam test-mode status <agentId>` | `testMode` on/off, `runsUsed`, `maxRuns`, `runsRemaining`, `startedAt`. |
+| `beam tasks test <agentId> --input <text> [--input …] \| --inputs-file <file.json>` | One test-mode run per input; returns the task ids and `runsUsed`/`runsRemaining`. Refuses before starting if the inputs exceed the runs left. Without `--input`, `beam tasks test <agentId> <text>` is still the draft test. |
+| `beam connections summary <agentId> [--mode live\|test]` | One row per step tool, LLM-step tool, custom API tool, MCP integration and trigger, with `liveConnection`, `testConnection`, `candidates`, `missing` and `nextStep`, plus `missingCount`. |
+| `beam connections missing <agentId> [--mode live\|test]` | The missing rows only. Exit 0 when none, 10 when any. |
+| `beam connections options <agentId> --node <id> [--tool <toolId>] \| --trigger <triggerId>` | The active connections that can fill that slot. |
+| `beam connections set <agentId> --node <id> [--tool <toolId>] --mode live\|test --connection <connId>` | Reads the whole node, changes the one field, saves it back and re-reads it. Never sends an empty connection. |
+| `beam connections set <agentId> --trigger <triggerId> --mode test --connection <connId> [--confirm-restart]` | A trigger's test connection is set only at start, so this stops and restarts test mode; without `--confirm-restart` it explains that `runsUsed` resets to 0 and changes nothing. |
+
+A test connection that is not set is reported as missing, even where the platform still
+falls back to the live one today (INT-11779 removes that fallback). MCP integrations have no
+test connection yet: their rows say `"testConnection": "not settable yet (INT-11779)"`,
+`"usesLiveInTest": true`, and they are not counted as missing.
+
+---
+
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success (`"ok": true`). |
-| `1` | A handled error — see the `error` field in the JSON output. |
-| `2` | No command given (help is printed). |
-| `130` | Interrupted. |
+| Code | `code` | Meaning |
+|------|--------|---------|
+| `0` | — | Success (`"ok": true`). |
+| `1` | `internal_error` | A handled error — see the `error` field in the JSON output. |
+| `2` | `validation_error`, `bad_request`, `confirmation_required` | Bad input, Beam rejected the request (400), or the command needs an explicit confirmation flag. No command given also exits 2. |
+| `3` | `auth_error` | Not signed in, or the key is no longer accepted. |
+| `4` | `not_found` | The agent, graph, node or connection does not exist here. |
+| `5` | `network_error`, `api_error` | Beam could not be reached, or a server error. |
+| `6` | `test_mode_active` | Test mode is already on; stop it before starting again with other options. |
+| `7` | `test_mode_inactive` | Test mode is off. |
+| `8` | `test_runs_exhausted` | Every test run of the session is used; start a new session. |
+| `9` | `permission_denied` | The role may not do this to this agent (403). |
+| `10` | `connections_missing` | `connections missing` found missing connections; the rows are in the output. |
+| `130` | — | Interrupted. |
+
+Codes 4 and 6–10 come only from the test-mode, test-task and connections commands; the
+others keep reporting an API failure as `api_error` (exit 5). Every failure carries `next`.

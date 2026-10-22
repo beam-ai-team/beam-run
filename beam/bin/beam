@@ -1096,6 +1096,18 @@ Usage:
   beam agents delete <id> --confirm <id>
                               delete an agent (irreversible; requires exact confirmation)
   beam tasks test <id> <q>   run a task against the agent's draft graph
+  beam tasks test <id> --input <q> [--input <q>...] | --inputs-file <file.json>
+                             start test-mode runs (test mode must be on; each uses one run)
+  beam test-mode start <agentId> [--max-runs N] [--trigger-connection triggerId=connId]... [--tool-connection nodeOrToolId=connId]...
+  beam test-mode stop <agentId>
+  beam test-mode status <agentId>
+                             turn test mode on/off; show runs used and remaining
+  beam connections summary <agentId> [--mode live|test]
+  beam connections missing <agentId> [--mode live|test]
+                             live connections come from the published graph, test ones from the draft
+  beam connections options <agentId> --node <nodeId> [--tool <toolId>] | --trigger <triggerId>
+  beam connections set <agentId> --node <nodeId> [--tool <toolId>] | --trigger <triggerId> --mode live|test --connection <connectionId>
+                             --connection is the connection row id (integrationProviderId)
   beam tasks list [flags]    list/search workspace tasks
   beam tasks create <id> <q> [--draft]
                              run a live task (or a draft test with --draft)
@@ -1886,12 +1898,13 @@ cmd_tasks_create() {
 
 cmd_tasks_test() {
   agent_id="${1:-}"; task_query="${2:-}"
+  case "$task_query" in --input|--input=*|--inputs-file|--inputs-file=*) cmd_agent_builder tasks-test "$@" ;; esac
   if [ -z "$agent_id" ] || [ -z "$task_query" ]; then
-    die "validation_error" "usage: beam tasks test <agentId> <task input>" 2
+    die "validation_error" "usage: beam tasks test <agentId> <task input>  |  beam tasks test <agentId> --input <text>... | --inputs-file <file>" 2
   fi
 
-  # `isDraftTask` is the API's graph-selection flag. `isTestTask` is returned
-  # by some task APIs but is ignored when supplied during task creation.
+  # `isDraftTask` is the API's graph-selection flag. A test-mode run sends
+  # `isTestTask` instead, through the --input form above.
   aid_json="$(json_quote "$agent_id")"
   query_json="$(json_quote "$task_query")"
   body="{\"agentId\":$aid_json,\"taskQuery\":{\"query\":$query_json},\"isDraftTask\":true}"
@@ -3058,6 +3071,20 @@ main() {
         update-tool) cmd_tasks_update_tool "$@" ;;
         submit-input) cmd_tasks_submit_input "$@" ;;
         *) die "validation_error" "usage: beam tasks <list|statuses|agents|latest|create|test|get|retry|approve|reject|abort|delete|rate|cancel-wait|update-tool|submit-input>" 2 ;;
+      esac ;;
+    test-mode)
+      prepare_scoped_session
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        start|stop|status) cmd_agent_builder "test-mode-$sub" "$@" ;;
+        *) die "validation_error" "usage: beam test-mode <start|stop|status> <agentId>" 2 ;;
+      esac ;;
+    connections)
+      prepare_scoped_session
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        summary|missing|set|options) cmd_agent_builder "connections-$sub" "$@" ;;
+        *) die "validation_error" "usage: beam connections <summary|missing|options|set> <agentId>" 2 ;;
       esac ;;
     inbox)
       prepare_scoped_session
