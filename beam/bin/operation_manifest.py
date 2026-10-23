@@ -8,7 +8,7 @@ SAFETY = {'read', 'additive-write', 'reversible-write', 'destructive-write', 'ex
 CONFIRMATION = {'none', 'always', 'always-two-turn', 'confirm-proposed-values', 'explicit',
                 'explicit-agent-name-and-id', 'explicit-publish-intent', 'explicit-workspace-create-intent',
                 'required-if-credentials-or-external-effect', 'required-if-production-side-effect'}
-SERIALIZERS = {'value', 'boolean', 'json', 'json-file', 'text-file', 'artifact'}
+SERIALIZERS = {'value', 'repeated-value', 'boolean', 'json', 'json-file', 'text-file', 'artifact'}
 
 
 def validate_operations(operations):
@@ -51,6 +51,8 @@ def validate_operations(operations):
                     raise ValueError('Invalid argument flag: ' + label)
                 if argument['kind'] == 'boolean' and (not flag or properties[field].get('type') != 'boolean'):
                     raise ValueError('Boolean serializer needs a boolean field and flag: ' + label)
+                if argument['kind'] == 'repeated-value' and (not flag or properties[field].get('type') != 'array'):
+                    raise ValueError('Repeated serializer needs an array field and flag: ' + label)
                 bound.add(field)
         if bound != properties.keys():
             raise ValueError('Input lacks an executable mapping: ' + label)

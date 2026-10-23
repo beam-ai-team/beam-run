@@ -35,7 +35,7 @@ confirmation gates, context continuity, and response quality.
 
 ### Playbook evals
 
-`test/evals/playbook-evals.json` holds 33 realistic requests covering all 16
+`test/evals/playbook-evals.json` holds 38 realistic requests covering all 17
 playbooks, multi-step work, safety traps and a non-Beam request. Each records the
 actions a correct plan must include, must never do, and must stop before.
 

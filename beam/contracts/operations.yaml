@@ -431,7 +431,43 @@ operations:
     cli: beam tasks test <agentId> <input>
     postRead: task.get
     status: ready
-    notes: "Runs the unpublished draft. For a batch, check the first task's agentGraphId before sending the rest."
+    notes: "Runs the unpublished draft on LIVE connections; the CLI prints a warning saying so. For test connections use task.create-test (beam test-mode run). It takes no flags. For a batch, check the first task's agentGraphId before sending the rest."
+  testmode.start:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"maxRuns":{"type":"integer","minimum":2,"maximum":200},"triggerConnection":{"type":"array","items":{"type":"string","maxLength":200000},"description":"triggerId=connectionId, one per trigger"},"toolConnection":{"type":"array","items":{"type":"string","maxLength":200000},"description":"nodeOrToolId=connectionId, one per step or LLM-step tool"}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"test-mode"},{"literal":"start"},{"field":"agentId","kind":"value"},{"field":"maxRuns","kind":"value","optional":true,"flag":"--max-runs"},{"field":"triggerConnection","kind":"repeated-value","optional":true,"flag":"--trigger-connection"},{"field":"toolConnection","kind":"repeated-value","optional":true,"flag":"--tool-connection"}]]}
+    safety: external-effect
+    confirmation: always
+    mcp: null
+    cli: beam test-mode start <agentId> [--max-runs N] [--trigger-connection triggerId=connectionId]... [--tool-connection nodeOrToolId=connectionId]...
+    preRead: connection.missing
+    postRead: testmode.status
+    status: ready
+    notes: "Default 2 runs, 2-200. Trigger and tool overrides can only be set here; a second start fails (test_mode_active, exit 6) while a session runs. Both override flags repeat. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id. Test runs may still reach real integrations until INT-11779."
+  testmode.stop:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"test-mode"},{"literal":"stop"},{"field":"agentId","kind":"value"}]]}
+    safety: reversible-write
+    confirmation: always
+    mcp: null
+    cli: beam test-mode stop <agentId>
+    preRead: testmode.status
+    postRead: testmode.status
+    status: ready
+    notes: "Ends the session, removes its test triggers and resets runsUsed to 0. Exit 7 (test_mode_inactive) when it is already off."
+  testmode.status:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"test-mode"},{"literal":"status"},{"field":"agentId","kind":"value"}]]}
+    safety: read
+    mcp: null
+    cli: beam test-mode status <agentId>
+    status: ready
+    notes: "Reports testMode on/off, runsUsed, maxRuns, runsRemaining and startedAt. A session that used every run switches itself off and shows exhausted: true."
+  task.create-test:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"input":{"type":"array","items":{"type":"string","maxLength":200000},"description":"One test-mode run per input"},"inputsFile":{"type":"array","description":"JSON array of inputs staged by the host into a private file"}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"test-mode"},{"literal":"run"},{"field":"agentId","kind":"value"},{"field":"input","kind":"repeated-value","optional":true,"flag":"--input"},{"field":"inputsFile","kind":"json-file","optional":true,"flag":"--inputs-file"}]]}
+    safety: external-effect
+    confirmation: always
+    mcp: null
+    cli: beam test-mode run <agentId> --input <text>... | --inputs-file <file>
+    postRead: task.get
+    status: ready
+    notes: "One test-mode run per input against the draft graph; needs test mode on. Returns the task ids, runsUsed and runsRemaining, and refuses before starting when the inputs exceed the runs left. Exit 7 when test mode is off, 8 when its runs are used. Test runs can still reach real integrations, and LLM-step tools without a test connection fall back to live until INT-11779."
   task.submit-input:
     execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"taskNodeId":{"type":"string","maxLength":200000},"parameter":{"type":"string","maxLength":200000},"answer":{"type":"string","maxLength":200000}},"required":["taskId","taskNodeId","parameter","answer"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"submit-input"},{"field":"taskId","kind":"value"},{"field":"taskNodeId","kind":"value"},{"field":"parameter","kind":"value"},{"field":"answer","kind":"value"}]]}
     safety: reversible-write
@@ -623,6 +659,37 @@ operations:
     cli: beam integrations custom-remove <id> --confirm <id>
     status: ready
 
+  connection.summary:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"mode":{"type":"string","enum":["live","test"]}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"connections"},{"literal":"summary"},{"field":"agentId","kind":"value"},{"field":"mode","kind":"value","optional":true,"flag":"--mode"}]]}
+    safety: read
+    mcp: null
+    cli: beam connections summary <agentId> [--mode live|test]
+    status: ready
+    notes: "One row per step tool, LLM-step tool, custom API tool, MCP integration and trigger, with liveConnection, testConnection, candidates, missing and nextStep, plus missingCount. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id."
+  connection.missing:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"mode":{"type":"string","enum":["live","test"]}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"connections"},{"literal":"missing"},{"field":"agentId","kind":"value"},{"field":"mode","kind":"value","optional":true,"flag":"--mode"}]]}
+    safety: read
+    mcp: null
+    cli: beam connections missing <agentId> [--mode live|test]
+    status: ready
+    notes: "Only the missing rows; exit 0 when none, 10 (connections_missing) when any. A test connection that is not set is missing even where staging still falls back to live. MCP integrations show testConnection 'not settable yet (INT-11779)', usesLiveInTest true, and are not counted. Run each row's nextStep: a beam connections set command, or a beam://integrations link when the workspace has no connection for it. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id."
+  connection.options:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000},"toolId":{"type":"string","maxLength":200000},"triggerId":{"type":"string","maxLength":200000},"mode":{"type":"string","enum":["live","test"]}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"connections"},{"literal":"options"},{"field":"agentId","kind":"value"},{"field":"nodeId","kind":"value","optional":true,"flag":"--node"},{"field":"toolId","kind":"value","optional":true,"flag":"--tool"},{"field":"triggerId","kind":"value","optional":true,"flag":"--trigger"},{"field":"mode","kind":"value","optional":true,"flag":"--mode"}]]}
+    safety: read
+    mcp: null
+    cli: beam connections options <agentId> --node <nodeId> [--tool <toolId>] | --trigger <triggerId>
+    status: ready
+    notes: "Lists the active connections that can fill one slot. Pass --tool for an LLM-step tool. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id."
+  connection.set:
+    execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"nodeId":{"type":"string","maxLength":200000},"toolId":{"type":"string","maxLength":200000},"triggerId":{"type":"string","maxLength":200000},"mode":{"type":"string","enum":["live","test"]},"connectionId":{"type":"string","maxLength":200000},"confirmRestart":{"type":"boolean"},"confirmLive":{"type":"boolean"}},"required":["agentId","mode","connectionId"],"additionalProperties":false},"commands":[[{"literal":"connections"},{"literal":"set"},{"field":"agentId","kind":"value"},{"field":"nodeId","kind":"value","optional":true,"flag":"--node"},{"field":"toolId","kind":"value","optional":true,"flag":"--tool"},{"field":"triggerId","kind":"value","optional":true,"flag":"--trigger"},{"field":"mode","kind":"value","flag":"--mode"},{"field":"connectionId","kind":"value","flag":"--connection"},{"field":"confirmRestart","kind":"boolean","optional":true,"flag":"--confirm-restart"},{"field":"confirmLive","kind":"boolean","optional":true,"flag":"--confirm-live"}]]}
+    safety: external-effect
+    confirmation: always
+    mcp: null
+    cli: beam connections set <agentId> --node <nodeId> [--tool <toolId>] | --trigger <triggerId> --mode live|test --connection <connectionId> [--confirm-live|--confirm-restart]
+    preRead: connection.summary
+    postRead: connection.summary
+    status: ready
+    notes: "Sends only the connection field (PATCH /agent-graphs/:agentId/nodes/:nodeId/connection) and re-reads it; input params and output examples are untouched and no empty connection is sent. --mode live changes the published agent: the first call explains and changes nothing; repeat with --confirm-live only after the user agrees. It also writes the same connection to the draft so the next publish keeps it, and says nextPublishReverts: true when it could not. Never suggest the live connection as a test connection. A trigger's test connection restarts test mode and resets runsUsed to 0: the first call explains and changes nothing; repeat with --confirm-restart only after the user agrees. A trigger's live connection is changed in Beam, not here. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id."
   template.list:
     execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"list"}]]}
     safety: read
