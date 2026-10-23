@@ -108,6 +108,15 @@ bt test-mode replay agent-1 --task past-mail; expect 7 "a replay without a sessi
 bt test-mode replay agent-1 --task past-other --task past-noinput --dry-run; expect 0 "a dry run with every id left out should still report"
 [ "$(field dataset)" = '[]' ] && [ "$(field nextStep)" = null ] || fail "a dry run with nothing to replay must say so"
 ok "replay dry run: top-level task ids stripped, nested and other keys untouched, every skipped id listed with its reason"
+bt test-mode replay agent-1 --task past-forbidden --task past-upper --task past-chat --dry-run
+expect 0 "a dry run with a task the role cannot read must still report"
+python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+assert [r["taskId"] for r in d["dataset"]] == ["past-upper", "past-chat"], d["dataset"]
+assert d["leftOut"] == [{"taskId": "past-forbidden", "reason": "not accessible to your role"}], d["leftOut"]' "$tm/out" || fail "a 403 task must be left out and agent ids compared case-insensitively: $(cat "$tm/out")"
+bt test-mode replay AGENT-1 --task past-chat --dry-run; expect 0 "a dry run with an upper-case agent id failed"
+[ "$(field dataset.0.taskId)" = past-chat ] && [ "$(field leftOut)" = '[]' ] || fail "an upper-case agent id must match the task's agent: $(cat "$tm/out")"
+ok "replay leaves out a task the role cannot read and matches agent ids case-insensitively"
 
 bt connections missing agent-1 --mode test; expect 10 "missing test connections must exit 10"
 [ "$(field missingCount)" = 5 ] || fail "expected 5 missing test connections, got $(field missingCount)"
@@ -197,11 +206,12 @@ rm -f "$tm/fake/deny403"
 ok "API errors keep their message and map to test_mode_*, test_runs_exhausted and permission_denied"
 
 bt test-mode start agent-1 --max-runs 3; expect 0 "start before the replay failed"
-bt test-mode replay agent-1 --task past-mail --task past-other --task past-chat; expect 0 "the replay failed"
+bt test-mode replay agent-1 --task past-mail --task past-forbidden --task past-other --task past-chat; expect 0 "the replay failed"
 python3 -c 'import json,sys
 d=json.load(open(sys.argv[1]))
 assert [r["sourceTaskId"] for r in d["started"]] == ["past-mail", "past-chat"] and all(r["taskId"] for r in d["started"]), d["started"]
-assert d["leftOut"] == [{"taskId": "past-other", "reason": "belongs to agent agent-2, not agent-1"}], d["leftOut"]
+assert d["leftOut"] == [{"taskId": "past-forbidden", "reason": "not accessible to your role"},
+                       {"taskId": "past-other", "reason": "belongs to agent agent-2, not agent-1"}], d["leftOut"]
 assert d["runsUsed"] == 2 and d["runsRemaining"] == 1, d
 bodies=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[-2:]]
 for body in bodies:

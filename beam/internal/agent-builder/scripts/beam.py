@@ -4152,6 +4152,9 @@ def _replay_dataset(api, agent_id, task_ids):
             if getattr(exc, "status", None) == 404:
                 left_out.append({"taskId": task_id, "reason": "not found in this workspace"})
                 continue
+            if getattr(exc, "status", None) == 403:
+                left_out.append({"taskId": task_id, "reason": "not accessible to your role"})
+                continue
             if getattr(exc, "status", None) == 400:
                 left_out.append({"taskId": task_id, "reason": "is not a valid task id"})
                 continue
@@ -4161,7 +4164,7 @@ def _replay_dataset(api, agent_id, task_ids):
             continue
         graph = task.get("agentGraph") if isinstance(task.get("agentGraph"), dict) else {}
         owner = graph.get("agentId")
-        if owner != agent_id:
+        if not isinstance(owner, str) or owner.lower() != agent_id.lower():
             reason = f"belongs to agent {owner}, not {agent_id}" if owner else "its agent could not be read"
             left_out.append({"taskId": task_id, "reason": reason})
             continue

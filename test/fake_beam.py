@@ -10,7 +10,7 @@ graph, triggers, connections and a test-mode session, all in memory. Control fil
 (test-mode start answers 403), race409 (a test task answers 409 exhausted). Writes mints (one
 line per Bearer token minted), lastpatch (the last update-node body), connections (one JSON
 body per node connection PATCH), lasttask (the last POST /agent-tasks body) and taskbodies (one
-line per POST /agent-tasks body). PAST_TASKS are the past tasks GET /agent-tasks/:id returns,
+line per POST /agent-tasks body). PAST_TASKS are the past tasks GET /agent-tasks/:id returns (FORBIDDEN_TASKS answer 403),
 for test-mode replay. Like the real update-node, the fake one gives input params new ids and
 drops output examples.
 """
@@ -107,7 +107,9 @@ PAST_TASKS = {
     "past-noinput": ("agent-1", None),
     "past-text": ("agent-1", "just some text"),
     "past-array": ("agent-1", "[1, 2]"),
+    "past-upper": ("AGENT-1", json.dumps({"query": "Same agent, upper-case id"})),
 }
+FORBIDDEN_TASKS = {"past-forbidden"}
 
 
 def _tm_node(node_id):
@@ -261,6 +263,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, [t for t in TM["triggers"] if t["isTestTrigger"] == want_test])
         if path.startswith("/agent-tasks/") and method == "GET":
             task_id = path.rsplit("/", 1)[1]
+            if task_id in FORBIDDEN_TASKS:
+                return self.send(403, {"statusCode": 403, "message": "Forbidden resource"})
             if task_id not in PAST_TASKS:
                 return self.send(404, {"statusCode": 404, "message": "Task not found"})
             agent_id, stored = PAST_TASKS[task_id]
