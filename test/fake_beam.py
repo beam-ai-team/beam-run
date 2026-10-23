@@ -9,8 +9,10 @@ Test mode and connections (host api.test): one agent, agent-1, with a published 
 graph, triggers, connections and a test-mode session, all in memory. Control files: deny403
 (test-mode start answers 403), race409 (a test task answers 409 exhausted). Writes mints (one
 line per Bearer token minted), lastpatch (the last update-node body), connections (one JSON
-body per node connection PATCH) and lasttask (the last POST /agent-tasks body). Like the real
-update-node, the fake one gives input params new ids and drops output examples.
+body per node connection PATCH), lasttask (the last POST /agent-tasks body) and taskbodies (one
+line per POST /agent-tasks body). PAST_TASKS are the past tasks GET /agent-tasks/:id returns,
+for test-mode replay. Like the real update-node, the fake one gives input params new ids and
+drops output examples.
 """
 import base64
 import hashlib
@@ -92,6 +94,20 @@ def _initial_state():
 
 
 TM = _initial_state()
+
+MAIL = json.dumps({"subject": "Invoice 42", "from": "billing@example.com", "beamAgentOSTaskID": "nested-id"})
+PAST_TASKS = {
+    "past-mail": ("agent-1", json.dumps({
+        "beamAgentOSTaskID": "old-id", "task": MAIL,
+        "attachments": [{"name": "invoice.pdf", "type": "file", "key": "files/invoice.pdf"}],
+        "additionalInfo": "", "customerQuery": {"beamTaskId": "nested-keep", "lang": "en"},
+        "beamTaskId": "INV-7", "beamTaskTimestamp": "2026-10-20T08:00:00Z", "beamAgentOSTaskId": "old-id-2"})),
+    "past-chat": ("agent-1", json.dumps({"query": "Where is my order?", "beamAgentOSTaskID": "old-chat"})),
+    "past-other": ("agent-2", json.dumps({"query": "Another agent's task"})),
+    "past-noinput": ("agent-1", None),
+    "past-text": ("agent-1", "just some text"),
+    "past-array": ("agent-1", "[1, 2]"),
+}
 
 
 def _tm_node(node_id):
@@ -243,8 +259,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/agent-trigger/" + TM_AGENT:
             want_test = query.get("isTestTrigger") == "true"
             return self.send(200, [t for t in TM["triggers"] if t["isTestTrigger"] == want_test])
+        if path.startswith("/agent-tasks/") and method == "GET":
+            task_id = path.rsplit("/", 1)[1]
+            if task_id not in PAST_TASKS:
+                return self.send(404, {"statusCode": 404, "message": "Task not found"})
+            agent_id, stored = PAST_TASKS[task_id]
+            return self.send(200, {"id": task_id, "status": "FAILED", "originalTaskQuery": stored,
+                                   "agentGraphId": "g-old", "agentGraph": {"id": "g-old", "agentId": agent_id}})
         if path == "/agent-tasks" and method == "POST":
             body = self.tm_body()
+            append("taskbodies", json.dumps(body))
             with open(os.path.join(DIR, "lasttask"), "w", encoding="utf-8") as fh:
                 json.dump(body, fh)
             if body.get("isTestTask"):

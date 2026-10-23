@@ -1102,6 +1102,8 @@ Usage:
                              turn test mode on/off; show runs used and remaining
   beam test-mode run <agentId> --input <q> [--input <q>...] | --inputs-file <file.json>
                              start test-mode runs (test mode must be on; each uses one run)
+  beam test-mode replay <agentId> --task <taskId> [--task <taskId>...] | --tasks-file <file.json> [--dry-run]
+                             replay past tasks' stored inputs as test-mode runs (--dry-run starts nothing)
   beam connections summary <agentId> [--mode live|test]
   beam connections missing <agentId> [--mode live|test]
                              live connections come from the published graph, test ones from the draft
@@ -3080,8 +3082,8 @@ main() {
       prepare_scoped_session
       sub="${1:-}"; shift || true
       case "$sub" in
-        start|stop|status|run) cmd_agent_builder "test-mode-$sub" "$@" ;;
-        *) die "validation_error" "usage: beam test-mode <start|stop|status|run> <agentId>" 2 ;;
+        start|stop|status|run|replay) cmd_agent_builder "test-mode-$sub" "$@" ;;
+        *) die "validation_error" "usage: beam test-mode <start|stop|status|run|replay> <agentId>" 2 ;;
       esac ;;
     connections)
       prepare_scoped_session

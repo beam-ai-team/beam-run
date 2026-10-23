@@ -3,7 +3,8 @@
 ## When to use
 
 - "Turn on test mode", "run it in test mode with these five emails", "how many test
-  runs are left?", "which connections are missing?", "use the test inbox for testing".
+  runs are left?", "which connections are missing?", "use the test inbox for testing",
+  "replay last week's failed tasks in test mode".
 - A test session: the draft runs a set number of times on test connections, so the
   live agent and its live connections are left alone.
 - A single trial of a draft with no session is `test-a-draft.md`; it runs on LIVE
@@ -35,7 +36,10 @@
    `connection.missing`. Never start again while it is on.
 5. Run the inputs with `task.create-test`, at most `runsRemaining` of them. Read each
    with `task.get` and check its `agentGraphId` is the draft.
-6. End with `testmode.stop` when the user is done.
+6. To replay past tasks instead, run `task.replay-test` with `--dry-run` first. Show
+   each row's task id and the input it will send, and every `leftOut` id with its
+   reason. After a yes, run it again without `--dry-run`; it uses one run per row.
+7. End with `testmode.stop` when the user is done.
 
 ## Stop and ask
 
@@ -49,18 +53,23 @@
 - `task.create-test`: always confirm the agent, the inputs and the runs they use
   first. Test runs may still reach real integrations until INT-11779 enforces
   test-only connections, and MCP integrations always use their live connection.
+- `task.replay-test`: the dry run starts nothing. Before the real replay, confirm the
+  agent, the rows from the dry run and the runs they use; never replay a left-out id.
 
 ## Done when
 
 - Status, runs used and runs remaining are reported from a fresh `testmode.status`.
 - No missing test connection is left, or the user chose to go ahead with the rest.
-- Each run is reported with its task id, status and a plain verdict.
+- Each run is reported with its task id, status and a plain verdict; a replay also
+  names the past task it came from and every task it left out.
 
 ## If it goes wrong
 
 - Exit 6 `test_mode_active`: options are fixed at start; stop, then start again.
 - Exit 7 `test_mode_inactive`: start test mode first.
 - Exit 8 `test_runs_exhausted`: tell the user and offer a new session.
+- A replay with every id left out exits 2 and starts nothing; read `leftOut`. Until
+  beam-api #3943 is live, Beam rejects a replayed input with no `query` (exit 2).
 - Exit 9 `permission_denied`: the role lacks access; ask an admin.
 - Exit 10 `connections_missing`: work through each row's `nextStep`.
 - Exit codes: `../internal/agent-builder/references/cli-reference.md`.
@@ -81,6 +90,7 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `connection.summary` | — | `beam connections summary <agentId> [--mode live\|test]` | no | — | One row per step tool, LLM-step tool, custom API tool, MCP integration and trigger, with liveConnection, testConnection, candidates, missing and nextStep, plus missingCount. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id. |
 | `task.create-test` | — | `beam test-mode run <agentId> --input <text>... \| --inputs-file <file>` | always | `task.get` | One test-mode run per input against the draft graph; needs test mode on. Returns the task ids, runsUsed and runsRemaining, and refuses before starting when the inputs exceed the runs left. Exit 7 when test mode is off, 8 when its runs are used. Test runs can still reach real integrations, and LLM-step tools without a test connection fall back to live until INT-11779. |
 | `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
+| `task.replay-test` | — | `beam test-mode replay <agentId> --task <taskId>... \| --tasks-file <file> [--dry-run]` | always | `task.get` | Replays past tasks of this agent as test-mode runs, one per task. The input is each task's originalTaskQuery as stored, minus the top-level beamAgentOSTaskID, beamTaskId and beamTaskTimestamp (both spellings of beamAgentOSTaskID); every other key and anything nested is sent unchanged, and query is not required. Ids of another agent's task, a task not found, or one with no stored input or an input that is not a JSON object are listed under leftOut with the reason, never dropped. Repeated ids count once. --dry-run returns the dataset and leftOut and starts nothing; it needs no test mode. Otherwise it needs test mode on (exit 7), refuses before starting when the tasks exceed the runs left, and returns started (sourceTaskId, taskId), leftOut, runsUsed and runsRemaining. Needs beam-api #3943. |
 | `testmode.start` | — | `beam test-mode start <agentId> [--max-runs N] [--trigger-connection triggerId=connectionId]... [--tool-connection nodeOrToolId=connectionId]...` | always | `testmode.status` | Default 2 runs, 2-200. Trigger and tool overrides can only be set here; a second start fails (test_mode_active, exit 6) while a session runs. Both override flags repeat. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id. Test runs may still reach real integrations until INT-11779. |
 | `testmode.status` | — | `beam test-mode status <agentId>` | no | — | Reports testMode on/off, runsUsed, maxRuns, runsRemaining and startedAt. A session that used every run switches itself off and shows exhausted: true. |
 | `testmode.stop` | — | `beam test-mode stop <agentId>` | always | `testmode.status` | Ends the session, removes its test triggers and resets runsUsed to 0. Exit 7 (test_mode_inactive) when it is already off. |

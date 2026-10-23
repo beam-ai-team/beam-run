@@ -99,8 +99,8 @@ class ManagedRuntimeTests(unittest.TestCase):
         result = subprocess.run(['python3', str(ROOT / 'beam/bin/operation_manifest.py')], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         operations = json.loads(result.stdout)['operations']
-        self.assertEqual(len(operations), 132)
-        self.assertEqual(len({op['id'] for op in operations}), 132)
+        self.assertEqual(len(operations), 133)
+        self.assertEqual(len({op['id'] for op in operations}), 133)
         for op in operations:
             self.assertFalse(op['execution']['inputSchema']['additionalProperties'])
             self.assertTrue(op['execution']['commands'])

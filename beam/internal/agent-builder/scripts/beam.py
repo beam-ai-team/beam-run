@@ -4063,33 +4063,148 @@ def _test_inputs(args):
     return inputs
 
 
+def _require_runs_left(status, count, noun, next_step):
+    if status["runsRemaining"] is not None and count > status["runsRemaining"]:
+        raise BeamError(
+            f"{count} {noun} but only {status['runsRemaining']} of {status['maxRuns']} test runs remain; "
+            "nothing was started.", code="validation_error", extra={"testMode": status},
+            next_step=next_step)
+
+
+def _start_test_tasks(api, agent_id, task_queries, row, started_key, pending):
+    started = []
+    for index, task_query in enumerate(task_queries):
+        try:
+            task = api.post("/agent-tasks", {"agentId": agent_id, "taskQuery": task_query,
+                                             "isTestTask": True})
+        except BeamError as exc:
+            translated = _translate_api_error(exc, agent_id)
+            translated.extra = {**translated.extra, started_key: started, "notStarted": pending[index:]}
+            raise translated from exc
+        if not isinstance(task, dict) or not task.get("id"):
+            raise BeamError("Beam did not create the test task; the agent may have no draft graph.",
+                            code="api_error", extra={started_key: started, "notStarted": pending[index:]},
+                            next_step=f"Check the draft with `beam agents get {agent_id}`.")
+        started.append(row(index, task))
+    return started
+
+
 def cmd_test_mode_run(api, args):
     agent_id = args.agent_id
     inputs = _test_inputs(args)
     status = _test_mode_status(api, agent_id)
     _require_test_mode_on(status)
-    if status["runsRemaining"] is not None and len(inputs) > status["runsRemaining"]:
-        raise BeamError(
-            f"{len(inputs)} inputs but only {status['runsRemaining']} of {status['maxRuns']} test runs remain; "
-            "nothing was started.", code="validation_error", extra={"testMode": status},
-            next_step="Send fewer inputs, or stop and start test mode again with a higher --max-runs.")
-    tasks = []
-    for text in inputs:
-        try:
-            task = api.post("/agent-tasks", {"agentId": agent_id, "taskQuery": {"query": text},
-                                             "isTestTask": True})
-        except BeamError as exc:
-            translated = _translate_api_error(exc, agent_id)
-            translated.extra = {**translated.extra, "tasks": tasks, "notStarted": inputs[len(tasks):]}
-            raise translated from exc
-        if not isinstance(task, dict) or not task.get("id"):
-            raise BeamError("Beam did not create the test task; the agent may have no draft graph.",
-                            code="api_error", extra={"tasks": tasks, "notStarted": inputs[len(tasks):]},
-                            next_step=f"Check the draft with `beam agents get {agent_id}`.")
-        tasks.append({"id": task["id"], "input": text, "status": task.get("status"),
-                      "customId": task.get("customId"), "url": task.get("taskUrl") or task.get("url")})
+    _require_runs_left(status, len(inputs), "inputs",
+                       "Send fewer inputs, or stop and start test mode again with a higher --max-runs.")
+    tasks = _start_test_tasks(
+        api, agent_id, [{"query": text} for text in inputs],
+        lambda index, task: {"id": task["id"], "input": inputs[index], "status": task.get("status"),
+                             "customId": task.get("customId"), "url": task.get("taskUrl") or task.get("url")},
+        "tasks", inputs)
     after = _test_mode_status(api, agent_id)
     return {"agentId": agent_id, "tasks": tasks, "runsUsed": after["runsUsed"],
+            "runsRemaining": after["runsRemaining"], "maxRuns": after["maxRuns"],
+            "testMode": after["testMode"], "warning": TEST_MODE_WARNING}
+
+
+REPLAY_STRIPPED_KEYS = ("beamAgentOSTaskID", "beamAgentOSTaskId", "beamTaskId", "beamTaskTimestamp")
+
+
+def _replay_task_ids(args):
+    ids = list(args.task or [])
+    if args.tasks_file:
+        data = _read_json_file(args.tasks_file, "Tasks file")
+        if not isinstance(data, list):
+            raise BeamError("The tasks file must be a JSON array of task ids or {\"taskId\": ...} objects.",
+                            code="validation_error")
+        for item in data:
+            ids.append((item.get("taskId") or item.get("id")) if isinstance(item, dict) else item)
+    unique, seen = [], set()
+    for value in ids:
+        if not isinstance(value, str) or not value.strip():
+            raise BeamError("Every task id must be a non-empty string.", code="validation_error")
+        task_id = value.strip()
+        if task_id.lower() not in seen:
+            seen.add(task_id.lower())
+            unique.append(task_id)
+    if not unique:
+        raise BeamError("Pass --task <taskId> (repeatable) or --tasks-file <file.json>.", code="validation_error")
+    return unique
+
+
+def _replay_query(stored):
+    if isinstance(stored, str):
+        try:
+            stored = json.loads(stored)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(stored, dict):
+        return None
+    return {key: value for key, value in stored.items() if key not in REPLAY_STRIPPED_KEYS}
+
+
+def _replay_dataset(api, agent_id, task_ids):
+    rows, left_out = [], []
+    for task_id in task_ids:
+        try:
+            task = api.get(f"/agent-tasks/{task_id}")
+        except BeamError as exc:
+            if getattr(exc, "status", None) == 404:
+                left_out.append({"taskId": task_id, "reason": "not found in this workspace"})
+                continue
+            if getattr(exc, "status", None) == 400:
+                left_out.append({"taskId": task_id, "reason": "is not a valid task id"})
+                continue
+            raise _translate_api_error(exc, agent_id) from exc
+        if not isinstance(task, dict) or not task.get("id"):
+            left_out.append({"taskId": task_id, "reason": "not found in this workspace"})
+            continue
+        graph = task.get("agentGraph") if isinstance(task.get("agentGraph"), dict) else {}
+        owner = graph.get("agentId")
+        if owner != agent_id:
+            reason = f"belongs to agent {owner}, not {agent_id}" if owner else "its agent could not be read"
+            left_out.append({"taskId": task_id, "reason": reason})
+            continue
+        stored = task.get("originalTaskQuery")
+        if stored is None or (isinstance(stored, str) and not stored.strip()):
+            left_out.append({"taskId": task_id, "reason": "has no stored input (originalTaskQuery)"})
+            continue
+        task_query = _replay_query(stored)
+        if task_query is None:
+            left_out.append({"taskId": task_id, "reason": "its stored input (originalTaskQuery) is not a JSON object"})
+            continue
+        if not task_query:
+            left_out.append({"taskId": task_id, "reason": "its stored input is empty once the task ids are removed"})
+            continue
+        rows.append({"taskId": task_id, "taskQuery": task_query})
+    return rows, left_out
+
+
+def cmd_test_mode_replay(api, args):
+    agent_id = args.agent_id
+    task_ids = _replay_task_ids(args)
+    if args.dry_run:
+        rows, left_out = _replay_dataset(api, agent_id, task_ids)
+        return {"agentId": agent_id, "dryRun": True, "dataset": rows, "leftOut": left_out,
+                "runsNeeded": len(rows), "removedKeys": list(REPLAY_STRIPPED_KEYS),
+                "nextStep": (f"beam test-mode replay {agent_id} "
+                             + " ".join(f"--task {row['taskId']}" for row in rows)) if rows else None}
+    status = _test_mode_status(api, agent_id)
+    _require_test_mode_on(status)
+    rows, left_out = _replay_dataset(api, agent_id, task_ids)
+    if not rows:
+        raise BeamError("None of the tasks can be replayed; nothing was started.", code="validation_error",
+                        extra={"leftOut": left_out},
+                        next_step=f"Pick tasks of agent {agent_id} that have a stored input; check them with `beam tasks get <taskId>`.")
+    _require_runs_left(status, len(rows), "tasks to replay",
+                       "Replay fewer tasks, or stop and start test mode again with a higher --max-runs.")
+    source_ids = [row["taskId"] for row in rows]
+    started = _start_test_tasks(
+        api, agent_id, [row["taskQuery"] for row in rows],
+        lambda index, task: {"sourceTaskId": source_ids[index], "taskId": task["id"], "status": task.get("status")},
+        "started", source_ids)
+    after = _test_mode_status(api, agent_id)
+    return {"agentId": agent_id, "started": started, "leftOut": left_out, "runsUsed": after["runsUsed"],
             "runsRemaining": after["runsRemaining"], "maxRuns": after["maxRuns"],
             "testMode": after["testMode"], "warning": TEST_MODE_WARNING}
 
@@ -4339,6 +4454,13 @@ def build_parser():
     s.add_argument("--input", action="append", help="Task input. Repeatable.")
     s.add_argument("--inputs-file", help="JSON array of inputs (strings or {\"query\": ...}).")
 
+    s = sub.add_parser("test-mode-replay", help="Replay past tasks of the agent as test-mode runs (one per task).")
+    s.add_argument("agent_id")
+    s.add_argument("--task", action="append", help="Past task id to replay. Repeatable.")
+    s.add_argument("--tasks-file", help="JSON array of task ids (strings or {\"taskId\": ...}).")
+    s.add_argument("--dry-run", action="store_true",
+                   help="Show the replay inputs and the tasks left out; start nothing (test mode not needed).")
+
     for name, text in (("connections-summary", "List every live and test connection of an agent."),
                        ("connections-missing", "List only the missing connections; exits 10 when any are.")):
         s = sub.add_parser(name, help=text)
@@ -4427,6 +4549,7 @@ COMMANDS = {
     "test-mode-stop": _with_api_errors(cmd_test_mode_stop),
     "test-mode-status": _with_api_errors(cmd_test_mode_status),
     "test-mode-run": _with_api_errors(cmd_test_mode_run),
+    "test-mode-replay": _with_api_errors(cmd_test_mode_replay),
     "connections-summary": _with_api_errors(cmd_connections_summary),
     "connections-missing": _with_api_errors(cmd_connections_missing),
     "connections-set": _with_api_errors(cmd_connections_set),

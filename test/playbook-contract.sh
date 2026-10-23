@@ -50,6 +50,7 @@ op testmode.stop | grep -q 'confirmation: always' || fail "test mode stop lost i
 op connection.set | grep -q 'confirmation: always' || fail "connection set lost its confirmation"
 op connection.set | grep -q 'safety: external-effect' || fail "connection set must be graded external-effect"
 op task.create-test | grep -q 'confirmation: always' && op task.create-test | grep -q 'safety: external-effect' || fail "test-mode runs must always ask first"
+op task.replay-test | grep -q 'confirmation: always' && op task.replay-test | grep -q 'safety: external-effect' && op task.replay-test | grep -q 'postRead: task.get' || fail "replaying past tasks must always ask first and re-read the task"
 python3 beam/bin/operation_manifest.py | python3 -c 'import json,sys
 ops={o["id"]:o for o in json.load(sys.stdin)["operations"]}
 kinds={a.get("field"):a.get("kind") for a in ops["testmode.start"]["execution"]["commands"][0]}
@@ -81,6 +82,32 @@ bt test-mode status agent-1; expect 0 "status failed"
 bt test-mode run agent-1 --input hello; expect 7 "a test task without a session must exit test_mode_inactive"
 [ "$(field code)" = test_mode_inactive ] && [ -n "$(field next)" ] || fail "inactive error lacks its code or next step"
 ok "status and the inactive error carry a code, an exit status and a next step"
+
+posts() { if [ -f "$tm/fake/taskbodies" ]; then wc -l < "$tm/fake/taskbodies" | tr -d ' '; else echo 0; fi; }
+bt test-mode replay agent-1 --task past-mail --task past-chat --task past-mail --task past-other --task past-noinput --task past-text --task past-array --task past-missing --dry-run
+expect 0 "a dry-run replay must work with test mode off"
+[ "$(posts)" = 0 ] || fail "a dry-run replay started a task"
+python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+mail=json.dumps({"subject": "Invoice 42", "from": "billing@example.com", "beamAgentOSTaskID": "nested-id"})
+want={"task": mail, "attachments": [{"name": "invoice.pdf", "type": "file", "key": "files/invoice.pdf"}],
+      "additionalInfo": "", "customerQuery": {"beamTaskId": "nested-keep", "lang": "en"}}
+rows={r["taskId"]: r["taskQuery"] for r in d["dataset"]}
+assert d["dryRun"] is True and list(rows) == ["past-mail", "past-chat"], rows
+assert rows["past-mail"] == want and list(rows["past-mail"]) == list(want), rows["past-mail"]
+assert rows["past-mail"]["task"] == mail, "the nested mail string changed"
+assert rows["past-chat"] == {"query": "Where is my order?"}, rows["past-chat"]
+left={r["taskId"]: r["reason"] for r in d["leftOut"]}
+assert left == {"past-other": "belongs to agent agent-2, not agent-1",
+                "past-noinput": "has no stored input (originalTaskQuery)",
+                "past-text": "its stored input (originalTaskQuery) is not a JSON object",
+                "past-array": "its stored input (originalTaskQuery) is not a JSON object",
+                "past-missing": "not found in this workspace"}, left' "$tm/out" || fail "dry-run dataset, key stripping or left-out reasons are wrong: $(cat "$tm/out")"
+bt test-mode replay agent-1 --task past-mail; expect 7 "a replay without a session must exit test_mode_inactive"
+[ "$(field code)" = test_mode_inactive ] && [ "$(posts)" = 0 ] || fail "a replay with test mode off reached the API"
+bt test-mode replay agent-1 --task past-other --task past-noinput --dry-run; expect 0 "a dry run with every id left out should still report"
+[ "$(field dataset)" = '[]' ] && [ "$(field nextStep)" = null ] || fail "a dry run with nothing to replay must say so"
+ok "replay dry run: top-level task ids stripped, nested and other keys untouched, every skipped id listed with its reason"
 
 bt connections missing agent-1 --mode test; expect 10 "missing test connections must exit 10"
 [ "$(field missingCount)" = 5 ] || fail "expected 5 missing test connections, got $(field missingCount)"
@@ -137,6 +164,10 @@ bt test-mode run agent-1 --input first --input second; expect 0 "test tasks fail
 [ "$(field runsUsed)" = 2 ] && [ "$(field runsRemaining)" = 1 ] && [ "$(field tasks.1.id)" = task-2 ] || fail "test tasks did not report ids and runs"
 python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("isTestTask") is True else 1)' "$tm/fake/lasttask" || fail "test tasks did not send isTestTask"
 bt test-mode run agent-1 --input a --input b; expect 2 "more inputs than runs left must be refused before starting"
+before="$(posts)"
+bt test-mode replay agent-1 --task past-mail --task past-chat --task past-other; expect 2 "more replay rows than runs left must be refused before starting"
+[ "$(posts)" = "$before" ] && [ "$(field code)" = validation_error ] || fail "a replay over the runs left started a task"
+grep -q '2 tasks to replay but only 1 of 3 test runs remain' "$tm/out" || fail "the replay refusal does not name the rows and runs left"
 bt tasks test agent-1 --input hello; expect 2 "beam tasks test must refuse test-mode flags"
 bt tasks test agent-1 "plain draft"; expect 0 "the draft test form stopped working"
 grep -q 'draft run on LIVE connections' "$tm/err" && grep -q 'beam test-mode run agent-1' "$tm/err" || fail "the draft run does not warn that it uses live connections"
@@ -164,6 +195,23 @@ touch "$tm/fake/deny403"
 bt test-mode start agent-1; expect 9 "a 403 must exit permission_denied"
 rm -f "$tm/fake/deny403"
 ok "API errors keep their message and map to test_mode_*, test_runs_exhausted and permission_denied"
+
+bt test-mode start agent-1 --max-runs 3; expect 0 "start before the replay failed"
+bt test-mode replay agent-1 --task past-mail --task past-other --task past-chat; expect 0 "the replay failed"
+python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+assert [r["sourceTaskId"] for r in d["started"]] == ["past-mail", "past-chat"] and all(r["taskId"] for r in d["started"]), d["started"]
+assert d["leftOut"] == [{"taskId": "past-other", "reason": "belongs to agent agent-2, not agent-1"}], d["leftOut"]
+assert d["runsUsed"] == 2 and d["runsRemaining"] == 1, d
+bodies=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[-2:]]
+for body in bodies:
+    assert set(body) == {"agentId", "taskQuery", "isTestTask"} and body["agentId"] == "agent-1" and body["isTestTask"] is True, body
+    assert isinstance(body["taskQuery"], dict), body
+    assert not {"beamAgentOSTaskID", "beamAgentOSTaskId", "beamTaskId", "beamTaskTimestamp"} & set(body["taskQuery"]), body
+assert "query" not in bodies[0]["taskQuery"] and bodies[0]["taskQuery"]["attachments"][0]["key"] == "files/invoice.pdf", bodies[0]
+assert bodies[1]["taskQuery"] == {"query": "Where is my order?"}, bodies[1]' "$tm/out" "$tm/fake/taskbodies" || fail "the replay did not start one test task per row with the stripped input: $(cat "$tm/out")"
+bt test-mode stop agent-1; expect 0 "stop after the replay failed"
+ok "replay starts one test task per row with the stored input as sent, and lists the ids it left out"
 
 kill "$TM_PID" 2>/dev/null || true
 

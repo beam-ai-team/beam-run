@@ -882,6 +882,42 @@
       ]
     },
     {
+      "id": "replay-past-tasks-in-test-mode",
+      "request": "Replay yesterday's three failed Invoice Intake tasks in test mode so I can see if the draft handles them.",
+      "situation": "Test mode is on for Invoice Intake with 1 of 10 runs used and every test connection set. The three failed tasks came from its Gmail trigger, so their stored input has the email and its attachments and no query. One of the ids the user pasted belongs to a different agent.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "testmode.status"
+        ],
+        [
+          "task.replay-test"
+        ]
+      ],
+      "forbidden": [
+        "task.create-live",
+        "task.create-draft",
+        "task.retry",
+        "testmode.start",
+        "graph.publish"
+      ],
+      "order": [
+        [
+          [
+            "testmode.status"
+          ],
+          [
+            "task.replay-test"
+          ]
+        ]
+      ],
+      "must_stop_before": [
+        "task.replay-test"
+      ]
+    },
+    {
       "id": "draft-run-is-not-test-mode",
       "request": "Test the Support Router in test mode with this email: 'My order is late'.",
       "situation": "Test mode is on for Support Router with 1 of 5 runs used and every test connection set. The last step replies by email.",
