@@ -462,7 +462,7 @@ operations:
   task.create-test:
     execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"input":{"type":"array","items":{"type":"string","maxLength":200000},"description":"One test-mode run per input"},"inputsFile":{"type":"array","description":"JSON array of inputs staged by the host into a private file"}},"required":["agentId"],"additionalProperties":false},"commands":[[{"literal":"test-mode"},{"literal":"run"},{"field":"agentId","kind":"value"},{"field":"input","kind":"repeated-value","optional":true,"flag":"--input"},{"field":"inputsFile","kind":"json-file","optional":true,"flag":"--inputs-file"}]]}
     safety: external-effect
-    confirmation: required-if-production-side-effect
+    confirmation: always
     mcp: null
     cli: beam test-mode run <agentId> --input <text>... | --inputs-file <file>
     postRead: task.get
@@ -689,7 +689,7 @@ operations:
     preRead: connection.summary
     postRead: connection.summary
     status: ready
-    notes: "Reads the whole node, changes the one field, saves it and re-reads it; never sends an empty connection. --mode live changes the published agent: the first call explains and changes nothing; repeat with --confirm-live only after the user agrees. It also writes the same connection to the draft so the next publish keeps it, and says nextPublishReverts: true when it could not. Never suggest the live connection as a test connection. A trigger's test connection restarts test mode and resets runsUsed to 0: the first call explains and changes nothing; repeat with --confirm-restart only after the user agrees. A trigger's live connection is changed in Beam, not here. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id."
+    notes: "Sends only the connection field (PATCH /agent-graphs/:agentId/nodes/:nodeId/connection) and re-reads it; input params and output examples are untouched and no empty connection is sent. --mode live changes the published agent: the first call explains and changes nothing; repeat with --confirm-live only after the user agrees. It also writes the same connection to the draft so the next publish keeps it, and says nextPublishReverts: true when it could not. Never suggest the live connection as a test connection. A trigger's test connection restarts test mode and resets runsUsed to 0: the first call explains and changes nothing; repeat with --confirm-restart only after the user agrees. A trigger's live connection is changed in Beam, not here. Test mode runs the draft graph and test connections are read from the draft; live connections are read from the active (published) graph. integrationProviderId and --connection are a connection row id, not an integration id."
   template.list:
     execution: {"inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"commands":[[{"literal":"templates"},{"literal":"list"}]]}
     safety: read

@@ -49,7 +49,7 @@ op testmode.start | grep -q 'confirmation: always' || fail "test mode start lost
 op testmode.stop | grep -q 'confirmation: always' || fail "test mode stop lost its confirmation"
 op connection.set | grep -q 'confirmation: always' || fail "connection set lost its confirmation"
 op connection.set | grep -q 'safety: external-effect' || fail "connection set must be graded external-effect"
-op task.create-test | grep -q 'confirmation: required-if-production-side-effect' && op task.create-test | grep -q 'safety: external-effect' || fail "test-mode runs must be graded like live runs"
+op task.create-test | grep -q 'confirmation: always' && op task.create-test | grep -q 'safety: external-effect' || fail "test-mode runs must always ask first"
 python3 beam/bin/operation_manifest.py | python3 -c 'import json,sys
 ops={o["id"]:o for o in json.load(sys.stdin)["operations"]}
 kinds={a.get("field"):a.get("kind") for a in ops["testmode.start"]["execution"]["commands"][0]}
@@ -100,28 +100,35 @@ bt connections summary agent-1; expect 0 "summary failed"
 [ "$(row step_tool live missing)" = false ] || fail "a connected live step was reported missing"
 ok "missing-connection rules: separate test connections, exact next steps, MCP noted not counted"
 
-: > "$tm/fake/mints"
+: > "$tm/fake/mints"; : > "$tm/fake/connections"; rm -f "$tm/fake/lastpatch"
+params() { python3 -c 'import json,sys,urllib.request
+g=json.load(urllib.request.urlopen(urllib.request.Request(sys.argv[1]+"/agent-graphs/agent-1?graphId="+sys.argv[2],headers={"x-api-key":"test-key"})))["graph"]
+n=[n for n in g["nodes"] if n["id"]==sys.argv[3]][0]
+tools=[n["toolConfiguration"]]+(n.get("agentGraphNodeTools") or [])
+print(json.dumps([[t.get("inputParams"),t.get("outputParams")] for t in tools],sort_keys=True))' "$TM_URL" "$1" "$2"; }
+mail_before="$(params g-draft n-draft-mail)"; llm_before="$(params g-draft n-draft-llm)"
 bt connections set agent-1 --node n-draft-mail --mode test --connection conn-gmail-2; expect 0 "setting a step test connection failed"
 [ "$(wc -l < "$tm/fake/mints" | tr -d ' ')" = 1 ] || fail "one command minted more than one Bearer token"
-python3 -c 'import json,sys
-b=json.load(open(sys.argv[1]))["node"]["toolConfiguration"]
-sys.exit(0 if b["integrationProviderId"]=="conn-gmail-1" and b["testIntegrationProviderId"]=="conn-gmail-2" and b["toolFunctionName"] else 1)' "$tm/fake/lastpatch" || fail "the update did not send the whole node with only the test field changed"
 bt connections set agent-1 --node n-draft-llm --tool tool-slack --mode test --connection conn-slack-2; expect 0 "setting an LLM-step tool test connection failed"
-python3 -c 'import json,sys
-n=json.load(open(sys.argv[1]))["node"]; t=n["agentGraphNodeTools"][0]
-sys.exit(0 if n.get("toolConfiguration") and t["integrationProviderId"]=="conn-slack-1" and t["testIntegrationProviderId"]=="conn-slack-2" else 1)' "$tm/fake/lastpatch" || fail "the LLM-step update dropped the node tool or its live connection"
+[ ! -e "$tm/fake/lastpatch" ] || fail "connections set still sends the whole node through update-node"
+[ "$(cat "$tm/fake/connections")" = '{"connectionId": "conn-gmail-2", "mode": "test"}
+{"connectionId": "conn-slack-2", "mode": "test", "toolConfigurationId": "tool-slack"}' ] || fail "connections set sent more than the connection field: $(cat "$tm/fake/connections")"
+[ "$(params g-draft n-draft-mail)" = "$mail_before" ] && [ "$(params g-draft n-draft-llm)" = "$llm_before" ] || fail "setting a connection changed input params or output examples"
 bt connections summary agent-1; expect 0 "summary after the updates failed"
 [ "$(row step_tool live liveConnection)" = '{"id": "conn-gmail-1", "name": "Support inbox"}' ] && [ "$(row step_tool test liveConnection)" = '{"id": "conn-gmail-1", "name": "Support inbox"}' ] && [ "$(row llm_tool test liveConnection)" = '{"id": "conn-slack-1", "name": "Ops Slack"}' ] || fail "a test-connection update changed a live connection"
+[ "$(row step_tool test testConnection)" = '{"id": "conn-gmail-2", "name": "Test inbox"}' ] || fail "the step test connection was not saved"
 bt connections set agent-1 --node n-draft-mail --mode test --connection conn-slack-1; expect 2 "a connection of another integration must be refused"
 bt connections set agent-1 --node n-live-mail --mode test --connection conn-gmail-2; expect 2 "a live-graph node must be refused for a test connection"
 bt connections set agent-1 --trigger trig-1 --mode live --connection conn-gmail-2; expect 2 "a live trigger connection must not be changed from the CLI"
-rm -f "$tm/fake/lastpatch"
+: > "$tm/fake/connections"
 bt connections set agent-1 --node n-live-mail --mode live --connection conn-gmail-2; expect 2 "a live connection change must ask for --confirm-live"
-[ "$(field code)" = confirmation_required ] && [ ! -e "$tm/fake/lastpatch" ] || fail "an unconfirmed live change reached the API"
+[ "$(field code)" = confirmation_required ] && [ ! -s "$tm/fake/connections" ] || fail "an unconfirmed live change reached the API"
 bt connections set agent-1 --node n-live-mail --mode live --connection conn-gmail-2 --confirm-live; expect 0 "the confirmed live change failed"
 [ "$(field after.integrationProviderId)" = conn-gmail-2 ] && [ "$(field draftUpdated)" = True ] && [ "$(field nextPublishReverts)" = False ] && [ "$(field draftNodeId)" = n-draft-mail ] || fail "the live change was not mirrored to the draft"
+[ "$(wc -l < "$tm/fake/connections" | tr -d ' ')" = 2 ] && [ "$(sort -u "$tm/fake/connections")" = '{"connectionId": "conn-gmail-2", "mode": "live"}' ] || fail "the live change and its draft mirror must each send only the live connection"
 bt connections set agent-1 --node n-live-mail --mode live --connection conn-gmail-1 --confirm-live; expect 0 "restoring the live connection failed"
-ok "connections set reads the whole node, changes one field, re-reads it, and never wipes a live connection"
+[ ! -e "$tm/fake/lastpatch" ] || fail "a live connection change used the full-node update"
+ok "connections set sends only the connection field, re-reads it, and leaves params, output examples and live connections alone"
 
 bt test-mode start agent-1 --max-runs 3 --trigger-connection trig-1=conn-gmail-2; expect 0 "test mode start failed"
 [ "$(field testMode.runsRemaining)" = 3 ] || fail "start should report 3 runs remaining"

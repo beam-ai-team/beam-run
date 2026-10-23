@@ -8,8 +8,9 @@ line), bad ("<host> <status>" probe answers), slow (hosts whose probe stalls), d
 Test mode and connections (host api.test): one agent, agent-1, with a published and a draft
 graph, triggers, connections and a test-mode session, all in memory. Control files: deny403
 (test-mode start answers 403), race409 (a test task answers 409 exhausted). Writes mints (one
-line per Bearer token minted), lastpatch (the last update-node body) and lasttask (the last
-POST /agent-tasks body).
+line per Bearer token minted), lastpatch (the last update-node body), connections (one JSON
+body per node connection PATCH) and lasttask (the last POST /agent-tasks body). Like the real
+update-node, the fake one gives input params new ids and drops output examples.
 """
 import base64
 import hashlib
@@ -28,6 +29,8 @@ TM_HOST, TM_KEY, TM_TOKEN, TM_AGENT = "api.test", "test-key", "jwt-test", "agent
 def _tool(fn, integration_id, identifier, live=None, test=None, kind="beam_tool", config_id=None):
     return {"id": config_id or "cfg-" + fn, "toolFunctionName": fn, "toolName": fn,
             "integrationProviderId": live, "testIntegrationProviderId": test,
+            "inputParams": [{"id": "param-" + fn, "paramName": "to"}],
+            "outputParams": [{"id": "out-" + fn, "outputExample": "{\"id\": \"1\"}"}],
             "originalTool": {"type": kind, "integrationId": integration_id,
                              "isIntegrationRequired": bool(integration_id) and kind != "custom_integration_tool",
                              "integration": {"systemIntegrationIdentifier": identifier,
@@ -185,6 +188,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(400, {"message": "Invalid nodeId"})
             entity = {k: v for k, v in node.items() if k not in ("agentGraphNodeTools", "agentGraphNodeMcpIntegrations")}
             return self.send(200, dict(json.loads(json.dumps(entity)), agentGraph={"id": "graph"}))
+        if path.startswith("/agent-graphs/%s/nodes/" % TM_AGENT) and path.endswith("/connection") and method == "PATCH":
+            body = self.tm_body()
+            append("connections", json.dumps(body, sort_keys=True))
+            node_id = path.split("/")[4]
+            graph, node = _tm_node(node_id)
+            if node is None:
+                return self.send(404, {"statusCode": 404, "message": "Node not found for this agent"})
+            if body.get("toolConfigurationId"):
+                tool = next((t for t in node.get("agentGraphNodeTools") or [] if t["id"] == body["toolConfigurationId"]), None)
+                if tool is None:
+                    return self.send(404, {"statusCode": 404, "message": "Tool configuration is not attached to this node"})
+            else:
+                tool = node.get("toolConfiguration")
+            connection = next((c for c in TM["connections"] if c["id"] == body.get("connectionId")), None)
+            if connection is None:
+                return self.send(404, {"statusCode": 404, "message": "Connection not found in this workspace"})
+            if connection["integrationId"] != tool["originalTool"]["integrationId"]:
+                return self.send(400, {"statusCode": 400, "message": "Connection belongs to a different integration than this tool"})
+            field = "integrationProviderId" if body.get("mode") == "live" else "testIntegrationProviderId"
+            tool[field] = connection["id"]
+            return self.send(200, {"nodeId": node_id, "toolConfigurationId": tool["id"], "mode": body.get("mode"),
+                                   "integrationProviderId": tool["integrationProviderId"],
+                                   "testIntegrationProviderId": tool["testIntegrationProviderId"]})
         if path == "/agent-graphs/update-node" and method == "PATCH":
             body = self.tm_body()
             with open(os.path.join(DIR, "lastpatch"), "w", encoding="utf-8") as fh:
@@ -196,7 +222,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if "toolConfiguration" not in incoming or incoming["toolConfiguration"] is None:
                 node.pop("toolConfiguration", None)
             else:
-                _tm_apply_ids(node["toolConfiguration"], incoming["toolConfiguration"])
+                tool = node["toolConfiguration"]
+                _tm_apply_ids(tool, incoming["toolConfiguration"])
+                tool["inputParams"] = [dict(p, id="new-" + p["id"]) for p in tool.get("inputParams") or []]
+                tool["outputParams"] = [dict(p, outputExample=None) for p in tool.get("outputParams") or []]
             if incoming.get("agentGraphNodeTools") is not None:
                 kept = []
                 for tool in node.get("agentGraphNodeTools") or []:

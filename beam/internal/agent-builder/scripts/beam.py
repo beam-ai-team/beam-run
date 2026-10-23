@@ -3290,7 +3290,6 @@ MIN_TEST_RUNS = 2
 MAX_TEST_RUNS = 200
 DEFAULT_TEST_RUNS = 2
 MCP_TEST_NOTE = "not settable yet (INT-11779)"
-CODE_EXECUTOR_TOOLS = {"StandAloneAction_CodeExecutor"}
 TEST_MODE_WARNING = ("Test runs can still reach real integrations until INT-11779 enforces "
                      "test-only connections; a step whose test connection is missing may use its live one.")
 
@@ -3793,36 +3792,6 @@ def _node_mode(api, agent_id, node_id):
                     next_step=f"Use node ids from `beam connections summary {agent_id}`.")
 
 
-def _node_update_body(api, agent_id, graph, node_id, tool_id, field, connection_id):
-    node = api.get(f"/agent-graphs/{agent_id}/nodes/{node_id}")
-    node = node.get("node", node) if isinstance(node, dict) else {}
-    node.pop("agentGraph", None)
-    node.pop("agentGraphNodeTools", None)
-    node.pop("agentGraphNodeMcpIntegrations", None)
-    current = node.get("toolConfiguration")
-    if not isinstance(current, dict) or not current.get("toolFunctionName"):
-        raise BeamError(f"Node {node_id} came back without its tool configuration; nothing was changed.",
-                        code="internal_error", next_step="Re-run `beam connections summary` and retry.")
-    if current.get("toolFunctionName") in CODE_EXECUTOR_TOOLS:
-        raise BeamError("Saving a code step re-runs it with its last input, so its connections are not "
-                        "changed from the CLI.", code="validation_error",
-                        next_step=f"Open beam://agent.flow?agentId={agent_id} to change it.")
-    if tool_id:
-        graph_node = _find_node(graph, node_id)
-        tools = []
-        for tool in graph_node.get("agentGraphNodeTools") or []:
-            entry = {"id": tool.get("id"), "toolFunctionName": tool.get("toolFunctionName"),
-                     "integrationProviderId": tool.get("integrationProviderId"),
-                     "testIntegrationProviderId": tool.get("testIntegrationProviderId")}
-            if tool.get("id") == tool_id:
-                entry[field] = connection_id
-            tools.append(entry)
-        node["agentGraphNodeTools"] = tools
-    else:
-        current[field] = connection_id
-    return {"agentId": agent_id, "graphId": graph["id"], "node": node}
-
-
 def _tool_in(graph, node_id, tool_id):
     node = _find_node(graph, node_id)
     if node is None:
@@ -3836,8 +3805,10 @@ def _write_connection(api, agent_id, graph, node_id, tool_id, field, connection_
     current = _tool_in(graph, node_id, tool_id) or {}
     before = {"integrationProviderId": current.get("integrationProviderId"),
               "testIntegrationProviderId": current.get("testIntegrationProviderId")}
-    body = _node_update_body(api, agent_id, graph, node_id, tool_id, field, connection_id)
-    api.patch_with_body("/agent-graphs/update-node", body)
+    body = {"mode": "live" if field == "integrationProviderId" else "test", "connectionId": connection_id}
+    if tool_id:
+        body["toolConfigurationId"] = tool_id
+    api.patch_with_body(f"/agent-graphs/{agent_id}/nodes/{node_id}/connection", body)
     saved = _tool_in(_load_graph(api, agent_id, graph["id"]), node_id, tool_id) or {}
     after = {"integrationProviderId": saved.get("integrationProviderId"),
              "testIntegrationProviderId": saved.get("testIntegrationProviderId")}
