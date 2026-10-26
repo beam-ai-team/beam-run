@@ -7,8 +7,6 @@
 - Right after building or changing a draft, or whenever the user wants a trial run
   that does not touch the live version.
 - Not for real runs: use `run-an-agent.md`.
-- "Turn on test mode", a batch of runs on test connections, or "which connections are
-  missing": use `use-test-mode.md`.
 
 ## What you need first
 
@@ -66,6 +64,6 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `agent.list` | `listAgents` | `beam agents list` | no | — | When more than one agent matches a name, ask which one; never pick by display name alone. |
 | `graph.test-node` | `testGraphNode` | `beam agent-builder test-node <agentId> <graphId> <nodeId> <paramsJson>` | no | — | Runs one step with explicit inputs; needs agentId, graphId, nodeId and a JSON params object. |
 | `graph.validate` | — | `beam agent-builder validate` | no | — | Run before the first builder read or write. Exit 3 means sign in with beam login; exit 2 means a workspace is needed; exit 5 is a network problem (suggest beam doctor). Read the JSON next field on any failure. |
-| `task.create-draft` | — | `beam tasks test <agentId> <input>` | no | `task.get` | Runs the unpublished draft on LIVE connections; the CLI prints a warning saying so. For test connections use task.create-test (beam test-mode run). It takes no flags. For a batch, check the first task's agentGraphId before sending the rest. |
+| `task.create-draft` | — | `beam tasks test <agentId> <input>` | no | `task.get` | Runs the unpublished draft. For a batch, check the first task's agentGraphId before sending the rest. |
 | `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
 | `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

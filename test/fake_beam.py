@@ -8,11 +8,10 @@ line), bad ("<host> <status>" probe answers), slow (hosts whose probe stalls), d
 Test mode and connections (host api.test): one agent, agent-1, with a published and a draft
 graph, triggers, connections and a test-mode session, all in memory. Control files: deny403
 (test-mode start answers 403), race409 (a test task answers 409 exhausted). Writes mints (one
-line per Bearer token minted), lastpatch (the last update-node body), connections (one JSON
+line per Bearer token minted), connections (one JSON
 body per node connection PATCH), lasttask (the last POST /agent-tasks body) and taskbodies (one
 line per POST /agent-tasks body). PAST_TASKS are the past tasks GET /agent-tasks/:id returns (FORBIDDEN_TASKS answer 403),
-for test-mode replay. Like the real update-node, the fake one gives input params new ids and
-drops output examples.
+for test-mode replay.
 """
 import base64
 import hashlib
@@ -120,12 +119,6 @@ def _tm_node(node_id):
     return None, None
 
 
-def _tm_apply_ids(target, incoming):
-    for key in ("integrationProviderId", "testIntegrationProviderId"):
-        if key in incoming:
-            target[key] = incoming[key]
-
-
 def read(name, default=""):
     try:
         with open(os.path.join(DIR, name), encoding="utf-8") as fh:
@@ -200,12 +193,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/agent-graphs/" + TM_AGENT and method == "GET":
             graph = TM["graphs"].get(query.get("graphId", "g-draft"))
             return self.send(200, {"graph": graph})
-        if path.startswith("/agent-graphs/%s/nodes/" % TM_AGENT) and method == "GET":
-            _, node = _tm_node(path.rsplit("/", 1)[1])
-            if node is None:
-                return self.send(400, {"message": "Invalid nodeId"})
-            entity = {k: v for k, v in node.items() if k not in ("agentGraphNodeTools", "agentGraphNodeMcpIntegrations")}
-            return self.send(200, dict(json.loads(json.dumps(entity)), agentGraph={"id": "graph"}))
         if path.startswith("/agent-graphs/%s/nodes/" % TM_AGENT) and path.endswith("/connection") and method == "PATCH":
             body = self.tm_body()
             append("connections", json.dumps(body, sort_keys=True))
@@ -229,35 +216,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, {"nodeId": node_id, "toolConfigurationId": tool["id"], "mode": body.get("mode"),
                                    "integrationProviderId": tool["integrationProviderId"],
                                    "testIntegrationProviderId": tool["testIntegrationProviderId"]})
-        if path == "/agent-graphs/update-node" and method == "PATCH":
-            body = self.tm_body()
-            with open(os.path.join(DIR, "lastpatch"), "w", encoding="utf-8") as fh:
-                json.dump(body, fh)
-            graph, node = _tm_node(body["node"]["id"])
-            if graph is None or graph["id"] != body.get("graphId"):
-                return self.send(404, {"message": "Node not found"})
-            incoming = body["node"]
-            if "toolConfiguration" not in incoming or incoming["toolConfiguration"] is None:
-                node.pop("toolConfiguration", None)
-            else:
-                tool = node["toolConfiguration"]
-                _tm_apply_ids(tool, incoming["toolConfiguration"])
-                tool["inputParams"] = [dict(p, id="new-" + p["id"]) for p in tool.get("inputParams") or []]
-                tool["outputParams"] = [dict(p, outputExample=None) for p in tool.get("outputParams") or []]
-            if incoming.get("agentGraphNodeTools") is not None:
-                kept = []
-                for tool in node.get("agentGraphNodeTools") or []:
-                    match = next((t for t in incoming["agentGraphNodeTools"] if t.get("id") == tool["id"]), None)
-                    if match is not None:
-                        _tm_apply_ids(tool, match)
-                        kept.append(tool)
-                node["agentGraphNodeTools"] = kept
-            return self.send(200, node)
         if path == "/integration-provider/connected-integrations":
             return self.send(200, {"connectedIntegrations": TM["connections"]})
-        if path.startswith("/integration-provider/get-connections/"):
-            wanted = path.rsplit("/", 1)[1]
-            return self.send(200, [c for c in TM["connections"] if c["integrationId"] == wanted])
         if path == "/agent-trigger/" + TM_AGENT:
             want_test = query.get("isTestTrigger") == "true"
             return self.send(200, [t for t in TM["triggers"] if t["isTestTrigger"] == want_test])

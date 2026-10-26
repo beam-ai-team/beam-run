@@ -1095,7 +1095,7 @@ Usage:
   beam agents publish <gid>  publish a draft graph (graphId from deploy output)
   beam agents delete <id> --confirm <id>
                               delete an agent (irreversible; requires exact confirmation)
-  beam tasks test <id> <q>   run a task against the agent's draft graph, on LIVE connections
+  beam tasks test <id> <q>   run a task against the agent's draft graph
   beam test-mode start <agentId> [--max-runs N] [--trigger-connection triggerId=connId]... [--tool-connection nodeOrToolId=connId]...
   beam test-mode stop <agentId>
   beam test-mode status <agentId>
@@ -1900,17 +1900,12 @@ cmd_tasks_create() {
 
 cmd_tasks_test() {
   agent_id="${1:-}"; task_query="${2:-}"
-  case "$task_query" in
-    --*) die "validation_error" "beam tasks test takes no flags; for test-mode runs use: beam test-mode run <agentId> --input <text>" 2 ;;
-  esac
   if [ -z "$agent_id" ] || [ -z "$task_query" ]; then
-    die "validation_error" "usage: beam tasks test <agentId> <task input>  (a draft run on LIVE connections; test mode is: beam test-mode run <agentId> --input <text>)" 2
+    die "validation_error" "usage: beam tasks test <agentId> <task input>" 2
   fi
-  [ $# -le 2 ] || die "validation_error" "beam tasks test takes only <agentId> <task input>; for test-mode runs use: beam test-mode run <agentId> --input <text>" 2
-  printf 'Warning: this is a draft run on LIVE connections, not test mode. For test connections use: beam test-mode run %s --input <text>\n' "$agent_id" >&2
 
-  # `isDraftTask` is the API's graph-selection flag. A test-mode run sends
-  # `isTestTask` instead, through beam test-mode run.
+  # `isDraftTask` is the API's graph-selection flag. `isTestTask` is returned
+  # by some task APIs but is ignored when supplied during task creation.
   aid_json="$(json_quote "$agent_id")"
   query_json="$(json_quote "$task_query")"
   body="{\"agentId\":$aid_json,\"taskQuery\":{\"query\":$query_json},\"isDraftTask\":true}"

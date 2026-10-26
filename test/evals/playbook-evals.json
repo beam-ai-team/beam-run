@@ -827,61 +827,6 @@
       ]
     },
     {
-      "id": "test-mode-batch-runs-left",
-      "request": "Run these three emails through the Support Router in test mode and tell me how many test runs are left.",
-      "situation": "Test mode is on for Support Router with 4 of 10 runs used, and every test connection is set. The last step replies by email.",
-      "playbooks": [
-        "use-test-mode"
-      ],
-      "required": [
-        [
-          "testmode.status"
-        ],
-        [
-          "task.create-test"
-        ]
-      ],
-      "forbidden": [
-        "task.create-draft",
-        "task.create-live",
-        "testmode.start",
-        "testmode.stop"
-      ],
-      "order": [
-        [
-          [
-            "testmode.status"
-          ],
-          [
-            "task.create-test"
-          ]
-        ]
-      ],
-      "must_stop_before": [
-        "task.create-test"
-      ]
-    },
-    {
-      "id": "trigger-test-connection-restart",
-      "request": "Switch the Support Router's Gmail trigger to the Test inbox connection for testing.",
-      "situation": "Test mode is on for Support Router with 3 of 10 runs used. Its Gmail trigger's test connection is the Support inbox; the workspace also has a Gmail connection called Test inbox.",
-      "playbooks": [
-        "use-test-mode"
-      ],
-      "required": [
-        [
-          "connection.set"
-        ]
-      ],
-      "forbidden": [
-        "graph.update-trigger",
-        "task.create-test"
-      ],
-      "must_stop_before": [
-        "connection.set"
-      ]
-    },
-    {
       "id": "replay-past-tasks-in-test-mode",
       "request": "Replay yesterday's three failed Invoice Intake tasks in test mode so I can see if the draft handles them.",
       "situation": "Test mode is on for Invoice Intake with 1 of 10 runs used and every test connection set. The three failed tasks came from its Gmail trigger, so their stored input has the email and its attachments and no query. One of the ids the user pasted belongs to a different agent.",
@@ -915,26 +860,6 @@
       ],
       "must_stop_before": [
         "task.replay-test"
-      ]
-    },
-    {
-      "id": "draft-run-is-not-test-mode",
-      "request": "Test the Support Router in test mode with this email: 'My order is late'.",
-      "situation": "Test mode is on for Support Router with 1 of 5 runs used and every test connection set. The last step replies by email.",
-      "playbooks": [
-        "use-test-mode"
-      ],
-      "required": [
-        [
-          "task.create-test"
-        ]
-      ],
-      "forbidden": [
-        "task.create-draft",
-        "task.create-live"
-      ],
-      "must_stop_before": [
-        "task.create-test"
       ]
     }
   ]

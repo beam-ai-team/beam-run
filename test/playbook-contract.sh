@@ -134,9 +134,11 @@ bt connections summary agent-1; expect 0 "summary failed"
 [ "$(row mcp_integration test testConnection)" = '"not settable yet (INT-11779)"' ] || fail "MCP test connection note missing"
 [ "$(row mcp_integration test usesLiveInTest)" = true ] && [ "$(row mcp_integration test missing)" = false ] || fail "MCP rows must use live in test and not count as missing"
 [ "$(row step_tool live missing)" = false ] || fail "a connected live step was reported missing"
+bt connections options agent-1 --node n-draft-mail; expect 0 "connections options failed"
+[ "$(field mode)" = test ] && [ "$(field nextStep)" = "beam connections set agent-1 --node n-draft-mail --mode test --connection conn-gmail-3" ] || fail "connections options must default to test and suggest a non-live connection: $(cat "$tm/out")"
 ok "missing-connection rules: separate test connections, exact next steps, MCP noted not counted"
 
-: > "$tm/fake/mints"; : > "$tm/fake/connections"; rm -f "$tm/fake/lastpatch"
+: > "$tm/fake/mints"; : > "$tm/fake/connections"
 params() { python3 -c 'import json,sys,urllib.request
 g=json.load(urllib.request.urlopen(urllib.request.Request(sys.argv[1]+"/agent-graphs/agent-1?graphId="+sys.argv[2],headers={"x-api-key":"test-key"})))["graph"]
 n=[n for n in g["nodes"] if n["id"]==sys.argv[3]][0]
@@ -146,7 +148,6 @@ mail_before="$(params g-draft n-draft-mail)"; llm_before="$(params g-draft n-dra
 bt connections set agent-1 --node n-draft-mail --mode test --connection conn-gmail-2; expect 0 "setting a step test connection failed"
 [ "$(wc -l < "$tm/fake/mints" | tr -d ' ')" = 1 ] || fail "one command minted more than one Bearer token"
 bt connections set agent-1 --node n-draft-llm --tool tool-slack --mode test --connection conn-slack-2; expect 0 "setting an LLM-step tool test connection failed"
-[ ! -e "$tm/fake/lastpatch" ] || fail "connections set still sends the whole node through update-node"
 [ "$(cat "$tm/fake/connections")" = '{"connectionId": "conn-gmail-2", "mode": "test"}
 {"connectionId": "conn-slack-2", "mode": "test", "toolConfigurationId": "tool-slack"}' ] || fail "connections set sent more than the connection field: $(cat "$tm/fake/connections")"
 [ "$(params g-draft n-draft-mail)" = "$mail_before" ] && [ "$(params g-draft n-draft-llm)" = "$llm_before" ] || fail "setting a connection changed input params or output examples"
@@ -163,7 +164,6 @@ bt connections set agent-1 --node n-live-mail --mode live --connection conn-gmai
 [ "$(field after.integrationProviderId)" = conn-gmail-2 ] && [ "$(field draftUpdated)" = True ] && [ "$(field nextPublishReverts)" = False ] && [ "$(field draftNodeId)" = n-draft-mail ] || fail "the live change was not mirrored to the draft"
 [ "$(wc -l < "$tm/fake/connections" | tr -d ' ')" = 2 ] && [ "$(sort -u "$tm/fake/connections")" = '{"connectionId": "conn-gmail-2", "mode": "live"}' ] || fail "the live change and its draft mirror must each send only the live connection"
 bt connections set agent-1 --node n-live-mail --mode live --connection conn-gmail-1 --confirm-live; expect 0 "restoring the live connection failed"
-[ ! -e "$tm/fake/lastpatch" ] || fail "a live connection change used the full-node update"
 ok "connections set sends only the connection field, re-reads it, and leaves params, output examples and live connections alone"
 
 bt test-mode start agent-1 --max-runs 3 --trigger-connection trig-1=conn-gmail-2; expect 0 "test mode start failed"
@@ -177,11 +177,7 @@ before="$(posts)"
 bt test-mode replay agent-1 --task past-mail --task past-chat --task past-other; expect 2 "more replay rows than runs left must be refused before starting"
 [ "$(posts)" = "$before" ] && [ "$(field code)" = validation_error ] || fail "a replay over the runs left started a task"
 grep -q '2 tasks to replay but only 1 of 3 test runs remain' "$tm/out" || fail "the replay refusal does not name the rows and runs left"
-bt tasks test agent-1 --input hello; expect 2 "beam tasks test must refuse test-mode flags"
-bt tasks test agent-1 "plain draft"; expect 0 "the draft test form stopped working"
-grep -q 'draft run on LIVE connections' "$tm/err" && grep -q 'beam test-mode run agent-1' "$tm/err" || fail "the draft run does not warn that it uses live connections"
-python3 -c 'import json,sys; b=json.load(open(sys.argv[1])); sys.exit(0 if b.get("isDraftTask") is True and "isTestTask" not in b else 1)' "$tm/fake/lasttask" || fail "the positional form is no longer a draft test"
-ok "test mode start, runs used and remaining, and the draft-test form side by side"
+ok "test mode start, runs used and remaining"
 
 bt connections set agent-1 --trigger trig-1 --mode test --connection conn-gmail-3; expect 2 "a trigger restart must ask for confirmation"
 [ "$(field code)" = confirmation_required ] && grep -q 'runsUsed resets from 2 to 0' "$tm/out" || fail "the restart warning does not name the reset"

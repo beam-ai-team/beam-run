@@ -3461,7 +3461,7 @@ def _set_command(agent_id, mode, connection_id, node_id=None, tool_id=None, trig
     return f"beam connections set {agent_id} {target} --mode {mode} --connection {connection_id}"
 
 
-def _finish_row(row, agent_id, mode, connections, integration_name, missing, reason=None):
+def _finish_row(row, agent_id, mode, connections, integration_name, missing, reason=None, test_on=False):
     live_id = (row.get("liveConnection") or {}).get("id")
     candidates = _candidates(connections, row["integrationId"], live_id)
     row["candidates"] = candidates
@@ -3475,14 +3475,15 @@ def _finish_row(row, agent_id, mode, connections, integration_name, missing, rea
         row["nextStep"] = f"beam://integrations?provider={integration_name or row['integrationId']}"
         if candidates:
             row["note"] = ONLY_LIVE_NOTE
+    elif row["kind"] == "trigger" and mode == "test" and test_on:
+        row["nextStep"] = _set_command(agent_id, "test", suggested, trigger_id=row["triggerId"])
     elif row["kind"] == "trigger" and mode == "test":
-        row["nextStep"] = row.pop("_trigger_next")(suggested)
+        row["nextStep"] = f"beam test-mode start {agent_id} --trigger-connection {row['triggerId']}={suggested}"
     elif row["kind"] == "trigger":
         row["nextStep"] = f"beam://agent.flow?agentId={agent_id}"
     else:
         row["nextStep"] = _set_command(agent_id, mode, suggested, node_id=row["nodeId"],
                                        tool_id=row.get("toolId"))
-    row.pop("_trigger_next", None)
     return row
 
 
@@ -3619,11 +3620,7 @@ def _trigger_rows(agent_id, live_triggers, test_triggers, test_on, connections, 
                 reason = None if not missing else (
                     "no test connection for this trigger in the running test session" if test_on
                     else "test mode is off; a trigger's test connection is set when test mode starts")
-                trigger_id = trigger["id"]
-                row["_trigger_next"] = (
-                    (lambda conn, t=trigger_id: _set_command(agent_id, "test", conn, trigger_id=t)) if test_on
-                    else (lambda conn, t=trigger_id: f"beam test-mode start {agent_id} --trigger-connection {t}={conn}"))
-            rows.append(_finish_row(row, agent_id, mode, connections, identifier, missing, reason))
+            rows.append(_finish_row(row, agent_id, mode, connections, identifier, missing, reason, test_on))
     return rows
 
 
@@ -3753,20 +3750,12 @@ def cmd_connections_options(api, args):
         if not args.node:
             raise BeamError("Pass --node <nodeId> (and --tool for an LLM-step tool) or --trigger <triggerId>.",
                             code="validation_error")
-        mode = args.mode or _node_mode(api, args.agent_id, args.node)
+        mode = args.mode or "test"
         _, node, tool_config = _resolve_target(api, args.agent_id, mode, args.node, args.tool)
         integration_id, integration_name, _ = _tool_integration(tool_config)
         target = {"nodeId": args.node, "toolId": args.tool, "stepName": node.get("objective"), "mode": mode}
         live_id = tool_config.get("integrationProviderId")
-    rows = api.t_get(f"/integration-provider/get-connections/{integration_id}")
-    candidates = []
-    for row in rows if isinstance(rows, list) else []:
-        if isinstance(row, dict) and row.get("id"):
-            candidates.append({"id": row["id"], "name": row.get("connectionName") or row.get("integration"),
-                               "isDefault": bool(row.get("isDefault"))})
-    candidates.sort(key=lambda c: (not c["isDefault"], (c["name"] or "").lower()))
-    for candidate in candidates:
-        candidate["isLive"] = candidate["id"] == live_id
+    candidates = _candidates(_active_connections(api), integration_id, live_id)
     result = {"agentId": args.agent_id, **target, "integrationId": integration_id,
               "integrationName": integration_name, "candidates": candidates}
     mode = target.get("mode", "test")
@@ -3779,17 +3768,6 @@ def cmd_connections_options(api, args):
     elif suggested is None:
         result["note"] = ONLY_LIVE_NOTE
     return result
-
-
-def _node_mode(api, agent_id, node_id):
-    live_id, draft_id = _agent_graph_ids(api, agent_id)
-    if _find_node(_load_graph(api, agent_id, draft_id), node_id):
-        return "test"
-    if _find_node(_load_graph(api, agent_id, live_id), node_id):
-        return "live"
-    raise BeamError(f"Node {node_id} is in neither the draft nor the published graph of agent {agent_id}.",
-                    code="validation_error",
-                    next_step=f"Use node ids from `beam connections summary {agent_id}`.")
 
 
 def _tool_in(graph, node_id, tool_id):
