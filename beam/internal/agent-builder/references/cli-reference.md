@@ -19,7 +19,8 @@ beam agent-builder <command> [args]
 - **Output**: every command prints one JSON object to **stdout**. Success →
   `{"ok": true, "command": "...", ...}`. Failure → `{"ok": false, "code": "...",
   "error": "...", "next": "..."}` plus a categorical exit code: 1 internal,
-  2 validation, 3 auth, 5 network. `next` names the command to run.
+  2 validation, 3 auth, 5 network (test mode and connections add more; see
+  [Exit codes](#exit-codes)). `next` names the command to run.
   Progress and diagnostics go to **stderr** — never merge them into stdout
   with `2>&1` before parsing, or the JSON will not parse.
 - **Files**: structured inputs (specs, node payloads, trigger configs) are
@@ -327,9 +328,20 @@ Pick nodes that: (a) do the core reasoning or extraction, (b) have the most comp
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success (`"ok": true`). |
-| `1` | A handled error — see the `error` field in the JSON output. |
-| `2` | No command given (help is printed). |
-| `130` | Interrupted. |
+| Code | `code` | Meaning |
+|------|--------|---------|
+| `0` | — | Success (`"ok": true`). |
+| `1` | `internal_error` | A handled error — see the `error` field in the JSON output. |
+| `2` | `validation_error`, `bad_request`, `confirmation_required` | Bad input, Beam rejected the request (400), or the command needs an explicit confirmation flag. No command given also exits 2. |
+| `3` | `auth_error` | Not signed in, or the key is no longer accepted. |
+| `4` | `not_found` | The agent, graph, node or connection does not exist here. |
+| `5` | `network_error`, `api_error` | Beam could not be reached, or a server error. |
+| `6` | `test_mode_active` | Test mode is already on; stop it before starting again with other options. |
+| `7` | `test_mode_inactive` | Test mode is off. |
+| `8` | `test_runs_exhausted` | Every test run of the session is used; start a new session. |
+| `9` | `permission_denied` | The role may not do this to this agent (403). |
+| `10` | `connections_missing` | `connections missing` found missing connections; the rows are in the output. |
+| `130` | — | Interrupted. |
+
+Codes 4 and 6–10 come only from the test-mode, test-task and connections commands; the
+others keep reporting an API failure as `api_error` (exit 5). Every failure carries `next`.

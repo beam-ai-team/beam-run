@@ -1096,6 +1096,20 @@ Usage:
   beam agents delete <id> --confirm <id>
                               delete an agent (irreversible; requires exact confirmation)
   beam tasks test <id> <q>   run a task against the agent's draft graph
+  beam test-mode start <agentId> [--max-runs N] [--trigger-connection triggerId=connId]... [--tool-connection nodeOrToolId=connId]...
+  beam test-mode stop <agentId>
+  beam test-mode status <agentId>
+                             turn test mode on/off; show runs used and remaining
+  beam test-mode run <agentId> --input <q> [--input <q>...] | --inputs-file <file.json>
+                             start test-mode runs (test mode must be on; each uses one run)
+  beam test-mode replay <agentId> --task <taskId> [--task <taskId>...] | --tasks-file <file.json> [--dry-run]
+                             replay past tasks' stored inputs as test-mode runs (--dry-run starts nothing)
+  beam connections summary <agentId> [--mode live|test]
+  beam connections missing <agentId> [--mode live|test]
+                             live connections come from the published graph, test ones from the draft
+  beam connections options <agentId> --node <nodeId> [--tool <toolId>] | --trigger <triggerId>
+  beam connections set <agentId> --node <nodeId> [--tool <toolId>] | --trigger <triggerId> --mode live|test --connection <connectionId> [--confirm-live|--confirm-restart]
+                             --connection is the connection row id (integrationProviderId)
   beam tasks list [flags]    list/search workspace tasks
   beam tasks create <id> <q> [--draft]
                              run a live task (or a draft test with --draft)
@@ -3058,6 +3072,20 @@ main() {
         update-tool) cmd_tasks_update_tool "$@" ;;
         submit-input) cmd_tasks_submit_input "$@" ;;
         *) die "validation_error" "usage: beam tasks <list|statuses|agents|latest|create|test|get|retry|approve|reject|abort|delete|rate|cancel-wait|update-tool|submit-input>" 2 ;;
+      esac ;;
+    test-mode)
+      prepare_scoped_session
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        start|stop|status|run|replay) cmd_agent_builder "test-mode-$sub" "$@" ;;
+        *) die "validation_error" "usage: beam test-mode <start|stop|status|run|replay> <agentId>" 2 ;;
+      esac ;;
+    connections)
+      prepare_scoped_session
+      sub="${1:-}"; shift || true
+      case "$sub" in
+        summary|missing|set|options) cmd_agent_builder "connections-$sub" "$@" ;;
+        *) die "validation_error" "usage: beam connections <summary|missing|options|set> <agentId>" 2 ;;
       esac ;;
     inbox)
       prepare_scoped_session

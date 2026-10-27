@@ -762,6 +762,105 @@
       "forbidden": [
         "workspace.create"
       ]
+    },
+    {
+      "id": "turn-on-test-mode",
+      "request": "Turn on test mode for the Support Router with 5 runs and use the Test inbox Gmail connection.",
+      "situation": "Support Router has a draft and a published version. Its Gmail step has no test connection; the workspace has a Gmail connection called Test inbox. Test mode is off.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "testmode.status"
+        ],
+        [
+          "connection.missing",
+          "connection.summary"
+        ],
+        [
+          "testmode.start"
+        ]
+      ],
+      "forbidden": [
+        "task.create-draft",
+        "task.create-live",
+        "graph.publish"
+      ],
+      "must_stop_before": [
+        "testmode.start",
+        [
+          "connection.set"
+        ]
+      ],
+      "order": [
+        [
+          [
+            "connection.missing",
+            "connection.summary"
+          ],
+          [
+            "testmode.start"
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "which-connections-missing",
+      "request": "Which connections are missing on the Invoice Matcher?",
+      "situation": "Invoice Matcher has a published and a draft version. Two draft steps have no test connection and the live Slack step has no connection.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "connection.missing",
+          "connection.summary"
+        ]
+      ],
+      "forbidden": [
+        "connection.set",
+        "testmode.start",
+        "testmode.stop",
+        "task.create-test",
+        "task.create-draft"
+      ]
+    },
+    {
+      "id": "replay-past-tasks-in-test-mode",
+      "request": "Replay yesterday's three failed Invoice Intake tasks in test mode so I can see if the draft handles them.",
+      "situation": "Test mode is on for Invoice Intake with 1 of 10 runs used and every test connection set. The three failed tasks came from its Gmail trigger, so their stored input has the email and its attachments and no query. One of the ids the user pasted belongs to a different agent.",
+      "playbooks": [
+        "use-test-mode"
+      ],
+      "required": [
+        [
+          "testmode.status"
+        ],
+        [
+          "task.replay-test"
+        ]
+      ],
+      "forbidden": [
+        "task.create-live",
+        "task.create-draft",
+        "task.retry",
+        "testmode.start",
+        "graph.publish"
+      ],
+      "order": [
+        [
+          [
+            "testmode.status"
+          ],
+          [
+            "task.replay-test"
+          ]
+        ]
+      ],
+      "must_stop_before": [
+        "task.replay-test"
+      ]
     }
   ]
 }

@@ -119,10 +119,14 @@ class BeamError(Exception):
     shell CLI, so an agent can branch the same way against either tool.
     """
 
-    def __init__(self, message, code="internal_error", next_step=None):
+    def __init__(self, message, code="internal_error", next_step=None, status=None,
+                 api_message=None, extra=None):
         super().__init__(message)
         self.code = code
         self.next_step = next_step
+        self.status = status
+        self.api_message = api_message
+        self.extra = extra or {}
 
 
 # code -> process exit status (mirrors bin/beam: 1 internal, 2 validation,
@@ -130,9 +134,17 @@ class BeamError(Exception):
 EXIT_CODES = {
     "internal_error": 1,
     "validation_error": 2,
+    "bad_request": 2,
+    "confirmation_required": 2,
     "auth_error": 3,
+    "not_found": 4,
     "network_error": 5,
     "api_error": 5,
+    "test_mode_active": 6,
+    "test_mode_inactive": 7,
+    "test_runs_exhausted": 8,
+    "permission_denied": 9,
+    "connections_missing": 10,
 }
 
 
@@ -268,18 +280,21 @@ def _http(method, url, headers, body=None, params=None, timeout=HTTP_TIMEOUT):
         except Exception:
             pass
         path = urllib.parse.urlparse(url).path
+        api_message = _api_error_message(detail)
         if exc.code in (401, 403):
             raise BeamError(
                 f"Authentication failed ({exc.code}) on {path}. "
                 f"Your Beam API key may be invalid or expired. {detail}",
                 code="auth_error",
                 next_step="Run `beam login` and approve in the browser, then retry.",
+                status=exc.code, api_message=api_message,
             )
         raise BeamError(
             f"{method} {path} failed ({exc.code}): {detail}",
             code="api_error",
             next_step="Check the request payload against references/spec-format.md; "
                       "if it looks right, run `beam doctor`.",
+            status=exc.code, api_message=api_message,
         )
     except urllib.error.URLError as exc:
         raise BeamError(
@@ -296,6 +311,19 @@ def _http(method, url, headers, body=None, params=None, timeout=HTTP_TIMEOUT):
         return json.loads(text)
     except json.JSONDecodeError:
         return {"raw": text}
+
+
+def _api_error_message(detail):
+    try:
+        body = json.loads(detail)
+    except (TypeError, ValueError):
+        return (detail or "").strip() or None
+    if not isinstance(body, dict):
+        return None
+    message = body.get("message") or body.get("error")
+    if isinstance(message, list):
+        message = "; ".join(str(item) for item in message)
+    return str(message) if message else None
 
 
 def _api_headers(api_key, workspace_id):
@@ -2276,7 +2304,7 @@ def cmd_deploy(api, args):
                 "preferredModel": integ.get("preferred_model") or node_model,
                 "requiresConsent": integ.get("requires_consent", False),
                 "isMemoryTool": False, "isBackgroundTool": False,
-                "isBatchExecutionEnabled": False, "integrationProviderId": None,
+                "isBatchExecutionEnabled": False,
                 "inputParams": clean_params,
                 "outputParams": integ.get("output_params", []) or [],
             },
@@ -2412,7 +2440,7 @@ def cmd_attach_tool(api, args):
             "preferredModel": tc.get("preferredModel"),
             "requiresConsent": tc.get("requiresConsent", False),
             "isMemoryTool": False, "isBackgroundTool": False,
-            "isBatchExecutionEnabled": False, "integrationProviderId": None,
+            "isBatchExecutionEnabled": False,
             "inputParams": [_clean_integration_param(ip)
                             for ip in tc.get("inputParams", []) or []],
             "outputParams": tc.get("outputParams", []) or [],
@@ -2761,7 +2789,7 @@ def cmd_add_node(api, args):
                              "preferredModel": integration.get("preferred_model"),
                              "requiresConsent": integration.get("requires_consent", False),
                              "isMemoryTool": False, "isBackgroundTool": False,
-                             "isBatchExecutionEnabled": False, "integrationProviderId": None,
+                             "isBatchExecutionEnabled": False,
                              "inputParams": clean,
                              "outputParams": integration.get("output_params", []) or []}}})
             steps.append({"step": "attach_integration", "status": "ok",
@@ -3258,6 +3286,910 @@ def cmd_delete_webhook(api, args):
     return {"deleted": True, "agentId": args.agent_id}
 
 
+MIN_TEST_RUNS = 2
+MAX_TEST_RUNS = 200
+DEFAULT_TEST_RUNS = 2
+MCP_TEST_NOTE = "not settable yet (INT-11779)"
+TEST_MODE_WARNING = ("Test runs can still reach real integrations until INT-11779 enforces "
+                     "test-only connections; a step whose test connection is missing may use its live one.")
+
+
+def _translate_api_error(exc, agent_id):
+    status = getattr(exc, "status", None)
+    if status is None or exc.code not in ("api_error", "auth_error"):
+        return exc
+    message = getattr(exc, "api_message", None) or str(exc)
+    lowered = message.lower()
+    if status == 403:
+        return BeamError(
+            f"Beam refused this action for your role: {message}",
+            code="permission_denied", status=status, api_message=message,
+            next_step="Ask a workspace admin for the agent edit and run permissions, or for access to this agent.")
+    if status == 401:
+        return exc
+    if "already active" in lowered:
+        return BeamError(
+            f"Test mode is already on for agent {agent_id}.", code="test_mode_active",
+            status=status, api_message=message,
+            next_step=f"Check it with `beam test-mode status {agent_id}`; to change its options run "
+                      f"`beam test-mode stop {agent_id}` first.")
+    if "exhausted" in lowered:
+        return BeamError(
+            message, code="test_runs_exhausted",
+            status=status, api_message=message,
+            next_step=f"Start a new session with `beam test-mode start {agent_id} --max-runs <2-200>`.")
+    if "not active" in lowered or "no active test session" in lowered:
+        return BeamError(
+            f"Test mode is off for agent {agent_id}.", code="test_mode_inactive",
+            status=status, api_message=message,
+            next_step=f"Turn it on with `beam test-mode start {agent_id}`.")
+    if status == 404:
+        return BeamError(f"Not found: {message}", code="not_found", status=status, api_message=message,
+                         next_step="Check the agent, node and connection ids with `beam connections summary <agentId>`.")
+    if status in (400, 422):
+        return BeamError(f"Beam rejected the request: {message}", code="bad_request",
+                         status=status, api_message=message,
+                         next_step="Fix the value named in the error and retry.")
+    return exc
+
+
+def _with_api_errors(handler):
+    def run(api, args):
+        try:
+            return handler(api, args)
+        except BeamError as exc:
+            raise _translate_api_error(exc, getattr(args, "agent_id", None)) from exc
+    return run
+
+
+def _test_mode_status(api, agent_id):
+    raw = api.t_get(f"/agents/{agent_id}/test-mode/status")
+    used = raw.get("currentTestRuns") or 0
+    max_runs = raw.get("maxTestRuns")
+    enabled = bool(raw.get("isTestModeEnabled"))
+    remaining = max(max_runs - used, 0) if isinstance(max_runs, int) else None
+    return {
+        "agentId": agent_id,
+        "testMode": "on" if enabled else "off",
+        "runsUsed": used,
+        "maxRuns": max_runs,
+        "runsRemaining": remaining if enabled else 0,
+        "startedAt": raw.get("testStartedAt"),
+        "exhausted": (not enabled) and isinstance(max_runs, int) and used >= max_runs,
+    }
+
+
+def _require_test_mode_on(status):
+    agent_id = status["agentId"]
+    if status["testMode"] == "on":
+        return
+    if status["exhausted"]:
+        raise BeamError(
+            f"All {status['maxRuns']} test runs for agent {agent_id} are used, so test mode switched off.",
+            code="test_runs_exhausted", extra={"testMode": status},
+            next_step=f"Start a new session with `beam test-mode start {agent_id} --max-runs <2-200>`.")
+    raise BeamError(f"Test mode is off for agent {agent_id}.", code="test_mode_inactive",
+                    extra={"testMode": status},
+                    next_step=f"Turn it on with `beam test-mode start {agent_id}`.")
+
+
+def _agent_graph_ids(api, agent_id):
+    history = api.get(f"/agent-graphs/history/{agent_id}")
+    graphs = history.get("graphs") if isinstance(history, dict) else history
+    graphs = graphs if isinstance(graphs, list) else []
+    live = next((g.get("id") for g in graphs if g.get("isActive")), None)
+    draft = next((g.get("id") for g in graphs if g.get("isDraft")), None)
+    return live, draft
+
+
+def _load_graph(api, agent_id, graph_id):
+    if not graph_id:
+        return None
+    data = api.get(f"/agent-graphs/{agent_id}", params={"graphId": graph_id})
+    graph = data.get("graph") if isinstance(data, dict) else None
+    return graph if isinstance(graph, dict) and graph.get("id") == graph_id else None
+
+
+def _active_connections(api):
+    data = api.t_get("/integration-provider/connected-integrations")
+    rows = data.get("connectedIntegrations") if isinstance(data, dict) else data
+    connections = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not row.get("id"):
+            continue
+        if row.get("status") and str(row.get("status")).lower() != "active":
+            continue
+        connections[row["id"]] = {
+            "id": row["id"],
+            "name": row.get("connectionName") or row.get("integration"),
+            "integrationId": row.get("integrationId"),
+            "integration": row.get("integration"),
+            "isDefault": bool(row.get("isDefault")),
+        }
+    return connections
+
+
+ONLY_LIVE_NOTE = ("The only connection for this integration is the live one; ask the user to add a "
+                  "separate test connection in Beam.")
+
+
+def _candidates(connections, integration_id, live_id=None):
+    found = [c for c in connections.values() if integration_id and c["integrationId"] == integration_id]
+    found.sort(key=lambda c: (not c["isDefault"], (c["name"] or "").lower()))
+    return [{"id": c["id"], "name": c["name"], "isDefault": c["isDefault"], "isLive": c["id"] == live_id}
+            for c in found]
+
+
+def _suggest(candidates, mode):
+    if mode == "test":
+        return next((c["id"] for c in candidates if not c["isLive"]), None)
+    return candidates[0]["id"] if candidates else None
+
+
+def _connection_ref(connections, provider_id):
+    if not provider_id:
+        return None
+    known = connections.get(provider_id)
+    if known:
+        return {"id": provider_id, "name": known["name"]}
+    return {"id": provider_id, "name": None, "inactive": True}
+
+
+def _tool_integration(tool_config):
+    original = tool_config.get("originalTool") or {}
+    integration = original.get("integration") or {}
+    integration_id = original.get("integrationId")
+    name = integration.get("systemIntegrationIdentifier")
+    required = original.get("isIntegrationRequired")
+    if not isinstance(required, bool):
+        required = bool(integration.get("systemIntegrationProvider"))
+    return integration_id, name, required
+
+
+def _tool_kind(tool_config, default):
+    original = tool_config.get("originalTool") or {}
+    name = tool_config.get("toolFunctionName") or ""
+    if name.startswith("CustomApiTool_") or original.get("type") == "custom_integration_tool":
+        return "custom_api"
+    return default
+
+
+def _set_command(agent_id, mode, connection_id, node_id=None, tool_id=None, trigger_id=None):
+    target = f"--trigger {trigger_id}" if trigger_id else f"--node {node_id}"
+    if tool_id:
+        target += f" --tool {tool_id}"
+    return f"beam connections set {agent_id} {target} --mode {mode} --connection {connection_id}"
+
+
+def _finish_row(row, agent_id, mode, connections, integration_name, missing, reason=None, test_on=False):
+    live_id = (row.get("liveConnection") or {}).get("id")
+    candidates = _candidates(connections, row["integrationId"], live_id)
+    row["candidates"] = candidates
+    row["missing"] = missing
+    if reason:
+        row["reason"] = reason
+    suggested = _suggest(candidates, mode)
+    if not missing:
+        row["nextStep"] = None
+    elif suggested is None:
+        row["nextStep"] = f"beam://integrations?provider={integration_name or row['integrationId']}"
+        if candidates:
+            row["note"] = ONLY_LIVE_NOTE
+    elif row["kind"] == "trigger" and mode == "test" and test_on:
+        row["nextStep"] = _set_command(agent_id, "test", suggested, trigger_id=row["triggerId"])
+    elif row["kind"] == "trigger" and mode == "test":
+        row["nextStep"] = f"beam test-mode start {agent_id} --trigger-connection {row['triggerId']}={suggested}"
+    elif row["kind"] == "trigger":
+        row["nextStep"] = f"beam://agent.flow?agentId={agent_id}"
+    else:
+        row["nextStep"] = _set_command(agent_id, mode, suggested, node_id=row["nodeId"],
+                                       tool_id=row.get("toolId"))
+    return row
+
+
+def _tool_row(agent_id, mode, node, tool_config, kind, connections, tool_id=None):
+    integration_id, integration_name, required = _tool_integration(tool_config)
+    live = _connection_ref(connections, tool_config.get("integrationProviderId"))
+    test = _connection_ref(connections, tool_config.get("testIntegrationProviderId"))
+    row = {
+        "nodeId": node.get("id"),
+        "stepName": node.get("objective") or node.get("customId") or node.get("id"),
+        "kind": kind,
+        "toolId": tool_id,
+        "toolName": tool_config.get("toolName") or tool_config.get("toolFunctionName"),
+        "integrationId": integration_id,
+        "integrationName": integration_name,
+        "mode": mode,
+        "liveConnection": live,
+        "testConnection": test,
+        "usesLiveInTest": False,
+        "required": required,
+    }
+    if tool_id is None:
+        row.pop("toolId")
+    if mode == "live":
+        missing = required and (live is None or live.get("inactive", False))
+        reason = None if not missing else ("connection is inactive or removed" if live else "no live connection")
+    else:
+        missing = test is None or test.get("inactive", False)
+        reason = None if not missing else ("test connection is inactive or removed" if test
+                                           else "no test connection set")
+        if missing and kind == "llm_tool":
+            row["usesLiveInTest"] = True
+            reason = "falls back to live until INT-11779"
+    return _finish_row(row, agent_id, mode, connections, integration_name, missing, reason)
+
+
+def _mcp_row(agent_id, mode, node, mcp, connections):
+    integration = mcp.get("integration") or {}
+    row = {
+        "nodeId": node.get("id"),
+        "stepName": node.get("objective") or node.get("customId") or node.get("id"),
+        "kind": "mcp_integration",
+        "toolId": mcp.get("id"),
+        "integrationId": mcp.get("integrationId"),
+        "integrationName": integration.get("name"),
+        "mode": mode,
+        "liveConnection": _connection_ref(connections, mcp.get("integrationProviderId")),
+        "testConnection": MCP_TEST_NOTE,
+        "usesLiveInTest": True,
+        "required": False,
+        "candidates": _candidates(connections, mcp.get("integrationId"), mcp.get("integrationProviderId")),
+        "missing": False,
+        "nextStep": None,
+    }
+    return row
+
+
+def _graph_rows(agent_id, mode, graph, connections):
+    rows = []
+    for node in (graph or {}).get("nodes") or []:
+        tool_config = node.get("toolConfiguration")
+        if isinstance(tool_config, dict) and _tool_integration(tool_config)[0]:
+            rows.append(_tool_row(agent_id, mode, node, tool_config,
+                                  _tool_kind(tool_config, "step_tool"), connections))
+        for tool in node.get("agentGraphNodeTools") or []:
+            if isinstance(tool, dict) and _tool_integration(tool)[0]:
+                rows.append(_tool_row(agent_id, mode, node, tool, _tool_kind(tool, "llm_tool"),
+                                      connections, tool_id=tool.get("id")))
+        for mcp in node.get("agentGraphNodeMcpIntegrations") or []:
+            if isinstance(mcp, dict):
+                rows.append(_mcp_row(agent_id, mode, node, mcp, connections))
+    return rows
+
+
+def _list_triggers(api, agent_id, test=False):
+    data = api.t_get(f"/agent-trigger/{agent_id}", params={"isTestTrigger": "true"} if test else None)
+    triggers = data if isinstance(data, list) else (data or {}).get("triggers", [])
+    return [t for t in triggers if isinstance(t, dict) and t.get("id")]
+
+
+def _is_integration_trigger(trigger):
+    config = trigger.get("configuration") or {}
+    return config.get("beamAction") != "Timer" and bool(config.get("integrationIdentifier"))
+
+
+def _trigger_integration(trigger):
+    data = trigger.get("integrationData") or {}
+    provider = trigger.get("integrationProvider") or {}
+    integration_id = data.get("id") or provider.get("integrationId")
+    name = (data.get("name") or (trigger.get("configuration") or {}).get("integrationIdentifier"))
+    return integration_id, name
+
+
+def _match_test_trigger(live, test_triggers):
+    config = live.get("configuration") or {}
+    for test in test_triggers:
+        test_config = test.get("configuration") or {}
+        if (test.get("agentGraphNodeId") == live.get("agentGraphNodeId")
+                and test_config.get("beamAction") == config.get("beamAction")
+                and test_config.get("integrationIdentifier") == config.get("integrationIdentifier")):
+            return test
+    return None
+
+
+def _trigger_rows(agent_id, live_triggers, test_triggers, test_on, connections, modes):
+    rows = []
+    for trigger in live_triggers:
+        if not _is_integration_trigger(trigger):
+            continue
+        integration_id, integration_name = _trigger_integration(trigger)
+        identifier = (trigger.get("configuration") or {}).get("integrationIdentifier") or integration_name
+        test_trigger = _match_test_trigger(trigger, test_triggers)
+        live = _connection_ref(connections, trigger.get("integrationProviderId"))
+        test = _connection_ref(connections, (test_trigger or {}).get("integrationProviderId"))
+        for mode in modes:
+            row = {
+                "nodeId": trigger.get("agentGraphNodeId"),
+                "stepName": trigger.get("title") or (trigger.get("configuration") or {}).get("beamActionTitle"),
+                "kind": "trigger",
+                "triggerId": trigger["id"],
+                "integrationId": integration_id,
+                "integrationName": integration_name,
+                "mode": mode,
+                "liveConnection": live,
+                "testConnection": test,
+                "usesLiveInTest": False,
+                "required": True,
+            }
+            if mode == "live":
+                missing = live is None or live.get("inactive", False)
+                reason = "no live connection" if missing else None
+            else:
+                missing = test is None or test.get("inactive", False)
+                reason = None if not missing else (
+                    "no test connection for this trigger in the running test session" if test_on
+                    else "test mode is off; a trigger's test connection is set when test mode starts")
+            rows.append(_finish_row(row, agent_id, mode, connections, identifier, missing, reason, test_on))
+    return rows
+
+
+def _connection_report(api, agent_id, modes):
+    live_id, draft_id = _agent_graph_ids(api, agent_id)
+    connections = _active_connections(api)
+    notes = []
+    rows = []
+    if "live" in modes:
+        live_graph = _load_graph(api, agent_id, live_id)
+        if live_graph is None:
+            notes.append("The agent has no published version, so there are no live connections to check.")
+        rows += _graph_rows(agent_id, "live", live_graph, connections)
+    if "test" in modes:
+        draft_graph = _load_graph(api, agent_id, draft_id)
+        if draft_graph is None:
+            notes.append("The agent has no draft, so test mode has nothing to run.")
+        rows += _graph_rows(agent_id, "test", draft_graph, connections)
+    status = _test_mode_status(api, agent_id)
+    live_triggers = _list_triggers(api, agent_id)
+    test_triggers = _list_triggers(api, agent_id, test=True) if status["testMode"] == "on" else []
+    rows += _trigger_rows(agent_id, live_triggers, test_triggers, status["testMode"] == "on",
+                          connections, [m for m in ("live", "test") if m in modes])
+    if any(r["kind"] == "mcp_integration" for r in rows):
+        notes.append("MCP integrations on LLM steps have no test connection yet (INT-11779); "
+                     "test runs use their live connection and they are not counted as missing.")
+    notes.append("Test connections are separate from live ones and are never copied from them.")
+    missing = [r for r in rows if r["missing"]]
+    return {
+        "agentId": agent_id,
+        "liveGraphId": live_id,
+        "testGraphId": draft_id,
+        "testMode": status,
+        "missingCount": len(missing),
+        "rows": rows,
+        "notes": notes,
+    }
+
+
+def _modes(value):
+    return ["live", "test"] if value in (None, "all") else [value]
+
+
+def cmd_connections_summary(api, args):
+    return _connection_report(api, args.agent_id, _modes(args.mode))
+
+
+def cmd_connections_missing(api, args):
+    report = _connection_report(api, args.agent_id, _modes(args.mode))
+    report["rows"] = [r for r in report["rows"] if r["missing"]]
+    if report["missingCount"]:
+        raise BeamError(
+            f"{report['missingCount']} connection(s) missing for agent {args.agent_id}.",
+            code="connections_missing", extra=report,
+            next_step="Run each row's nextStep: a `beam connections set` command, or the beam:// link "
+                      "when the workspace has no connection for that integration yet.")
+    return report
+
+
+def _find_node(graph, node_id):
+    return next((n for n in (graph or {}).get("nodes") or [] if n.get("id") == node_id), None)
+
+
+def _resolve_target(api, agent_id, mode, node_id, tool_id):
+    live_id, draft_id = _agent_graph_ids(api, agent_id)
+    graph_id = live_id if mode == "live" else draft_id
+    graph = _load_graph(api, agent_id, graph_id)
+    if graph is None:
+        raise BeamError(
+            f"Agent {agent_id} has no {'published' if mode == 'live' else 'draft'} graph.",
+            code="not_found",
+            next_step="Live connections are read from the published graph and test connections from the draft.")
+    node = _find_node(graph, node_id)
+    if node is None:
+        other = _load_graph(api, agent_id, draft_id if mode == "live" else live_id)
+        where = ("neither graph" if not _find_node(other, node_id)
+                 else "the draft (test) graph" if mode == "live" else "the published (live) graph")
+        raise BeamError(
+            f"Node {node_id} is not in the {'published (live)' if mode == 'live' else 'draft (test)'} graph; "
+            f"it is in {where}.",
+            code="validation_error",
+            next_step=f"Use node ids from `beam connections summary {agent_id} --mode {mode}`; "
+                      "node ids differ between the draft and the published graph.")
+    if tool_id:
+        tool = next((t for t in node.get("agentGraphNodeTools") or [] if t.get("id") == tool_id), None)
+        if tool is None:
+            if any(m.get("id") == tool_id for m in node.get("agentGraphNodeMcpIntegrations") or []):
+                raise BeamError("MCP integrations have no test connection yet (INT-11779), and their live "
+                                "connection is not set through this command.", code="validation_error",
+                                next_step=f"Open beam://agent.flow?agentId={agent_id} to change it.")
+            raise BeamError(f"Tool {tool_id} is not attached to node {node_id}.", code="validation_error",
+                            next_step=f"Use tool ids from `beam connections summary {agent_id}`.")
+        tool_config = tool
+    else:
+        tool_config = node.get("toolConfiguration")
+    if not isinstance(tool_config, dict) or not _tool_integration(tool_config)[0]:
+        raise BeamError(f"Node {node_id} has no integration tool{' ' + tool_id if tool_id else ''} to connect.",
+                        code="validation_error",
+                        next_step=f"Pick a row from `beam connections summary {agent_id}`; LLM-step tools need --tool.")
+    return graph, node, tool_config
+
+
+def _check_connection(connections, connection_id, integration_id, agent_id):
+    connection = connections.get(connection_id)
+    if connection is None:
+        raise BeamError(f"Connection {connection_id} is not an active connection in this workspace.",
+                        code="validation_error",
+                        next_step=f"List the choices with `beam connections options {agent_id} --node <nodeId>`.")
+    if integration_id and connection["integrationId"] != integration_id:
+        raise BeamError(
+            f"Connection {connection_id} ({connection['name']}) belongs to another integration.",
+            code="validation_error",
+            next_step=f"List the matching choices with `beam connections options {agent_id} --node <nodeId>`.")
+    return connection
+
+
+def cmd_connections_options(api, args):
+    if args.trigger:
+        trigger = next((t for t in _list_triggers(api, args.agent_id) if t["id"] == args.trigger), None)
+        if trigger is None or not _is_integration_trigger(trigger):
+            raise BeamError(f"Trigger {args.trigger} is not an integration trigger of agent {args.agent_id}.",
+                            code="validation_error")
+        integration_id, integration_name = _trigger_integration(trigger)
+        target = {"triggerId": args.trigger}
+        live_id = trigger.get("integrationProviderId")
+    else:
+        if not args.node:
+            raise BeamError("Pass --node <nodeId> (and --tool for an LLM-step tool) or --trigger <triggerId>.",
+                            code="validation_error")
+        mode = args.mode or "test"
+        _, node, tool_config = _resolve_target(api, args.agent_id, mode, args.node, args.tool)
+        integration_id, integration_name, _ = _tool_integration(tool_config)
+        target = {"nodeId": args.node, "toolId": args.tool, "stepName": node.get("objective"), "mode": mode}
+        live_id = tool_config.get("integrationProviderId")
+    candidates = _candidates(_active_connections(api), integration_id, live_id)
+    result = {"agentId": args.agent_id, **target, "integrationId": integration_id,
+              "integrationName": integration_name, "candidates": candidates}
+    mode = target.get("mode", "test")
+    suggested = _suggest(candidates, mode)
+    result["nextStep"] = (f"beam://integrations?provider={integration_name or integration_id}" if suggested is None
+                          else _set_command(args.agent_id, mode, suggested, node_id=args.node,
+                                            tool_id=args.tool, trigger_id=args.trigger))
+    if not candidates:
+        result["note"] = "The workspace has no active connection for this integration; add one in Beam first."
+    elif suggested is None:
+        result["note"] = ONLY_LIVE_NOTE
+    return result
+
+
+def _tool_in(graph, node_id, tool_id):
+    node = _find_node(graph, node_id)
+    if node is None:
+        return None
+    if tool_id:
+        return next((t for t in node.get("agentGraphNodeTools") or [] if t.get("id") == tool_id), None)
+    return node.get("toolConfiguration")
+
+
+def _write_connection(api, agent_id, graph, node_id, tool_id, field, connection_id):
+    current = _tool_in(graph, node_id, tool_id) or {}
+    before = {"integrationProviderId": current.get("integrationProviderId"),
+              "testIntegrationProviderId": current.get("testIntegrationProviderId")}
+    body = {"mode": "live" if field == "integrationProviderId" else "test", "connectionId": connection_id}
+    if tool_id:
+        body["toolConfigurationId"] = tool_id
+    api.patch_with_body(f"/agent-graphs/{agent_id}/nodes/{node_id}/connection", body)
+    saved = _tool_in(_load_graph(api, agent_id, graph["id"]), node_id, tool_id) or {}
+    after = {"integrationProviderId": saved.get("integrationProviderId"),
+             "testIntegrationProviderId": saved.get("testIntegrationProviderId")}
+    other = "testIntegrationProviderId" if field == "integrationProviderId" else "integrationProviderId"
+    if after[field] != connection_id:
+        raise BeamError("The connection did not persist; the re-read still shows the old value.",
+                        code="internal_error", extra={"before": before, "after": after},
+                        next_step=f"Re-run `beam connections summary {agent_id}` before retrying.")
+    if before[other] and after[other] != before[other]:
+        raise BeamError(f"Saving changed {other} from {before[other]} to {after[other]}; report this before "
+                        "making further changes.", code="internal_error", extra={"before": before, "after": after})
+    return before, after
+
+
+def _mirror_live_to_draft(api, agent_id, live_node, live_tool, tool_id, connection_id):
+    reverts = {"draftUpdated": False, "nextPublishReverts": True,
+               "warning": "The draft still has the old live connection, so the next publish reverts this change; "
+                          "set the same connection on the draft in Beam before publishing."}
+    _, draft_id = _agent_graph_ids(api, agent_id)
+    draft = _load_graph(api, agent_id, draft_id)
+    if draft is None:
+        return {"draftUpdated": False, "nextPublishReverts": False}
+    custom_id = live_node.get("customId")
+    matches = [n for n in draft.get("nodes") or [] if custom_id and n.get("customId") == custom_id]
+    if len(matches) != 1:
+        return reverts
+    draft_node = matches[0]
+    if tool_id:
+        tools = [t for t in draft_node.get("agentGraphNodeTools") or []
+                 if t.get("toolFunctionName") == live_tool.get("toolFunctionName")]
+        if len(tools) != 1:
+            return reverts
+        target, draft_tool_id = tools[0], tools[0].get("id")
+    else:
+        target, draft_tool_id = draft_node.get("toolConfiguration") or {}, None
+        if target.get("toolFunctionName") != live_tool.get("toolFunctionName"):
+            return reverts
+    result = {"draftUpdated": True, "draftGraphId": draft["id"], "draftNodeId": draft_node["id"],
+              "nextPublishReverts": False}
+    if target.get("integrationProviderId") == connection_id:
+        return result
+    try:
+        _write_connection(api, agent_id, draft, draft_node["id"], draft_tool_id, "integrationProviderId",
+                          connection_id)
+    except BeamError as exc:
+        return {**reverts, "draftError": str(exc)}
+    return result
+
+
+def _set_tool_connection(api, args, connections):
+    field = "integrationProviderId" if args.mode == "live" else "testIntegrationProviderId"
+    graph, node, tool_config = _resolve_target(api, args.agent_id, args.mode, args.node, args.tool)
+    integration_id, _, _ = _tool_integration(tool_config)
+    connection = _check_connection(connections, args.connection, integration_id, args.agent_id)
+    if args.mode == "live" and not args.confirm_live:
+        raise BeamError(
+            f"This changes the published agent: live runs of step '{node.get('objective') or args.node}' will use "
+            f"{connection['name']} ({connection['id']}) instead of {tool_config.get('integrationProviderId') or 'no connection'}, "
+            "and the draft gets the same connection so the next publish keeps it.",
+            code="confirmation_required",
+            extra={"currentLiveConnection": tool_config.get("integrationProviderId")},
+            next_step=_set_command(args.agent_id, "live", args.connection, node_id=args.node,
+                                   tool_id=args.tool) + " --confirm-live")
+    before, after = _write_connection(api, args.agent_id, graph, args.node, args.tool, field, args.connection)
+    result = {"updated": True, "verified": True, "agentId": args.agent_id, "graphId": graph["id"],
+              "nodeId": args.node, "toolId": args.tool, "mode": args.mode,
+              "connection": {"id": connection["id"], "name": connection["name"]},
+              "before": before, "after": after}
+    if args.mode == "live":
+        result.update(_mirror_live_to_draft(api, args.agent_id, node, tool_config, args.tool, args.connection))
+    return result
+
+
+def _restart_overrides(live_triggers, test_triggers, trigger_id, connection_id):
+    overrides = []
+    unmatched = list(test_triggers)
+    for live in live_triggers:
+        test = _match_test_trigger(live, unmatched)
+        if test is None and live["id"] != trigger_id:
+            continue
+        if test is not None:
+            unmatched.remove(test)
+        override = {"triggerId": live["id"]}
+        for key in ("integrationProviderId", "title", "prompt", "timezone", "onlyOnce",
+                    "userDefinedFrequency", "userDefinedFrequencyValue", "userDefinedFrequencyDateTime"):
+            if test is not None and test.get(key) is not None:
+                override[key] = test[key]
+        if live["id"] == trigger_id:
+            override["integrationProviderId"] = connection_id
+        overrides.append(override)
+    return overrides, unmatched
+
+
+def _set_trigger_connection(api, args, connections):
+    agent_id = args.agent_id
+    if args.mode == "live":
+        raise BeamError(
+            "A trigger's live connection also drives its event subscription, which this command cannot "
+            "re-create, so it is not changed from the CLI.", code="validation_error",
+            next_step=f"Change it in Beam: beam://agent.flow?agentId={agent_id}")
+    live_triggers = _list_triggers(api, agent_id)
+    trigger = next((t for t in live_triggers if t["id"] == args.trigger), None)
+    if trigger is None or not _is_integration_trigger(trigger):
+        raise BeamError(f"Trigger {args.trigger} is not an integration trigger of agent {agent_id}.",
+                        code="validation_error",
+                        next_step=f"Use trigger ids from `beam connections summary {agent_id}`.")
+    integration_id, _ = _trigger_integration(trigger)
+    connection = _check_connection(connections, args.connection, integration_id, agent_id)
+    status = _test_mode_status(api, agent_id)
+    if status["testMode"] != "on":
+        raise BeamError(
+            "A trigger's test connection is set when test mode starts, and test mode is off.",
+            code="test_mode_inactive", extra={"testMode": status},
+            next_step=f"beam test-mode start {agent_id} --trigger-connection {args.trigger}={args.connection}")
+    if not args.confirm_restart:
+        raise BeamError(
+            f"Changing a trigger's test connection restarts test mode: it stops the session and starts a new one "
+            f"with the same {status['maxRuns']} runs, and runsUsed resets from {status['runsUsed']} to 0.",
+            code="confirmation_required",
+            extra={"testMode": status, "warning": "runsUsed resets to 0"},
+            next_step=_set_command(agent_id, "test", args.connection, trigger_id=args.trigger) + " --confirm-restart")
+    test_triggers = _list_triggers(api, agent_id, test=True)
+    overrides, unmatched = _restart_overrides(live_triggers, test_triggers, args.trigger, args.connection)
+    if unmatched:
+        raise BeamError("Some test triggers could not be matched to a live trigger, so restarting would lose "
+                        "them; nothing was changed.", code="validation_error",
+                        extra={"unmatchedTestTriggers": [t["id"] for t in unmatched]},
+                        next_step=f"Open beam://agent.flow?agentId={agent_id} to change the test trigger.")
+    api.t_delete(f"/agents/{agent_id}/test-mode/stop")
+    body = {"maxTestRuns": status["maxRuns"], "testTriggerOverrides": overrides}
+    try:
+        api.t_post(f"/agents/{agent_id}/test-mode/start", body)
+    except BeamError as exc:
+        raise BeamError(f"Test mode was stopped but could not be started again: {exc}",
+                        code=_translate_api_error(exc, agent_id).code, extra={"restartBody": body},
+                        next_step=f"Test mode is now off. Start it again with `beam test-mode start {agent_id}` "
+                                  "and the same --trigger-connection values.") from exc
+    after = _test_mode_status(api, agent_id)
+    return {"updated": True, "restarted": True, "agentId": agent_id, "triggerId": args.trigger, "mode": "test",
+            "connection": {"id": connection["id"], "name": connection["name"]},
+            "runsUsedBefore": status["runsUsed"], "testMode": after, "triggerOverrides": overrides}
+
+
+def cmd_connections_set(api, args):
+    if bool(args.node) == bool(args.trigger):
+        raise BeamError("Pass exactly one of --node <nodeId> or --trigger <triggerId>.", code="validation_error")
+    if args.trigger and args.tool:
+        raise BeamError("--tool applies to a node, not a trigger.", code="validation_error")
+    if not args.connection:
+        raise BeamError("--connection <connectionId> is required; it is the connection row id (providerId).",
+                        code="validation_error")
+    connections = _active_connections(api)
+    if args.trigger:
+        return _set_trigger_connection(api, args, connections)
+    return _set_tool_connection(api, args, connections)
+
+
+def _parse_pairs(values, flag):
+    pairs = []
+    for value in values or []:
+        key, sep, connection = value.partition("=")
+        if not sep or not key or not connection:
+            raise BeamError(f"{flag} expects <id>=<connectionId>, got {value!r}.", code="validation_error")
+        pairs.append((key.strip(), connection.strip()))
+    return pairs
+
+
+def cmd_test_mode_start(api, args):
+    agent_id = args.agent_id
+    if not MIN_TEST_RUNS <= args.max_runs <= MAX_TEST_RUNS:
+        raise BeamError(f"--max-runs must be from {MIN_TEST_RUNS} to {MAX_TEST_RUNS}.", code="validation_error")
+    status = _test_mode_status(api, agent_id)
+    if status["testMode"] == "on":
+        raise BeamError(f"Test mode is already on for agent {agent_id}; its options are set only at start.",
+                        code="test_mode_active", extra={"testMode": status},
+                        next_step=f"Stop it with `beam test-mode stop {agent_id}`, then start it again.")
+    connections = _active_connections(api)
+    tool_pairs = _parse_pairs(args.tool_connection, "--tool-connection")
+    trigger_pairs = _parse_pairs(args.trigger_connection, "--trigger-connection")
+    tool_overrides = []
+    if tool_pairs:
+        _, draft_id = _agent_graph_ids(api, agent_id)
+        graph = _load_graph(api, agent_id, draft_id)
+        if graph is None:
+            raise BeamError(f"Agent {agent_id} has no draft graph to test.", code="not_found")
+        by_key = {}
+        for node in graph.get("nodes") or []:
+            tool_config = node.get("toolConfiguration")
+            if isinstance(tool_config, dict) and _tool_integration(tool_config)[0]:
+                by_key[node["id"]] = tool_config
+            for tool in node.get("agentGraphNodeTools") or []:
+                if isinstance(tool, dict) and tool.get("id") and _tool_integration(tool)[0]:
+                    by_key[tool["id"]] = tool
+        for key, connection_id in tool_pairs:
+            tool_config = by_key.get(key)
+            if tool_config is None:
+                raise BeamError(f"{key} is not a draft step or LLM-step tool with an integration.",
+                                code="validation_error",
+                                next_step=f"Use node or tool ids from `beam connections summary {agent_id} --mode test`.")
+            _check_connection(connections, connection_id, _tool_integration(tool_config)[0], agent_id)
+            tool_overrides.append({"agentToolConfigurationId": tool_config["id"],
+                                   "integrationProviderId": connection_id})
+    trigger_overrides = []
+    if trigger_pairs:
+        live_triggers = {t["id"]: t for t in _list_triggers(api, agent_id)}
+        for trigger_id, connection_id in trigger_pairs:
+            trigger = live_triggers.get(trigger_id)
+            if trigger is None or not _is_integration_trigger(trigger):
+                raise BeamError(f"{trigger_id} is not an integration trigger of agent {agent_id}.",
+                                code="validation_error")
+            _check_connection(connections, connection_id, _trigger_integration(trigger)[0], agent_id)
+            trigger_overrides.append({"triggerId": trigger_id, "integrationProviderId": connection_id})
+    body = {"maxTestRuns": args.max_runs, "testTriggerOverrides": trigger_overrides}
+    if tool_overrides:
+        body["toolOverrides"] = tool_overrides
+    api.t_post(f"/agents/{agent_id}/test-mode/start", body)
+    after = _test_mode_status(api, agent_id)
+    return {"started": True, "testMode": after, "toolOverrides": tool_overrides,
+            "triggerOverrides": trigger_overrides, "warning": TEST_MODE_WARNING,
+            "nextStep": f"beam connections missing {agent_id} --mode test"}
+
+
+def cmd_test_mode_stop(api, args):
+    before = _test_mode_status(api, args.agent_id)
+    if before["testMode"] != "on":
+        raise BeamError(f"Test mode is already off for agent {args.agent_id}; there is nothing to stop.",
+                        code="test_mode_inactive", extra={"testMode": before},
+                        next_step=f"Check it with `beam test-mode status {args.agent_id}`.")
+    api.t_delete(f"/agents/{args.agent_id}/test-mode/stop")
+    return {"stopped": True, "runsUsedBeforeStop": before["runsUsed"],
+            "testMode": _test_mode_status(api, args.agent_id)}
+
+
+def cmd_test_mode_status(api, args):
+    return {"testMode": _test_mode_status(api, args.agent_id)}
+
+
+def _test_inputs(args):
+    inputs = list(args.input or [])
+    if args.inputs_file:
+        data = _read_json_file(args.inputs_file, "Inputs file")
+        if not isinstance(data, list):
+            raise BeamError("The inputs file must be a JSON array of strings or {\"query\": ...} objects.",
+                            code="validation_error")
+        for item in data:
+            value = item.get("query") if isinstance(item, dict) else item
+            if not isinstance(value, str) or not value.strip():
+                raise BeamError("Every input must be a non-empty string.", code="validation_error")
+            inputs.append(value)
+    if not inputs:
+        raise BeamError("Pass --input <text> (repeatable) or --inputs-file <file.json>.", code="validation_error")
+    return inputs
+
+
+def _require_runs_left(status, count, noun, next_step):
+    if status["runsRemaining"] is not None and count > status["runsRemaining"]:
+        raise BeamError(
+            f"{count} {noun} but only {status['runsRemaining']} of {status['maxRuns']} test runs remain; "
+            "nothing was started.", code="validation_error", extra={"testMode": status},
+            next_step=next_step)
+
+
+def _start_test_tasks(api, agent_id, task_queries, row, started_key, pending):
+    started = []
+    for index, task_query in enumerate(task_queries):
+        try:
+            task = api.post("/agent-tasks", {"agentId": agent_id, "taskQuery": task_query,
+                                             "isTestTask": True})
+        except BeamError as exc:
+            translated = _translate_api_error(exc, agent_id)
+            translated.extra = {**translated.extra, started_key: started, "notStarted": pending[index:]}
+            raise translated from exc
+        if not isinstance(task, dict) or not task.get("id"):
+            raise BeamError("Beam did not create the test task; the agent may have no draft graph.",
+                            code="api_error", extra={started_key: started, "notStarted": pending[index:]},
+                            next_step=f"Check the draft with `beam agents get {agent_id}`.")
+        started.append(row(index, task))
+    return started
+
+
+def cmd_test_mode_run(api, args):
+    agent_id = args.agent_id
+    inputs = _test_inputs(args)
+    status = _test_mode_status(api, agent_id)
+    _require_test_mode_on(status)
+    _require_runs_left(status, len(inputs), "inputs",
+                       "Send fewer inputs, or stop and start test mode again with a higher --max-runs.")
+    tasks = _start_test_tasks(
+        api, agent_id, [{"query": text} for text in inputs],
+        lambda index, task: {"id": task["id"], "input": inputs[index], "status": task.get("status"),
+                             "customId": task.get("customId"), "url": task.get("taskUrl") or task.get("url")},
+        "tasks", inputs)
+    after = _test_mode_status(api, agent_id)
+    return {"agentId": agent_id, "tasks": tasks, "runsUsed": after["runsUsed"],
+            "runsRemaining": after["runsRemaining"], "maxRuns": after["maxRuns"],
+            "testMode": after["testMode"], "warning": TEST_MODE_WARNING}
+
+
+REPLAY_STRIPPED_KEYS = ("beamAgentOSTaskID", "beamAgentOSTaskId", "beamTaskId", "beamTaskTimestamp")
+
+
+def _replay_task_ids(args):
+    ids = list(args.task or [])
+    if args.tasks_file:
+        data = _read_json_file(args.tasks_file, "Tasks file")
+        if not isinstance(data, list):
+            raise BeamError("The tasks file must be a JSON array of task ids or {\"taskId\": ...} objects.",
+                            code="validation_error")
+        for item in data:
+            ids.append((item.get("taskId") or item.get("id")) if isinstance(item, dict) else item)
+    unique, seen = [], set()
+    for value in ids:
+        if not isinstance(value, str) or not value.strip():
+            raise BeamError("Every task id must be a non-empty string.", code="validation_error")
+        task_id = value.strip()
+        if task_id.lower() not in seen:
+            seen.add(task_id.lower())
+            unique.append(task_id)
+    if not unique:
+        raise BeamError("Pass --task <taskId> (repeatable) or --tasks-file <file.json>.", code="validation_error")
+    return unique
+
+
+def _replay_query(stored):
+    if isinstance(stored, str):
+        try:
+            stored = json.loads(stored)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(stored, dict):
+        return None
+    return {key: value for key, value in stored.items() if key not in REPLAY_STRIPPED_KEYS}
+
+
+def _replay_dataset(api, agent_id, task_ids):
+    rows, left_out = [], []
+    for task_id in task_ids:
+        try:
+            task = api.get(f"/agent-tasks/{task_id}")
+        except BeamError as exc:
+            if getattr(exc, "status", None) == 404:
+                left_out.append({"taskId": task_id, "reason": "not found in this workspace"})
+                continue
+            if getattr(exc, "status", None) == 403:
+                left_out.append({"taskId": task_id, "reason": "not accessible to your role"})
+                continue
+            if getattr(exc, "status", None) == 400:
+                left_out.append({"taskId": task_id, "reason": "is not a valid task id"})
+                continue
+            raise _translate_api_error(exc, agent_id) from exc
+        if not isinstance(task, dict) or not task.get("id"):
+            left_out.append({"taskId": task_id, "reason": "not found in this workspace"})
+            continue
+        graph = task.get("agentGraph") if isinstance(task.get("agentGraph"), dict) else {}
+        owner = graph.get("agentId")
+        if not isinstance(owner, str) or owner.lower() != agent_id.lower():
+            reason = f"belongs to agent {owner}, not {agent_id}" if owner else "its agent could not be read"
+            left_out.append({"taskId": task_id, "reason": reason})
+            continue
+        stored = task.get("originalTaskQuery")
+        if stored is None or (isinstance(stored, str) and not stored.strip()):
+            left_out.append({"taskId": task_id, "reason": "has no stored input (originalTaskQuery)"})
+            continue
+        task_query = _replay_query(stored)
+        if task_query is None:
+            left_out.append({"taskId": task_id, "reason": "its stored input (originalTaskQuery) is not a JSON object"})
+            continue
+        if not task_query:
+            left_out.append({"taskId": task_id, "reason": "its stored input is empty once the task ids are removed"})
+            continue
+        rows.append({"taskId": task_id, "taskQuery": task_query})
+    return rows, left_out
+
+
+def cmd_test_mode_replay(api, args):
+    agent_id = args.agent_id
+    task_ids = _replay_task_ids(args)
+    if args.dry_run:
+        rows, left_out = _replay_dataset(api, agent_id, task_ids)
+        return {"agentId": agent_id, "dryRun": True, "dataset": rows, "leftOut": left_out,
+                "runsNeeded": len(rows), "removedKeys": list(REPLAY_STRIPPED_KEYS),
+                "nextStep": (f"beam test-mode replay {agent_id} "
+                             + " ".join(f"--task {row['taskId']}" for row in rows)) if rows else None}
+    status = _test_mode_status(api, agent_id)
+    _require_test_mode_on(status)
+    rows, left_out = _replay_dataset(api, agent_id, task_ids)
+    if not rows:
+        raise BeamError("None of the tasks can be replayed; nothing was started.", code="validation_error",
+                        extra={"leftOut": left_out},
+                        next_step=f"Pick tasks of agent {agent_id} that have a stored input; check them with `beam tasks get <taskId>`.")
+    _require_runs_left(status, len(rows), "tasks to replay",
+                       "Replay fewer tasks, or stop and start test mode again with a higher --max-runs.")
+    source_ids = [row["taskId"] for row in rows]
+    started = _start_test_tasks(
+        api, agent_id, [row["taskQuery"] for row in rows],
+        lambda index, task: {"sourceTaskId": source_ids[index], "taskId": task["id"], "status": task.get("status")},
+        "started", source_ids)
+    after = _test_mode_status(api, agent_id)
+    return {"agentId": agent_id, "started": started, "leftOut": left_out, "runsUsed": after["runsUsed"],
+            "runsRemaining": after["runsRemaining"], "maxRuns": after["maxRuns"],
+            "testMode": after["testMode"], "warning": TEST_MODE_WARNING}
+
+
 # ===========================================================================
 # Small shared helpers for commands
 # ===========================================================================
@@ -3483,6 +4415,58 @@ def build_parser():
     s.add_argument("node_id", help="Node ID to test")
     s.add_argument("params", help='JSON object of input values, for example: {"message":"sample"}')
 
+    s = sub.add_parser("test-mode-start", help="Turn on test mode for an agent (runs its draft graph).")
+    s.add_argument("agent_id")
+    s.add_argument("--max-runs", type=int, default=DEFAULT_TEST_RUNS,
+                   help=f"Test runs allowed in this session, {MIN_TEST_RUNS}-{MAX_TEST_RUNS} (default {DEFAULT_TEST_RUNS}).")
+    s.add_argument("--trigger-connection", action="append", metavar="TRIGGER_ID=CONNECTION_ID",
+                   help="Test connection for an integration trigger. Repeatable.")
+    s.add_argument("--tool-connection", action="append", metavar="NODE_OR_TOOL_ID=CONNECTION_ID",
+                   help="Test connection for a draft step (node id) or LLM-step tool (tool id). Repeatable.")
+
+    s = sub.add_parser("test-mode-stop", help="Turn off test mode for an agent.")
+    s.add_argument("agent_id")
+
+    s = sub.add_parser("test-mode-status", help="Show test mode: on/off, runs used, runs remaining.")
+    s.add_argument("agent_id")
+
+    s = sub.add_parser("test-mode-run", help="Start test-mode runs (one per input) against the draft graph.")
+    s.add_argument("agent_id")
+    s.add_argument("--input", action="append", help="Task input. Repeatable.")
+    s.add_argument("--inputs-file", help="JSON array of inputs (strings or {\"query\": ...}).")
+
+    s = sub.add_parser("test-mode-replay", help="Replay past tasks of the agent as test-mode runs (one per task).")
+    s.add_argument("agent_id")
+    s.add_argument("--task", action="append", help="Past task id to replay. Repeatable.")
+    s.add_argument("--tasks-file", help="JSON array of task ids (strings or {\"taskId\": ...}).")
+    s.add_argument("--dry-run", action="store_true",
+                   help="Show the replay inputs and the tasks left out; start nothing (test mode not needed).")
+
+    for name, text in (("connections-summary", "List every live and test connection of an agent."),
+                       ("connections-missing", "List only the missing connections; exits 10 when any are.")):
+        s = sub.add_parser(name, help=text)
+        s.add_argument("agent_id")
+        s.add_argument("--mode", choices=["live", "test", "all"], default="all")
+
+    s = sub.add_parser("connections-set", help="Set one live or test connection on a step, LLM-step tool or trigger.")
+    s.add_argument("agent_id")
+    s.add_argument("--node")
+    s.add_argument("--tool")
+    s.add_argument("--trigger")
+    s.add_argument("--mode", choices=["live", "test"], required=True)
+    s.add_argument("--connection", required=True, help="Connection row id (integrationProviderId).")
+    s.add_argument("--confirm-restart", action="store_true",
+                   help="Accept that a trigger's test connection restarts test mode and resets runsUsed to 0.")
+    s.add_argument("--confirm-live", action="store_true",
+                   help="Accept that --mode live changes the published agent (and the draft, so publish keeps it).")
+
+    s = sub.add_parser("connections-options", help="List the connections that can fill one step, tool or trigger.")
+    s.add_argument("agent_id")
+    s.add_argument("--node")
+    s.add_argument("--tool")
+    s.add_argument("--trigger")
+    s.add_argument("--mode", choices=["live", "test"])
+
     return p
 
 
@@ -3542,6 +4526,15 @@ COMMANDS = {
     "validate-webhook": cmd_validate_webhook,
     "delete-webhook": cmd_delete_webhook,
     "test-node": cmd_test_node,
+    "test-mode-start": _with_api_errors(cmd_test_mode_start),
+    "test-mode-stop": _with_api_errors(cmd_test_mode_stop),
+    "test-mode-status": _with_api_errors(cmd_test_mode_status),
+    "test-mode-run": _with_api_errors(cmd_test_mode_run),
+    "test-mode-replay": _with_api_errors(cmd_test_mode_replay),
+    "connections-summary": _with_api_errors(cmd_connections_summary),
+    "connections-missing": _with_api_errors(cmd_connections_missing),
+    "connections-set": _with_api_errors(cmd_connections_set),
+    "connections-options": _with_api_errors(cmd_connections_options),
 }
 
 
@@ -3594,6 +4587,7 @@ def main(argv=None):
     except BeamError as exc:
         payload = {"ok": False, "command": args.command,
                    "code": getattr(exc, "code", "internal_error"), "error": str(exc)}
+        payload.update(getattr(exc, "extra", None) or {})
         if getattr(exc, "next_step", None):
             payload["next"] = exc.next_step
         print(json.dumps(payload, indent=2))

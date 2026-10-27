@@ -22,7 +22,7 @@ grep -q 'Never omit, compress, reword, or combine' beam/skills/beam/SKILL.md || 
 grep -q 'This confirmation is mandatory' beam/skills/setup/SKILL.md || fail "first-time setup success block is not mandatory"
 grep -q 'For a read-only operation, say that no changes will be made' beam/skills/beam/SKILL.md || fail "read-only activity boundary missing"
 grep -q 'the exact entity and resulting state' beam/skills/beam/SKILL.md || fail "write-result activity contract missing"
-[ "$(find beam/playbooks -name '*.md' | wc -l | tr -d ' ')" -eq 16 ] || fail "expected 16 playbooks"
+[ "$(find beam/playbooks -name '*.md' | wc -l | tr -d ' ')" -eq 17 ] || fail "expected 17 playbooks"
 ok "agent brief and playbooks are present"
 
 printf '\n=== operation and fallback contracts ===\n'
