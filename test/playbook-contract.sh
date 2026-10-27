@@ -49,8 +49,11 @@ op testmode.start | grep -q 'confirmation: always' || fail "test mode start lost
 op testmode.stop | grep -q 'confirmation: always' || fail "test mode stop lost its confirmation"
 op connection.set | grep -q 'confirmation: always' || fail "connection set lost its confirmation"
 op connection.set | grep -q 'safety: external-effect' || fail "connection set must be graded external-effect"
-op task.create-test | grep -q 'confirmation: always' && op task.create-test | grep -q 'safety: external-effect' || fail "test-mode runs must always ask first"
-op task.replay-test | grep -q 'confirmation: always' && op task.replay-test | grep -q 'safety: external-effect' && op task.replay-test | grep -q 'postRead: task.get' || fail "replaying past tasks must always ask first and re-read the task"
+op task.create-test | grep -q 'confirmation: always' || fail "test-mode runs must always ask first"
+op task.create-test | grep -q 'safety: external-effect' || fail "test-mode runs must always ask first"
+op task.replay-test | grep -q 'confirmation: always' || fail "replaying past tasks must always ask first and re-read the task"
+op task.replay-test | grep -q 'safety: external-effect' || fail "replaying past tasks must always ask first and re-read the task"
+op task.replay-test | grep -q 'postRead: task.get' || fail "replaying past tasks must always ask first and re-read the task"
 python3 beam/bin/operation_manifest.py | python3 -c 'import json,sys
 ops={o["id"]:o for o in json.load(sys.stdin)["operations"]}
 kinds={a.get("field"):a.get("kind") for a in ops["testmode.start"]["execution"]["commands"][0]}
@@ -180,7 +183,8 @@ grep -q '2 tasks to replay but only 1 of 3 test runs remain' "$tm/out" || fail "
 ok "test mode start, runs used and remaining"
 
 bt connections set agent-1 --trigger trig-1 --mode test --connection conn-gmail-3; expect 2 "a trigger restart must ask for confirmation"
-[ "$(field code)" = confirmation_required ] && grep -q 'runsUsed resets from 2 to 0' "$tm/out" || fail "the restart warning does not name the reset"
+[ "$(field code)" = confirmation_required ] || fail "the restart warning does not name the reset"
+grep -q 'runsUsed resets from 2 to 0' "$tm/out" || fail "the restart warning does not name the reset"
 bt connections set agent-1 --trigger trig-1 --mode test --connection conn-gmail-3 --confirm-restart; expect 0 "the confirmed trigger restart failed"
 [ "$(field testMode.runsUsed)" = 0 ] && [ "$(field triggerOverrides.0.integrationProviderId)" = conn-gmail-3 ] || fail "the restart did not apply the new trigger connection"
 ok "a trigger's test connection restarts test mode only after the reset is confirmed"
