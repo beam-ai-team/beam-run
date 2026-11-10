@@ -25,13 +25,13 @@ Beam Run key for them. Nobody copies an API key. Supersedes the key-first part o
    sent to `POST /auth/cli/token`) so Beam's Connect page can show which computer is asking.
    It also carries `client_app` (`claude-code`, `codex` or `cursor`, from the host's session variables;
    left out when the host is not recognised) and, when the person started from a workspace URL,
-   `workspace_id=<that workspace>`. Both are display-only on Beam's page. `client_app` is also written to the
+   `workspace_id=<that workspace>` (only when the first path segment is a UUID; otherwise left out). Both are display-only on Beam's page. `client_app` is also written to the
    pending file (`CLIENT_APP=`). The person signs in if asked, then clicks Connect; Cancel returns `error=access_denied`.
 4. The browser ends at `http://127.0.0.1:<port>/callback?code=..&state=..` (or
    `?error=..`). The listener checks `state`, records the code or error, and shows one of three
    self-contained dark pages (inline CSS and SVG, no outside assets, "Beam Run" footer, tries `window.close()`),
    naming the host from the pending file's `CLIENT_APP` ("Claude Code", "Codex", "Cursor", else "your AI agent"):
-   "You're connected" ("Go back to APP to choose a workspace. You can close this tab."),
+   "You're connected" ("Go back to APP to finish connecting. You can close this tab."),
    "Connection cancelled" (`access_denied`: "Nothing was connected. To try again, ask APP to connect to Beam.") and
    "This connection didn't go through" (anything else: "Go back to APP and start connecting again.").
    Only those fixed names are ever put in a page.

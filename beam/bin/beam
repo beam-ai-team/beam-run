@@ -1386,7 +1386,8 @@ login_connect() {
   client_name_q="$(printf '%s' "$(connect_client_name)" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')"
   connect_url="$DETECTED_APP_URL/api/cli/authorize?code_challenge=$challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A$port%2Fcallback&state=$state&client_name=$client_name_q"
   if [ -n "$client_app" ]; then connect_url="$connect_url&client_app=$client_app"; fi
-  if [ -n "$workspace_hint" ]; then connect_url="$connect_url&workspace_id=$workspace_hint"; fi  # display-only on Beam's page; the hint holds only A-Za-z0-9._-
+  # display-only on Beam's page, and only when the first path segment really is a workspace id (a UUID), not e.g. "settings"
+  if printf '%s' "$workspace_hint" | grep -Eqi '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then connect_url="$connect_url&workspace_id=$workspace_hint"; fi
   printf '{"ok":true,"status":"waiting","mode":"%s","instanceId":"%s","connectUrl":%s}\n' "$mode" "$DETECTED_INSTANCE_ID" "$(json_quote "$connect_url")"
   printf 'Connect Beam: %s\n' "$connect_url" >&2
   if [ "$mode" = "paste" ]; then

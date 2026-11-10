@@ -25,7 +25,7 @@ CHECK, CROSS, BANG = "M5 12.5l4.5 4.5L19 7.5", "M7 7l10 10M17 7L7 17", "M12 7v6M
 # kind -> (icon colour, icon path, title, text); {app} is replaced from the APPS allowlist; nothing else is substituted
 PAGES = {
     "ok": ("#22c55e", CHECK, "You're connected",
-           "Go back to {app} to choose a workspace. You can close this tab."),
+           "Go back to {app} to finish connecting. You can close this tab."),
     "cancelled": ("#94a3b8", CROSS, "Connection cancelled",
                   "Nothing was connected. To try again, ask {app} to connect to Beam."),
     "failed": ("#eab308", BANG, "This connection didn't go through",
@@ -90,8 +90,8 @@ def start(path):
         def log_message(self, *args):
             pass
 
-        def reply(self, status, kind):
-            body = page(kind, pending_value(path, "CLIENT_APP")) if kind in PAGES else b"Not found"
+        def reply(self, status, kind, app=""):
+            body = page(kind, app) if kind in PAGES else b"Not found"
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -103,17 +103,19 @@ def start(path):
             if url.path != "/callback":
                 return self.reply(404, "")
             values = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+            app = pending_value(path, "CLIENT_APP")  # read before CODE/ERROR is written: `beam login --wait` may delete the file right after
             expected = pending_value(path, "STATE")
             if not expected or not secrets.compare_digest(values.get("state", "").encode(), expected.encode()):
-                return self.reply(400, "failed")  # not our sign-in: keep waiting for the real one
+                return self.reply(400, "failed", app)  # not our sign-in: keep waiting for the real one
             error, code = values.get("error", ""), values.get("code", "")
             line = "CODE=%s" % code if SAFE.match(code) and not error else "ERROR=%s" % (
                 error if SAFE.match(error) else "invalid_callback")
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
             done.append(1)
+            time.sleep(float(os.environ.get("BEAM_TEST_REPLY_DELAY") or 0))  # test hook: lets a test collect the sign-in before the page goes out
             self.reply(200 if line.startswith("CODE=") else 400,
-                       "ok" if line.startswith("CODE=") else "cancelled" if error == "access_denied" else "failed")
+                       "ok" if line.startswith("CODE=") else "cancelled" if error == "access_denied" else "failed", app)
 
     try:
         if os.environ.get("BEAM_TEST_BIND_BLOCKED"):  # test hook: simulate a sandbox that blocks binds

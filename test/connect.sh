@@ -98,7 +98,7 @@ got_name="$(python3 -c 'import sys,urllib.parse as u; print(u.parse_qs(u.urlpars
 [ "$got_name" = "$(printf '%s' "$want_name" | cut -c1-64)" ] || fail "connect link client_name is not this computer's name"
 qget() { python3 -c 'import sys,urllib.parse as u; print(u.parse_qs(u.urlparse(sys.argv[1]).query).get(sys.argv[2], ["<absent>"])[0])' "$1" "$2"; }
 [ "$(qget "$url" client_app)" = "<absent>" ] && [ -z "$(pend app CLIENT_APP)" ] || fail "an unrecognised host still sent client_app"
-[ "$(qget "$url" workspace_id)" = ws1 ] && [ "$(pend app WORKSPACE_HINT)" = ws1 ] || fail "a workspace URL did not send workspace_id"
+[ "$(qget "$url" workspace_id)" = "<absent>" ] && [ "$(pend app WORKSPACE_HINT)" = ws1 ] || fail "a non-UUID first path segment was sent as workspace_id"
 saw "Sign in if asked, then click Connect in your browser" || fail "next step does not say click Connect"
 saw "Connect Beam: $url" || fail "human Connect line missing"
 n=0; until grep -qF "$url" "$tmp/opened" 2>/dev/null; do n=$((n + 1)); [ "$n" -lt 30 ] || fail "browser was not opened"; sleep 0.1; done
@@ -156,6 +156,9 @@ for pair in CODEX_THREAD_ID:codex CODEX_SESSION_ID:codex CLAUDE_CODE_SESSION_ID:
 done
 HOSTENV=""; b login "$APP"; [ "$(qget "$(jget connectUrl)" client_app)" = "<absent>" ] || fail "no host variable should leave client_app out"
 b login https://app.beam.ai; [ "$(qget "$(jget connectUrl)" workspace_id)" = "<absent>" ] || fail "a bare instance address sent workspace_id"
+b login https://app.beam.ai/settings/profile; [ "$(qget "$(jget connectUrl)" workspace_id)" = "<absent>" ] || fail "a page name was sent as workspace_id"
+b login https://app.beam.ai/0A1b2c3d-4e5f-6789-abcd-ef0123456789/agents
+[ "$(qget "$(jget connectUrl)" workspace_id)" = "0A1b2c3d-4e5f-6789-abcd-ef0123456789" ] || fail "a workspace UUID was not sent as workspace_id"
 ok "client_app per host variable (absent otherwise); workspace_id only from a workspace URL"
 
 result_page() { # $1 = host env assignment (or empty); $2 = callback query; prints the page the browser gets
@@ -165,7 +168,7 @@ result_page() { # $1 = host env assignment (or empty); $2 = callback query; prin
 for pair in CLAUDECODE:"Claude Code" CODEX_THREAD_ID:Codex CURSOR_TRACE_ID:Cursor X:"your AI agent"; do
   app_name="${pair#*:}"
   page="$(result_page "${pair%%:*}=t1" "code=abc123")"
-  case "$page" in *"You're connected"*"Go back to $app_name to choose a workspace. You can close this tab."*) ;; *) fail "success page for $app_name: $page" ;; esac
+  case "$page" in *"You're connected"*"Go back to $app_name to finish connecting. You can close this tab."*) ;; *) fail "success page for $app_name: $page" ;; esac
   page="$(result_page "${pair%%:*}=t1" "error=access_denied")"
   case "$page" in *"Connection cancelled"*"Nothing was connected. To try again, ask $app_name to connect to Beam."*) ;; *) fail "cancelled page for $app_name: $page" ;; esac
   page="$(result_page "${pair%%:*}=t1" "error=server_error")"
@@ -177,7 +180,19 @@ case "$page" in *"<svg"*"Beam Run</div>"*"window.close()"*) ;; *) fail "result p
 b login "$APP"
 grep -v '^CLIENT_APP=' "$CFG/pending/app" > "$tmp/p.new"; printf 'CLIENT_APP=<img src=x onerror=alert(1)>\n' >> "$tmp/p.new"; cat "$tmp/p.new" > "$CFG/pending/app"
 page="$("$REAL_CURL" -s --noproxy '*' "http://127.0.0.1:$(pend app PORT)/callback?code=abc123&state=$(pend app STATE)")"
-case "$page" in *"<img"*) fail "an unlisted app name reached the page" ;; *"Go back to your AI agent to choose"*) ;; *) fail "unlisted app name did not fall back: $page" ;; esac
+case "$page" in *"<img"*) fail "an unlisted app name reached the page" ;; *"Go back to your AI agent to finish"*) ;; *) fail "unlisted app name did not fall back: $page" ;; esac
+# the page still names the app when --wait collects the sign-in (and deletes the pending file) before the page goes out
+export BEAM_TEST_REPLY_DELAY=3
+HOSTENV=CODEX_THREAD_ID=t1 b login "$APP"
+unset BEAM_TEST_REPLY_DELAY
+"$REAL_CURL" -sL --noproxy '*' "$(tofake "$(jget connectUrl)")" > "$tmp/slow.html" &
+slow=$!
+n=0; until grep -q '^CODE=' "$CFG/pending/app" 2>/dev/null; do n=$((n + 1)); [ "$n" -lt 50 ] || fail "listener never recorded the sign-in"; sleep 0.1; done
+b login --wait
+[ "$(jget status)" = connected ] && [ ! -e "$CFG/pending/app" ] || fail "--wait did not collect the sign-in"
+wait "$slow"
+grep -qF "Go back to Codex to finish connecting." "$tmp/slow.html" || fail "page lost the app name after --wait: $(cat "$tmp/slow.html")"
+b logout
 HOSTENV=""
 ok "three pages, per app and fallback; self-contained; only allowlisted names are shown"
 
