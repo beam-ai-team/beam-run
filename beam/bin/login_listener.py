@@ -19,9 +19,35 @@ import urllib.parse
 
 TTL = int(os.environ.get("BEAM_TEST_LISTENER_TTL") or 300)  # seconds the listener stays up (override is for tests)
 SAFE = re.compile(r"^[A-Za-z0-9._~-]{1,512}$")
-GOOD = "Connected — you can close this tab and return to your coding tool."
-BAD = "Sign-in did not complete — go back to your tool and try again."
-DENIED = "You cancelled the connection in the browser. Run Connect again when ready."
+APPS = {"claude-code": "Claude Code", "codex": "Codex", "cursor": "Cursor"}  # the only names ever put in a page
+FALLBACK_APP = "your AI agent"
+CHECK, CROSS, BANG = "M5 12.5l4.5 4.5L19 7.5", "M7 7l10 10M17 7L7 17", "M12 7v6M12 17h.01"
+# kind -> (icon colour, icon path, title, text); {app} is replaced from the APPS allowlist; nothing else is substituted
+PAGES = {
+    "ok": ("#22c55e", CHECK, "You're connected",
+           "Go back to {app} to choose a workspace. You can close this tab."),
+    "cancelled": ("#94a3b8", CROSS, "Connection cancelled",
+                  "Nothing was connected. To try again, ask {app} to connect to Beam."),
+    "failed": ("#eab308", BANG, "This connection didn't go through",
+               "Go back to {app} and start connecting again."),
+}
+PAGE = ("<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>Beam Run</title><style>"
+        "body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;"
+        "gap:16px;padding:24px;box-sizing:border-box;background:#020817;color:#f8fafc;text-align:center;"
+        "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}"
+        "h1{margin:0;font-size:24px;font-weight:600;line-height:1.3}"
+        "p{margin:0;max-width:360px;font-size:15px;line-height:1.5;color:#94a3b8}"
+        ".b{margin-top:16px;font-size:13px;color:#94a3b8;letter-spacing:.2px}"
+        "</style><body><svg width=56 height=56 viewBox='0 0 24 24' aria-hidden=true fill=none stroke='@colour@' stroke-linecap=round "
+        "stroke-linejoin=round><circle cx=12 cy=12 r=11 stroke-width=1.2 /><path d='@path@' stroke-width=1.8 /></svg>"
+        "<h1>@title@</h1><p>@text@</p><div class=b>Beam Run</div><script>window.close()</script>")
+
+
+def page(kind, app=""):
+    colour, path, title, text = PAGES[kind]
+    html = PAGE.replace("@colour@", colour).replace("@path@", path).replace("@title@", title)
+    return html.replace("@text@", text.replace("{app}", APPS.get(app, FALLBACK_APP))).encode()
 
 
 def b64(raw):
@@ -64,9 +90,8 @@ def start(path):
         def log_message(self, *args):
             pass
 
-        def reply(self, status, text):
-            body = ("<!doctype html><meta charset=utf-8><title>Beam</title><p>%s</p>"
-                    "<script>window.close()</script>" % text).encode()
+        def reply(self, status, kind):
+            body = page(kind, pending_value(path, "CLIENT_APP")) if kind in PAGES else b"Not found"
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -76,11 +101,11 @@ def start(path):
         def do_GET(self):
             url = urllib.parse.urlparse(self.path)
             if url.path != "/callback":
-                return self.reply(404, "Not found")
+                return self.reply(404, "")
             values = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
             expected = pending_value(path, "STATE")
             if not expected or not secrets.compare_digest(values.get("state", "").encode(), expected.encode()):
-                return self.reply(400, BAD)  # not our sign-in: keep waiting for the real one
+                return self.reply(400, "failed")  # not our sign-in: keep waiting for the real one
             error, code = values.get("error", ""), values.get("code", "")
             line = "CODE=%s" % code if SAFE.match(code) and not error else "ERROR=%s" % (
                 error if SAFE.match(error) else "invalid_callback")
@@ -88,7 +113,7 @@ def start(path):
                 fh.write(line + "\n")
             done.append(1)
             self.reply(200 if line.startswith("CODE=") else 400,
-                       GOOD if line.startswith("CODE=") else DENIED if error == "access_denied" else BAD)
+                       "ok" if line.startswith("CODE=") else "cancelled" if error == "access_denied" else "failed")
 
     try:
         if os.environ.get("BEAM_TEST_BIND_BLOCKED"):  # test hook: simulate a sandbox that blocks binds

@@ -97,6 +97,14 @@ session_id() {
   printf '%s' "$raw" | tr -c 'A-Za-z0-9._-' '_'
 }
 
+host_app() {
+  # Which coding agent is running this: the same variables session_id reads, plus CLAUDECODE and CURSOR_TRACE_ID.
+  if [ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]; then printf 'codex'
+  elif [ -n "${CLAUDE_CODE_SESSION_ID:-}${CLAUDECODE:-}${CLAUDE_SESSION_ID:-}" ]; then printf 'claude-code'
+  elif [ -n "${CURSOR_SESSION_ID:-}${CURSOR_TRACE_ID:-}" ]; then printf 'cursor'
+  fi
+}
+
 SESSION_ID="$(session_id)"
 SESSION_FILE="$SESSIONS_DIR/$SESSION_ID"
 # The stdio bridge needs a REMOTE-streamable-HTTP -> stdio proxy:
@@ -997,7 +1005,7 @@ cmd_checkout() {
           printf '✅ Beam Run ready\n' >&2
           printf '⬜ Connect Beam\n\n' >&2
           printf 'Next: run beam login <instance> (app, staging, enterprise, or a region such as anz), then:\n' >&2
-          printf '1. Open the Connect link in your browser, sign in if asked, then click Allow\n' >&2
+          printf '1. Open the Connect link in your browser, sign in if asked, then click Connect\n' >&2
           printf '2. Run beam login --wait <instance> until it says connected\n' >&2
           printf '3. Select or create a workspace\n' >&2
           die "auth_missing" "Beam connection is required before work can begin" 3 ;;
@@ -1336,7 +1344,7 @@ login_probe() {
 }
 
 connect_client_name() {
-  # This computer's name, trimmed to 64 characters: shown on Beam's Allow page and sent with the token request.
+  # This computer's name, trimmed to 64 characters: shown on Beam's Connect page and sent with the token request.
   printf '%s' "$(hostname 2>/dev/null || uname -n)" | cut -c1-64
 }
 
@@ -1369,19 +1377,22 @@ login_connect() {
     fi
   fi
   redirect_uri="http://127.0.0.1:$port/callback"
+  client_app="$(host_app)"
   {
     printf 'INSTANCE_ID=%s\nINSTANCE_NAME=%s\nAPI_URL=%s\nAPP_URL=%s\nMCP_URL=%s\n' "$DETECTED_INSTANCE_ID" "$DETECTED_INSTANCE_NAME" "$DETECTED_API_URL" "$DETECTED_APP_URL" "$DETECTED_MCP_URL"
-    printf 'VERIFIER=%s\nSTATE=%s\nPORT=%s\nREDIRECT_URI=%s\nREPLACE=%s\nWORKSPACE_HINT=%s\nSTARTED_AT=%s\n' "$verifier" "$state" "$port" "$redirect_uri" "$replace" "$workspace_hint" "$(date +%s)"
+    printf 'VERIFIER=%s\nSTATE=%s\nPORT=%s\nREDIRECT_URI=%s\nREPLACE=%s\nWORKSPACE_HINT=%s\nCLIENT_APP=%s\nSTARTED_AT=%s\n' "$verifier" "$state" "$port" "$redirect_uri" "$replace" "$workspace_hint" "$client_app" "$(date +%s)"
   } > "$pending"
   chmod 600 "$pending"
   client_name_q="$(printf '%s' "$(connect_client_name)" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')"
   connect_url="$DETECTED_APP_URL/api/cli/authorize?code_challenge=$challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A$port%2Fcallback&state=$state&client_name=$client_name_q"
+  if [ -n "$client_app" ]; then connect_url="$connect_url&client_app=$client_app"; fi
+  if [ -n "$workspace_hint" ]; then connect_url="$connect_url&workspace_id=$workspace_hint"; fi  # display-only on Beam's page; the hint holds only A-Za-z0-9._-
   printf '{"ok":true,"status":"waiting","mode":"%s","instanceId":"%s","connectUrl":%s}\n' "$mode" "$DETECTED_INSTANCE_ID" "$(json_quote "$connect_url")"
   printf 'Connect Beam: %s\n' "$connect_url" >&2
   if [ "$mode" = "paste" ]; then
-    printf "Sign in if asked, then click Allow in your browser. Then copy the address the browser ends on and run: beam login --callback '<address>'\n" >&2
+    printf "Sign in if asked, then click Connect in your browser. Then copy the address the browser ends on and run: beam login --callback '<address>'\n" >&2
   else
-    printf 'Sign in if asked, then click Allow in your browser. Then run: beam login --wait %s\n' "$DETECTED_INSTANCE_ID" >&2
+    printf 'Sign in if asked, then click Connect in your browser. Then run: beam login --wait %s\n' "$DETECTED_INSTANCE_ID" >&2
   fi
   for opener in open xdg-open; do  # detached: a stuck opener must never hang this command
     if command -v "$opener" >/dev/null 2>&1; then ( "$opener" "$connect_url" </dev/null >/dev/null 2>&1 & ); break; fi
