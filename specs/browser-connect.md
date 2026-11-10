@@ -22,14 +22,23 @@ Beam Run key for them. Nobody copies an API key. Supersedes the key-first part o
    `{"ok":true,"status":"waiting","mode":"listener","connectUrl":...}` plus
    `Connect Beam: <url>`, tries to open the browser and exits 0. The link carries
    `client_name=<computer name, URL-encoded, at most 64 characters>` (the same value later
-   sent to `POST /auth/cli/token`) so Beam's Allow page can show which computer is asking.
-   The person signs in if asked, then clicks Allow; Cancel returns `error=access_denied`.
+   sent to `POST /auth/cli/token`) so Beam's Connect page can show which computer is asking.
+   It also carries `client_app` (`claude-code`, `codex` or `cursor`, from the host's session variables;
+   left out when the host is not recognised) and, when the person started from a workspace URL,
+   `workspace_id=<that workspace>` (only when the first path segment is a UUID; otherwise left out). Both are display-only on Beam's page. `client_app` is also written to the
+   pending file (`CLIENT_APP=`). The person signs in if asked, then clicks Connect; Cancel returns `error=access_denied`.
 4. The browser ends at `http://127.0.0.1:<port>/callback?code=..&state=..` (or
-   `?error=..`). The listener checks `state` and records the code or error.
+   `?error=..`). The listener checks `state`, records the code or error, and shows one of three
+   self-contained dark pages (inline CSS and SVG, no outside assets, "Beam Run" footer, tries `window.close()`),
+   naming the host from the pending file's `CLIENT_APP` ("Claude Code", "Codex", "Cursor", else "your AI agent"):
+   "You're connected" ("Go back to APP to finish connecting. You can close this tab."),
+   "Connection cancelled" (`access_denied`: "Nothing was connected. To try again, ask APP to connect to Beam.") and
+   "This connection didn't go through" (anything else: "Go back to APP and start connecting again.").
+   Only those fixed names are ever put in a page.
 5. `beam login --wait [instanceId]` (with no id, the newest pending sign-in; ones older than 330 s are dropped) returns within about two seconds with one status:
    `waiting`, `connected`, `choose_workspace` (with `workspaces`), `no_workspace`
    (message: "Create a workspace in Beam first: <app address>"; the connection is kept),
-   or `failed` (with `reason`, exit 2; for `access_denied` the message is "You cancelled the connection in the browser. Run Connect again when ready.", the pending file is removed and the listener's page says the same). On a code it calls `POST <api>/auth/cli/token`,
+   or `failed` (with `reason`, exit 2; for `access_denied` the message is "You cancelled the connection in the browser. Run Connect again when ready.", the pending file is removed). On a code it calls `POST <api>/auth/cli/token`,
    saves the profile, picks the only workspace or leaves the choice to `beam checkout`.
 6. `beam login --paste` skips the listener (the browser shows a "can't connect" page
    whose address bar holds the result); `beam login --callback '<address>'` finishes
