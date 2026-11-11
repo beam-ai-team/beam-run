@@ -861,6 +861,75 @@
       "must_stop_before": [
         "task.replay-test"
       ]
+    },
+    {
+      "id": "chat-first-message-with-question",
+      "request": "Chat with the Onboarding Helper: put together a first-week plan for our new designer, Sara.",
+      "situation": "Onboarding Helper is published, only reads and replies, and takes free text. Its run pauses at USER_INPUT_REQUIRED asking 'What is the employee's start date?'; the user has not said one.",
+      "playbooks": [
+        "chat-with-an-agent"
+      ],
+      "required": [
+        [
+          "agent.list",
+          "agent.get"
+        ],
+        [
+          "task.create-live"
+        ],
+        [
+          "task.wait"
+        ]
+      ],
+      "forbidden": [
+        "task.create-draft",
+        "task.retry",
+        "graph.publish"
+      ],
+      "must_stop_before": [
+        "task.submit-input"
+      ],
+      "order": [
+        [
+          [
+            "task.create-live"
+          ],
+          [
+            "task.wait"
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "chat-change-last-answer",
+      "request": "Make that answer shorter, two sentences max.",
+      "situation": "Earlier in this conversation the user asked to chat with the Research Assistant (published, only reads and replies). Its first run completed and you showed its reply about the risks of moving the CRM to HubSpot.",
+      "playbooks": [
+        "chat-with-an-agent"
+      ],
+      "required": [
+        [
+          "task.create-live"
+        ],
+        [
+          "task.wait"
+        ]
+      ],
+      "forbidden": [
+        "task.retry",
+        "task.create-draft",
+        "graph.publish"
+      ],
+      "order": [
+        [
+          [
+            "task.create-live"
+          ],
+          [
+            "task.wait"
+          ]
+        ]
+      ]
     }
   ]
 }

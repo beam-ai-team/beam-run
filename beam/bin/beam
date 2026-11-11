@@ -115,7 +115,7 @@ SESSION_FILE="$SESSIONS_DIR/$SESSION_ID"
 
 die() {
   # Categorical exit codes agents can branch on:
-  # 1 internal, 2 validation, 3 auth, 5 network
+  # 1 internal, 2 validation, 3 auth, 5 network, 6 still running
   msg=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
   printf '{"error":{"code":"%s","message":"%s"}}\n' "$1" "$msg" >&2
   exit "$3"
@@ -1122,6 +1122,8 @@ Usage:
   beam tasks create <id> <q> [--draft]
                              run a live task (or a draft test with --draft)
   beam tasks get <id>        inspect a task or draft test task
+  beam tasks wait <id> [--timeout s]
+                             wait until a task finishes, fails or pauses for the user
   beam tasks retry <id> [--task-node-id ID --feedback text]
   beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>
   beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason text]
@@ -2079,16 +2081,89 @@ cmd_tasks_get() {
   printf '%s\n' "$resp"
 }
 
+task_status() {
+  # reads a task JSON on stdin, prints its top-level status
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.status // ""' 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("status") or "")
+except Exception:
+    pass' 2>/dev/null || true
+  else
+    grep -o '"status"[[:space:]]*:[[:space:]]*"[A-Z_]*"' | tail -n1 | sed 's/.*"\([A-Z_]*\)"$/\1/' || true
+  fi
+}
+
+task_input_question() {
+  # $1 = taskNodeId ; $2 = parameter ; task JSON on stdin. Prints the question the
+  # paused step asked for that parameter; the API matches answers by that text.
+  if command -v jq >/dev/null 2>&1; then
+    jq -r --arg n "$1" --arg p "$2" '[.agentTaskNodes[]? | select(.id == $n) | .input[]? | select(.name == $p) | .question // empty][0] // ""' 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for n in d.get("agentTaskNodes") or []:
+    if n.get("id") == sys.argv[1]:
+        for i in n.get("input") or []:
+            if i.get("name") == sys.argv[2] and i.get("question"):
+                print(i["question"]); sys.exit(0)' "$1" "$2" 2>/dev/null || true
+  fi
+}
+
+cmd_tasks_wait() {
+  # The task updates stream (/agent-tasks/<id>/updates) sends nothing on change,
+  # so wait by re-reading the task until it leaves the queue or stops running.
+  task_id="${1:-}"; timeout=300
+  [ -n "$task_id" ] || die "validation_error" "usage: beam tasks wait <taskId> [--timeout seconds]" 2
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --timeout) timeout="${2:-}"; shift 2 ;;
+      *) die "validation_error" "unknown flag for beam tasks wait: $1" 2 ;;
+    esac
+  done
+  case "$timeout" in ''|*[!0-9]*) die "validation_error" "--timeout must be a whole number of seconds" 2 ;; esac
+  require_workspace
+  waited=0
+  while :; do
+    set +e; resp="$(api_read "/agent-tasks/$task_id")"; rc=$?; set -e
+    if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+    if [ "$rc" -eq 4 ]; then die "task_not_found" "task $task_id was not found in the current workspace" 2; fi
+    if [ "$rc" -eq 5 ]; then die "network_error" "task lookup failed" 5; fi
+    case "$(printf '%s' "$resp" | task_status)" in
+      QUEUED|IN_PROGRESS|'') ;;
+      *) printf '%s\n' "$resp"; return 0 ;;
+    esac
+    [ "$waited" -lt "$timeout" ] || die "still_running" "task $task_id is still running after ${timeout}s; wait again or read it with beam tasks get" 6
+    sleep 3; waited=$((waited + 3))
+  done
+}
+
 cmd_tasks_submit_input() {
   task_id="${1:-}"; task_node_id="${2:-}"; parameter="${3:-}"; answer="${4:-}"
   if [ -z "$task_id" ] || [ -z "$task_node_id" ] || [ -z "$parameter" ] || [ -z "$answer" ]; then
     die "validation_error" "usage: beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>" 2
   fi
 
+  # The API rejects an answer ("Inputs are required") unless it repeats the exact
+  # question the paused step asked, so look that text up; the parameter name is
+  # only a fallback for steps that ask no question text.
+  require_workspace
+  set +e; task_json="$(api_read "/agent-tasks/$task_id")"; rc=$?; set -e
+  if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
+  if [ "$rc" -eq 4 ]; then die "task_not_found" "task $task_id was not found in the current workspace" 2; fi
+  if [ "$rc" -eq 5 ]; then die "network_error" "task lookup failed" 5; fi
+  question="$(printf '%s' "$task_json" | task_input_question "$task_node_id" "$parameter")"
   task_node_json="$(json_quote "$task_node_id")"
   parameter_json="$(json_quote "$parameter")"
+  question_json="$(json_quote "${question:-$parameter}")"
   answer_json="$(json_quote "$answer")"
-  body="{\"taskNodeId\":$task_node_json,\"userInputs\":[{\"question\":$parameter_json,\"answer\":$answer_json,\"parameter\":$parameter_json}]}"
+  body="{\"taskNodeId\":$task_node_json,\"userInputs\":[{\"question\":$question_json,\"answer\":$answer_json,\"parameter\":$parameter_json}]}"
   set +e; resp="$(api_write PATCH "/agent-tasks/execution/$task_id/user-input" "$body")"; rc=$?; set -e
   if [ "$rc" -eq 3 ]; then die "auth_missing" "not signed in — run beam login first" 3; fi
   if [ "$rc" -eq 4 ]; then die "task_not_found" "task $task_id was not found in the current workspace" 2; fi
@@ -3074,6 +3149,7 @@ main() {
         create) cmd_tasks_create "$@" ;;
         test) cmd_tasks_test "$@" ;;
         get) cmd_tasks_get "$@" ;;
+        wait) cmd_tasks_wait "$@" ;;
         retry) cmd_tasks_retry "$@" ;;
         approve) cmd_tasks_approve "$@" ;;
         reject) cmd_tasks_reject "$@" ;;
@@ -3083,7 +3159,7 @@ main() {
         cancel-wait) cmd_tasks_cancel_wait "$@" ;;
         update-tool) cmd_tasks_update_tool "$@" ;;
         submit-input) cmd_tasks_submit_input "$@" ;;
-        *) die "validation_error" "usage: beam tasks <list|statuses|agents|latest|create|test|get|retry|approve|reject|abort|delete|rate|cancel-wait|update-tool|submit-input>" 2 ;;
+        *) die "validation_error" "usage: beam tasks <list|statuses|agents|latest|create|test|get|wait|retry|approve|reject|abort|delete|rate|cancel-wait|update-tool|submit-input>" 2 ;;
       esac ;;
     test-mode)
       prepare_scoped_session

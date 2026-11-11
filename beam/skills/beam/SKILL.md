@@ -100,6 +100,7 @@ consent state before any write, test, publish, approval or other external effect
 | --- | --- |
 | Who am I, which workspace, what agents exist; switch or create a workspace; any broad question about the workspace | `get-oriented.md` |
 | Start a real run of a published agent | `run-an-agent.md` |
+| Chat with an agent: send a message, see its reply, keep the conversation going | `chat-with-an-agent.md` |
 | Try unpublished changes once, or test one step, without publishing (runs on live connections) | `test-a-draft.md` |
 | Turn test mode on or off, run a batch of test-mode runs (`beam test-mode run`), replay past tasks as test runs (`beam test-mode replay`), runs left, or which test or live connections are missing | `use-test-mode.md` |
 | What ran, what failed and why — for one agent or across agents; counts by status | `find-out-what-happened.md` |
