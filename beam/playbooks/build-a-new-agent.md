@@ -27,7 +27,8 @@
 3. Design the flow: execution steps for processing, a condition step for exclusive
    routing, a waiting step for delayed work, a loop for a collection. Beam runs
    steps one after another: the entry step has one outgoing link, other
-   non-condition steps at most one (a final action can have none). Pick models only
+   non-condition steps at most one (a final action can have none). A loop over a
+   long list of independent items can run up to 10 at once. Pick models only
    from `model.catalog`, preferring the cheapest that does the job reliably. Check
    `docs.search` before relying on how a feature works (loops, automation modes,
    publishing, triggers, evaluation).

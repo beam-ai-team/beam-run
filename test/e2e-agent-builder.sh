@@ -179,6 +179,63 @@ assert [e["targetAgentGraphNodeId"] for e in loop["childEdges"]] == [compile_nod
 assert body["childEdges"] == []
 PY
 
+group "loop run-at-once settings are checked and carried through"
+python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$SPECS/loop-article-digest.json" <<'PY' \
+  && ok "maxConcurrency/failureMode reach Beam; bad values, serial bodies and loop readiness handled" \
+  || bad "loop run-at-once settings are lost, unchecked, or break readiness"
+import copy, importlib.util, json, sys
+script, fixture = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("beam_builder", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+base = json.load(open(fixture))
+loop_key = next(n["key"] for n in base["nodes"] if n.get("node_type") == "loopingNode")
+
+def with_loop(**cfg):
+    s = copy.deepcopy(base)
+    next(n for n in s["nodes"] if n["key"] == loop_key)["node_configurations"].update(cfg)
+    return s
+
+def rejected(s):
+    try: module._validate_spec(s)
+    except module.BeamError: return True
+    return False
+
+good = with_loop(maxConcurrency=5, failureMode="continue")
+module._validate_spec(good)
+nodes = module.build_payload(good)["nodes"]
+cfg = next(n for n in nodes if n["nodeType"] == "loopingNode")["nodeConfigurations"]
+assert cfg["maxConcurrency"] == 5 and cfg["failureMode"] == "continue"
+for bad_cfg in ({"maxConcurrency": 0}, {"maxConcurrency": 11}, {"maxConcurrency": "5"},
+                {"maxConcurrency": True}, {"failureMode": "skip"}):
+    assert rejected(with_loop(**bad_cfg)), bad_cfg
+
+# A consent step in the body makes Beam run one item at a time.
+body_key = next(n["key"] for n in base["nodes"] if n.get("parent") == loop_key)
+serial = with_loop(maxConcurrency=3)
+serial.setdefault("integrations", []).append({"node_key": body_key, "requires_consent": True})
+assert rejected(serial)
+serial["nodes"][[n["key"] for n in serial["nodes"]].index(loop_key)]["node_configurations"]["maxConcurrency"] = 1
+module._validate_spec(serial)
+
+# Single-step edits are checked too, before anything is sent.
+class Api:
+    def patch_with_body(self, *a): raise AssertionError("bad loop setting was sent")
+import os, tempfile
+fd, path = tempfile.mkstemp(suffix=".json"); os.close(fd)
+json.dump({"nodeType": "loopingNode", "objective": "Loop", "nodeConfigurations": {"maxConcurrency": 50}}, open(path, "w"))
+args = type("Args", (), {"node_file": path, "agent_id": "a", "graph_id": "g"})()
+try: module.cmd_update_node(Api(), args); raise SystemExit("update-node accepted maxConcurrency 50")
+except module.BeamError: pass
+finally: os.remove(path)
+
+# Beam saves a loop with an empty GPTAction tool; readiness must not call it a prompt step.
+saved = copy.deepcopy(nodes)
+loop = next(n for n in saved if n["nodeType"] == "loopingNode")
+loop["toolConfiguration"] = {"toolFunctionName": "GPTAction_Loop", "prompt": "", "inputParams": [], "outputParams": []}
+assert module._readiness_report(saved)["ready"], module._readiness_report(saved)["failures"]
+PY
+
 group "condition updates keep the intended objective"
 python3 - "$ROOT/beam/internal/agent-builder/scripts/beam.py" "$SPECS/condition-ticket-router.json" <<'PY' \
   && ok "condition objective refreshes on update" \

@@ -18,7 +18,8 @@
 2. Read the structure with `graph.nodes`. Use `graph.node` for the steps that
    matter; fetch `graph.get` only when the full graph is truly needed.
 3. Explain in order: how it starts (trigger or manual) → each step and what it
-   does → branches, waits and loops → how it finishes.
+   does → branches, waits and loops → how it finishes. For a loop, say how many
+   items it runs at once and whether it stops or carries on when one fails.
 4. As asked:
    - trigger: `graph.triggers` with the entry node id
    - webhook: `graph.webhook`

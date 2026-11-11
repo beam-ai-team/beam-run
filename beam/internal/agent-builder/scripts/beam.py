@@ -900,8 +900,9 @@ def _readiness_report(nodes, graph_id=None):
         # must declare every input so the runtime can inject it predictably.
         # Beam saves the entry node with a GPTAction tool but no prompt or
         # params; it only receives the task input, so the contract skips it.
+        # A loop container is saved the same way and has no prompt either.
         is_custom_gpt = (str(tc.get("toolFunctionName") or "").startswith("GPTAction_")
-                         and not is_entry)
+                         and not is_entry and node_type != "loopingNode")
         if is_custom_gpt:
             prompt = str(tc.get("prompt") or "")
             check("gpt_prompt_present", bool(prompt.strip()),
@@ -1016,6 +1017,27 @@ def _require_publish_ready(api, agent_id, graph_id=None):
     return report
 
 
+# Studio's loop limits. Beam's API stores out-of-range values without
+# complaint, so the builder is the only place they get caught.
+LOOP_MAX_CONCURRENCY = 10
+LOOP_FAILURE_MODES = ("stop", "continue")
+
+
+def _check_loop_run_settings(name, config):
+    """Reject a loop's maxConcurrency / failureMode outside what Studio allows."""
+    conc = config.get("maxConcurrency")
+    if conc is not None and (isinstance(conc, bool) or not isinstance(conc, int)
+                             or not 1 <= conc <= LOOP_MAX_CONCURRENCY):
+        raise BeamError(
+            f"Looping node '{name}' has invalid maxConcurrency; use a whole number "
+            f"from 1 to {LOOP_MAX_CONCURRENCY}.", code="validation_error")
+    mode = config.get("failureMode")
+    if mode is not None and mode not in LOOP_FAILURE_MODES:
+        raise BeamError(
+            f"Looping node '{name}' has invalid failureMode '{mode}'; use "
+            "'stop' or 'continue'.", code="validation_error")
+
+
 def _validate_spec(spec):
     """Catch the most common spec mistakes before any UUIDs are generated."""
     if not isinstance(spec, dict):
@@ -1090,6 +1112,18 @@ def _validate_spec(spec):
                     raise BeamError(
                         f"Looping node '{node.get('key')}' must reference an array "
                         f"output; '{variable}' is not one.", code="validation_error")
+            _check_loop_run_settings(node.get("key"), config)
+            if (config.get("maxConcurrency") or 1) > 1:
+                consent_keys = {i.get("node_key") for i in spec.get("integrations") or []
+                                if i.get("requires_consent")}
+                serial = [n.get("key") for n in nodes if n.get("parent") == node.get("key")
+                          and (n.get("node_type") == "waitingNode" or n.get("key") in consent_keys)]
+                if serial:
+                    raise BeamError(
+                        f"Looping node '{node.get('key')}' sets maxConcurrency above 1, but "
+                        f"its body has a wait or consent step ({', '.join(serial)}). Beam runs "
+                        "such loops one item at a time; set maxConcurrency to 1 or remove it.",
+                        code="validation_error")
 
     # Integrations are matched to nodes by exact 'objective' string, so a
     # duplicate silently attaches the tool to the wrong node.
@@ -2496,6 +2530,9 @@ def cmd_attach_mcp_tools(api, args):
 def cmd_update_node(api, args):
     payload = _read_json_file(args.node_file, "Node file")
     node_obj = payload.get("node", payload) if isinstance(payload, dict) else payload
+    if isinstance(node_obj, dict) and node_obj.get("nodeType") == "loopingNode":
+        _check_loop_run_settings(node_obj.get("objective") or node_obj.get("id"),
+                                 node_obj.get("nodeConfigurations") or {})
     data = api.patch_with_body("/agent-graphs/update-node", {
         "agentId": args.agent_id, "graphId": args.graph_id, "node": node_obj})
     return {"updated": True, "agentId": args.agent_id, "node": data}
