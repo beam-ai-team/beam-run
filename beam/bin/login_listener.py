@@ -13,6 +13,7 @@ import http.server
 import os
 import re
 import secrets
+import socketserver
 import sys
 import time
 import urllib.parse
@@ -117,10 +118,15 @@ def start(path):
             self.reply(200 if line.startswith("CODE=") else 400,
                        "ok" if line.startswith("CODE=") else "cancelled" if error == "access_denied" else "failed", app)
 
+    class Server(http.server.HTTPServer):
+        def server_bind(self):  # skip HTTPServer's hostname lookup: it can hang for tens of seconds in macOS mDNS
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = self.server_address[:2]
+
     try:
         if os.environ.get("BEAM_TEST_BIND_BLOCKED"):  # test hook: simulate a sandbox that blocks binds
             raise PermissionError(1, "Operation not permitted")
-        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        server = Server(("127.0.0.1", 0), Handler)
     except OSError as exc:
         print("cannot bind 127.0.0.1: %s" % exc, file=sys.stderr)
         sys.exit(3)
