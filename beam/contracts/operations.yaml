@@ -415,6 +415,13 @@ operations:
     cli: beam tasks get <taskId>
     status: ready
     notes: "Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId."
+  task.wait:
+    execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"timeout":{"type":"string","maxLength":200000}},"required":["taskId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"wait"},{"field":"taskId","kind":"value"},{"field":"timeout","kind":"value","optional":true,"flag":"--timeout"}]]}
+    safety: read
+    mcp: null
+    cli: beam tasks wait <taskId> [--timeout seconds]
+    status: ready
+    notes: "Re-reads the task every few seconds and returns it once it is no longer queued or running: finished, failed, or paused for consent or input. Beam's live task updates feed sends nothing, so do not use it. Right after an answer or approval the old pause can still show for a moment; if the same step is still paused for the same thing, wait again."
   task.create-live:
     execution: {"inputSchema":{"type":"object","properties":{"agentId":{"type":"string","maxLength":200000},"input":{"type":"string","maxLength":200000}},"required":["agentId","input"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"create"},{"field":"agentId","kind":"value"},{"field":"input","kind":"value"}]]}
     safety: external-effect
@@ -485,7 +492,7 @@ operations:
     cli: beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>
     postRead: task.get
     status: ready
-    notes: "Answer the paused step's userQuestions. Never guess a value; propose it and get it confirmed."
+    notes: "The questions are the paused step's input[] entries with found false; send that entry's exact question text as the question and its name as the parameter; the API rejects any other question text (the CLI looks it up for you). Never guess a value; propose it and get it confirmed."
   task.retry:
     execution: {"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","maxLength":200000},"taskNodeId":{"type":"string","maxLength":200000},"text":{"type":"string","maxLength":200000}},"required":["taskId"],"additionalProperties":false},"commands":[[{"literal":"tasks"},{"literal":"retry"},{"field":"taskId","kind":"value"},{"field":"taskNodeId","kind":"value","optional":true,"flag":"--task-node-id"},{"field":"text","kind":"value","optional":true,"flag":"--feedback"}]]}
     safety: external-effect

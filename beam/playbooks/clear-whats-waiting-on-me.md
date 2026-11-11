@@ -20,7 +20,8 @@
    `agentTaskId`) and find the paused step:
    - status USER_CONSENT_REQUIRED: the agent wants to run a tool; show which tool
      and with which values.
-   - status USER_INPUT_REQUIRED: the agent is asking `userQuestions`; propose
+   - status USER_INPUT_REQUIRED: the agent is asking for each `input` entry
+     whose `found` is false (its `question` says what it needs); propose
      answers only from what the user has said or the run already contains.
 3. Act:
    - let the tool run: `task.approve`
@@ -67,5 +68,5 @@ the CLI in Codex). Re-read with the re-check action after a change.
 | `task.approve` | `approveTaskExecution` | `beam tasks approve <taskId> <taskNodeId> --confirm <taskNodeId>` | always | `task.get` | Before asking, show what the agent is about to do: the tool and its parameters from the paused step. |
 | `task.get` | `getTaskDetails` | `beam tasks get <taskId>` | no | — | Fields are at the top level. agentTaskNodes[] holds each step's status; USER_CONSENT_REQUIRED and USER_INPUT_REQUIRED mark a paused step and carry its taskNodeId; the agent id is agentGraph.agentId. |
 | `task.reject` | `rejectTaskExecution` | `beam tasks reject <taskId> <taskNodeId> --confirm <taskNodeId> [--reason <text>]` | always | `task.get` | Ends the task. |
-| `task.submit-input` | `submitUserInput` | `beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>` | confirm-proposed-values | `task.get` | Answer the paused step's userQuestions. Never guess a value; propose it and get it confirmed. |
+| `task.submit-input` | `submitUserInput` | `beam tasks submit-input <taskId> <taskNodeId> <parameter> <answer>` | confirm-proposed-values | `task.get` | The questions are the paused step's input[] entries with found false; send that entry's exact question text as the question and its name as the parameter; the API rejects any other question text (the CLI looks it up for you). Never guess a value; propose it and get it confirmed. |
 | `user.current` | `getCurrentUser` | `beam whoami` | no | — | Gives the user id that Learning Hub writes need. Never invent a user id. |

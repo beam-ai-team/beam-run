@@ -186,6 +186,18 @@ if sandbox BEAM_API_KEY= sh "$BEAM" tasks get >/dev/null 2>&1; then get_rc=0; el
 [ "$get_rc" -eq 2 ] && ok "missing task ID exits validation" || bad "missing task ID should exit 2"
 if sandbox BEAM_API_KEY= sh "$BEAM" tasks submit-input test-task test-node work_item >/dev/null 2>&1; then submit_rc=0; else submit_rc=$?; fi
 [ "$submit_rc" -eq 2 ] && ok "tasks submit-input validates its arguments" || bad "tasks submit-input missing argument should exit 2"
+printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam tasks wait' && ok "help documents waiting for a task" || bad "missing task wait command"
+if sandbox BEAM_API_KEY= sh "$BEAM" tasks wait >/dev/null 2>&1; then wait_rc=0; else wait_rc=$?; fi
+[ "$wait_rc" -eq 2 ] && ok "tasks wait requires a task ID" || bad "tasks wait without a task ID should exit 2"
+if sandbox BEAM_API_KEY= sh "$BEAM" tasks wait test-task --timeout soon >/dev/null 2>&1; then wait_rc=0; else wait_rc=$?; fi
+[ "$wait_rc" -eq 2 ] && ok "tasks wait rejects a non-numeric timeout" || bad "tasks wait should reject a non-numeric timeout"
+# The API only accepts an answer that repeats the paused step's exact question.
+QUESTION="$(sed -n '/^task_input_question()/,/^}/p' "$BEAM")"
+PAUSED='{"agentTaskNodes":[{"id":"n1","input":[{"name":"audience","found":false,"question":"Who is it for?"},{"name":"message","found":true,"question":null}]}]}'
+[ "$(printf '%s' "$PAUSED" | sh -c "$QUESTION"'; task_input_question n1 audience')" = "Who is it for?" ] \
+  && ok "submit-input sends the step's own question text" || bad "submit-input did not find the step's question text"
+[ -z "$(printf '%s' "$PAUSED" | sh -c "$QUESTION"'; task_input_question n1 message')" ] \
+  && ok "submit-input falls back to the parameter name when no question was asked" || bad "question lookup invented a question"
 
 group "Learning API CLI contract"
 printf '%s' "$(sh "$BEAM" --help)" | grep -q 'beam learning <cmd>' && ok "help documents Learning API commands" || bad "missing Learning API help"

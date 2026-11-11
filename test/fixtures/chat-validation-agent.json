@@ -1,0 +1,63 @@
+{
+  "agentName": "Beam Run Chat Validation",
+  "agentDescription": "Disposable draft-only agent for checking the chat-with-an-agent playbook with synthetic messages.",
+  "personality": "Friendly and brief.",
+  "restrictions": "Answer from general knowledge only. Do not call external services.",
+  "prompts": [],
+  "nodes": [
+    {
+      "key": "entry",
+      "name": "Entry",
+      "objective": "Entry Node",
+      "is_entry": true,
+      "edges": [
+        {
+          "target": "reply"
+        }
+      ]
+    },
+    {
+      "key": "reply",
+      "name": "Reply To Message",
+      "objective": "Reply to the person's message for the requested audience",
+      "model": "GEMINI_3_FLASH",
+      "prompt": "## Role:\nYou are a helpful assistant.\n\n## Task:\nReply to the latest request in the message below, using any earlier conversation it includes and following its instructions on length and format, written for the given audience.\n\n## Context:\n```\nMessage: {message}\nAudience: {audience}\n```\n\n## Rules:\n1. Follow any length or format the message asks for; otherwise reply in at most five sentences.\n2. Do not call or reference any external service.\n3. Output reply containing only the reply text.",
+      "input_params": [
+        {
+          "name": "message",
+          "description": "The whole task input, copied word for word, including any earlier conversation and every instruction. Never shorten or summarise it.",
+          "type": "string",
+          "fill_type": "ai_fill",
+          "position": 0
+        },
+        {
+          "name": "audience",
+          "description": "Who the reply is written for",
+          "type": "string",
+          "fill_type": "user_fill",
+          "position": 1
+        }
+      ],
+      "output_params": [
+        {
+          "name": "reply",
+          "description": "The reply text",
+          "type": "string",
+          "position": 0
+        }
+      ],
+      "edges": [
+        {
+          "target": "exit"
+        }
+      ]
+    },
+    {
+      "key": "exit",
+      "name": "Finish",
+      "objective": "Finish without side effects",
+      "node_type": "exitNode",
+      "edges": []
+    }
+  ]
+}
