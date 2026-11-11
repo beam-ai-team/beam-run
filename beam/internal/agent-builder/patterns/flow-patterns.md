@@ -1,6 +1,6 @@
 # Flow Patterns — User Intent → Graph Shape
 
-**Beam executes nodes sequentially. There is no parallel execution.** A non-condition node has exactly one outgoing edge. To do several things, chain them. To do one of several things, use a condition node. To do a thing for each item in a list, use a looping node.
+**Beam executes nodes sequentially. There are no parallel branches** — the only parallelism is a loop running several items at once (`maxConcurrency`). A non-condition node has exactly one outgoing edge. To do several things, chain them. To do one of several things, use a condition node. To do a thing for each item in a list, use a looping node.
 
 Use this file whenever translating a verbal brief or material requested change
 into a node layout.
@@ -45,6 +45,8 @@ Fetch Articles → [Loop: For Each Article]
 
 Use when: "for each row", "for every item", "loop over", "do this 3 times", "process a batch of N", any plural collection of inputs.
 
+A loop can run up to 10 items at once (`maxConcurrency`) and either stop or carry on when one item fails (`failureMode`). Offer it when the items are independent and the list is long; keep 1 when a body step waits, asks for consent or asks a person for input. See `references/spec-format.md` → Looping nodes.
+
 ### 4. TriggerAgent fan-out — fire-and-forget sidecars
 
 `BeamSystemAction_TriggerAgent` fires a downstream agent without blocking the main flow.
@@ -70,6 +72,8 @@ Use when: "also log this to audit", "send a copy to", "in parallel, notify". The
 | "classify, **respond differently**, then send the reply" | Condition + merge | See merge node below |
 | "**for each** invoice line, validate" | Looping node | Variable-based on upstream array |
 | "do this **three times** to triple-check" | Looping node | Count-based (`iterationCount: 3`) |
+| "process them **five at a time**", "speed up the loop" | Looping node | `maxConcurrency: 5` |
+| "**don't stop** if one item fails" | Looping node | `failureMode: "continue"` |
 | "**also** log every decision to audit" | TriggerAgent fan-out | Fire-and-forget |
 | "send **only if** the total exceeds 1000" | Condition node | Single branch with fallback no-op |
 | "**wait** 2 days **then** follow up" | Waiting node | `waitType: time_based` |
@@ -96,7 +100,9 @@ The merge node (`Send Email`) reads the drafted message with `ai_fill` — the o
 
 ## What is NOT supported
 
-- **Parallel execution** — nodes always run in series; there is no fork-join
+- **Parallel branches** — different nodes always run in series; there is no
+  fork-join. Running the *same* loop body for several items at once is
+  supported (`maxConcurrency`).
 - **`linked` params across a merge** — a node *may* have several incoming edges
   (that is the merge pattern above), but it cannot `link` to a specific branch's
   output, because Beam has no "whichever arrived" semantics. Read merged data

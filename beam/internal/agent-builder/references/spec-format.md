@@ -500,6 +500,31 @@ Pick exactly one loop mode, set in `node_configurations`:
 **Constraints:** a `loopingNode` cannot be the entry node, and loops cannot nest
 (a `loopingNode` cannot itself carry a `parent`).
 
+**Running items at the same time.** Two optional keys sit beside the loop mode
+in `node_configurations` (Studio labels: "Run at once", "If an item fails"):
+
+| Key | Values | Default | Behaviour |
+|-----|--------|---------|-----------|
+| `maxConcurrency` | whole number 1–10 | `1` | How many items run at the same time. Works in both loop modes. |
+| `failureMode` | `"stop"` or `"continue"` | `"stop"` | On a failed item, stop the loop, or run every item and report the failed ones in the results. |
+
+```json
+"node_configurations": { "linkedVariableId": "list-articles:articles", "maxConcurrency": 5, "failureMode": "continue" }
+```
+
+- Results stay in item order whatever `maxConcurrency` is, so the node after
+  the loop can still pair them by position.
+- A loop whose body has a wait or consent step, or a step that stops to ask a
+  person for input, always runs one item at a time. `beam.py` rejects
+  `maxConcurrency` above 1 on a loop with a `waitingNode` or a
+  `requires_consent` integration in its body.
+- Leave it at 1 unless the items are independent of each other. Before raising
+  it on a loop that calls an outside service, check that service can take that
+  many calls at once.
+- Beam's API stores out-of-range values without complaint; `beam.py` rejects
+  them at deploy and `update-node`. To change it on a live loop, read the loop
+  with `get-node --full`, edit `nodeConfigurations`, and save with `update-node`.
+
 **Params in and out of a loop:** a variable-loop body input that needs the
 current element uses `fill_type: "linked"` to the same upstream array output as
 `linkedVariableId`. Agent OS resolves that link to the current array element by
@@ -551,7 +576,9 @@ that is expected, not a different field.
 
 ## Flow patterns
 
-Beam executes nodes **sequentially — no parallelism**.
+Beam executes nodes **sequentially — no parallel branches**. The one exception
+is a loop's `maxConcurrency`, which runs several items through the same loop
+body at once (see Looping nodes).
 
 **Sequential chain (do ALL of several things):** chain the nodes; each has one
 edge to the next.

@@ -33,7 +33,8 @@
    - prompt or tone: `graph.update-prompt`
    - inputs or outputs: `graph.update-params`
    - a branch condition: `graph.update-edge`
-   - model or other step configuration: `graph.update-node`
+   - model, how many items a loop runs at once, or other step configuration:
+     `graph.update-node`
    - consent before a tool runs: `graph.update-consent`
    - add or remove one step: `graph.add-node` / `graph.remove-node`
    - add an integration to a step: `graph.search-tools`, then `graph.attach-tool`
