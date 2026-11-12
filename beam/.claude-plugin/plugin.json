@@ -1,8 +1,14 @@
 {
   "name": "beam",
   "description": "Universally operate Beam from Claude Code",
-  "version": "0.7.1-prism.5",
+  "version": "0.7.1-prism.6",
   "author": {
     "name": "Beam AI"
+  },
+  "mcpServers": {
+    "beam": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/beam",
+      "args": ["mcp"]
+    }
   }
 }

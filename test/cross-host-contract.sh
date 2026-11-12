@@ -45,6 +45,12 @@ server = portable_mcp.get("mcpServers", {}).get("beam", {})
 if server.get("type") != "stdio" or server.get("command") != "./bin/beam" or server.get("args") != ["mcp"]:
     raise SystemExit("FAIL: portable MCP config does not launch the bundled Beam bridge")
 print("  ok   portable MCP config loads the bundled local bridge")
+
+# Claude Code resolves a relative command/cwd against the user's project, not the plugin.
+claude_server = manifests["claude"].get("mcpServers", {}).get("beam", {})
+if claude_server.get("command") != "${CLAUDE_PLUGIN_ROOT}/bin/beam" or claude_server.get("args") != ["mcp"] or "cwd" in claude_server:
+    raise SystemExit("FAIL: Claude Code MCP entry must launch ${CLAUDE_PLUGIN_ROOT}/bin/beam")
+print("  ok   Claude Code launches the bundled bridge from the plugin root")
 PY
 
 public_skills="$(find beam/skills -mindepth 2 -maxdepth 2 -name SKILL.md | sort)"
